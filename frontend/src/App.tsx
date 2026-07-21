@@ -1,4 +1,13 @@
 import React from 'react';
-export default function App() {
-  return <div>Horus Heresy Campaign Map</div>;
+import CampaignMap from './components/Map';
+
+function App() {
+  return (
+    <div>
+      <h1>Horus Heresy 500 Worlds Campaign</h1>
+      <CampaignMap />
+    </div>
+  );
 }
+
+export default App;
