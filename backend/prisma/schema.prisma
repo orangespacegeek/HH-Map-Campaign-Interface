@@ -1,0 +1,19 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Planet {
+  id            String  @id @default(cuid())
+  name          String
+  powerLevel    Int     @default(1)
+  owner         String?
+}
+
+model Legion {
+  id          String  @id @default(cuid())
+  name        String  @unique
+}
