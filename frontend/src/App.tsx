@@ -3,8 +3,7 @@ import CampaignMap from './components/Map';
 
 function App() {
   return (
-    <div>
-      <h1>Horus Heresy 500 Worlds Campaign</h1>
+    <div className="min-h-screen bg-black overflow-hidden">
       <CampaignMap />
     </div>
   );
