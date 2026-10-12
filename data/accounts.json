@@ -1,0 +1,14 @@
+[
+  {
+    "account_id": 1,
+    "role": "campaign_admin",
+    "label": "Campaign Admin",
+    "player_id": null,
+    "login": "admin",
+    "pass_hash": null,
+    "pass_salt": null,
+    "invite_code": null,
+    "provider": "local",
+    "created_at": "2026-09-30"
+  }
+]
