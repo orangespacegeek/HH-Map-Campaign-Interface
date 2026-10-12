@@ -1,13 +1,10 @@
 {
-  "name": "hh-map-campaign-interface",
-  "version": "1.0.0",
+  "name": "sunset-heresy",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Sunset Heresy campaign tracker – static UI + shared JSON API",
   "scripts": {
-    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:backend": "cd backend && npm run dev",
-    "dev:frontend": "cd frontend && npm run dev"
-  },
-  "devDependencies": {
-    "concurrently": "^9.2.4",
-    "tsx": "^4.23.1"
+    "start": "node server.js",
+    "server": "node server.js"
   }
 }

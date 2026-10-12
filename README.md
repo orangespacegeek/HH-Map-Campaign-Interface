@@ -1,23 +1,23 @@
-# HH-Map-Campaign-Interface
+# Sunset Heresy Campaign Tracker
 
-Warhammer 40,000 500 Worlds Map Campaign Web App
-500 Worlds: Titus – War on the Vespator Front system. A map/sticker campaign from the recent GW release.
-App supports:
-- Interactive sector map (planets/systems as nodes).
-- Alliances/Factions (e.g., 2–3 teams: Imperials, Chaos, Xenos/Necrons, customizable).
-- Power Levels (1–4 per planet, with strongholds).
-- Infrastructure (strongholds, staging grounds, fortifications, etc.).
-- Campaign Phases (multi-month turns with Operations: attacks, builds, moves).
-- Battle tracking (link to missions, results updating control/power).
-- Theaters of War and special rules (e.g., Xenoflora effects).
-- User accounts/roles for players, GM ("Warmaster"), and viewers.
+Horus Heresy-style campaign tracker for the Sunset Heresy campaign.
 
+## Stack
+- Node.js static file server + JSON REST API (`server.js`)
+- HTML/JS front-end (campaign map, player admin, forces, systems, games, rules)
+- File-based JSON data in `data/`
 
-Tech Stack
-- Frontend: React + Vite + TypeScript + Tailwind CSS + Leaflet.js (for interactive maps) or Konva.js/SVG for node-based maps.
-- Backend: Node.js + Express + TypeScript.
-- Database: SQLite (via Prisma) for simplicity; easy to swap to PostgreSQL.
-- Auth: Simple JWT or Clerk/Firebase (expandable).
-- Deployment: Ready for Vercel/Netlify (frontend) + Render/Heroku (backend).
+## Quick start
+```bash
+npm start
+# open http://localhost:3847
+```
 
-Tools used Windows, Git Bash, GitHub, Notepad++
+## Deploy (Render)
+- Runtime: Node
+- Build: `npm install`
+- Start: `npm start`
+- For production persistence: attach a Render persistent disk mounted at `data/`
+
+## Archive
+Previous TypeScript/Prisma/Vite build is preserved on branch `archive/previous-build`.
