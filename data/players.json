@@ -1,0 +1,14 @@
+[
+  {
+    "player_id": 1,
+    "player_name": "Alex Chen",
+    "display_name": "The Warsmith",
+    "contact": "discord:vox#1234",
+    "status": "active",
+    "role": "player",
+    "allegiance": "Traitor",
+    "start_sys_id": 4,
+    "notes": "Prefers weekend games.",
+    "joined_at": "2026-08-01"
+  }
+]
