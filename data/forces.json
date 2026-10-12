@@ -1,1 +1,25 @@
-[]
+[
+  {
+    "force_id": 12,
+    "player_id": 1,
+    "force_name": "14th Grand Battalion",
+    "game_system": "HH",
+    "force_type": "Legion",
+    "allegiance": "Traitor",
+    "legion": "IV Iron Warriors",
+    "subfaction": "Stor-Bezashk",
+    "allies": "Daemons",
+    "organisation": "The Ironfire",
+    "warlord_name": "Warsmith Voss",
+    "primarch_present": false,
+    "titan_support": false,
+    "points": 3000,
+    "home_sys_id": 4,
+    "sys_id": 4,
+    "dest_sys_id": null,
+    "strength": 3,
+    "status": "active",
+    "notes": "Siege cadre. Flagship damaged at Mezoa.",
+    "fought_this_turn": false
+  }
+]

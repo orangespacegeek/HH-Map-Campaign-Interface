@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "game_id": 17,
+    "turn": 3,
+    "played_on": "2026-08-22",
+    "sys_id": 4,
+    "game_system": "HH",
+    "mission": "Onslaught",
+    "points": 3000,
+    "attacker_id": 1,
+    "defender_id": 2,
+    "attacker_force_id": 12,
+    "defender_force_id": 5,
+    "attacker_vp": 7,
+    "defender_vp": 5,
+    "result": "attacker_win",
+    "winner_id": 1,
+    "attacker_list": "The Ironfire 3000",
+    "defender_list": "Stone Gauntlet 3000",
+    "notes": "Warlord duel: both survived."
+  }
+]
