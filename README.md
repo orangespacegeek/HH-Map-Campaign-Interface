@@ -20,19 +20,24 @@ npm start
 - For production persistence: attach a Render persistent disk mounted at `data/`
 
 ## Archive
-Previous TypeScript/Prisma/Vite build is preserved on branch `archive/previous-build`.
+Previous TypeScript/Prisma/Vite build is on branch `archive/previous-build`.
 
-## Migration status (Oct 2026)
-- `archive/previous-build` holds the old code.
-- `main` has the new `package.json`, README, sample `data/`, and partial cleanup of the old `frontend/` / `backend/` trees.
-- Full application sources (`server.js`, HTML pages, `js/`) still need a complete local push if placeholders remain.
+## Status (Oct 2026)
+**Done on main**
+- Old `frontend/` and `backend/` trees removed
+- New `package.json`, `campaign_rules.md`, `rules.html`
+- Sample `data/` (players, forces, games, systems, meta)
+- Schema stubs
 
-To finish from a machine that has the full project:
+**Still needed (copy from local project)**
+- `server.js` (full Node API)
+- `index.html`, `campaign_map.html`, `login.html`, `player_admin.html`, `forces.html`, `systems.html`, `games.html`
+- `js/api.js`, `js/map.js`
+- `Sunset Heresy-ff-02.png` logo
+
 ```bash
 git clone https://github.com/orangespacegeek/HH-Map-Campaign-Interface.git
 cd HH-Map-Campaign-Interface
-# copy full project files over, then:
-git add -A
-git commit -m "Complete Sunset Heresy Node + static HTML build"
-git push origin main
+# copy the files above from your project folder, then:
+git add -A && git commit -m "Add remaining Sunset Heresy app sources" && git push origin main
 ```
