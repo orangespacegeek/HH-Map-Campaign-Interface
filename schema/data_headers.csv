@@ -1,0 +1,5 @@
+sheet,headers
+db_players,"player_id,player_name,display_name,contact,status,role,allegiance,start_sys_id,notes,joined_at"
+db_forces,"force_id,player_id,force_name,game_system,force_type,allegiance,legion,subfaction,allies,organisation,warlord_name,primarch_present,titan_support,points,home_sys_id,sys_id,dest_sys_id,strength,status,notes,fought_this_turn"
+db_systems,"sys_id,sys_name,sys_type,sys_power,sys_loyal,sys_traitor,sys_neut,sys_controller,sys_struct,sys_links,sys_notes,sys_x,sys_y"
+db_games,"game_id,turn,played_on,sys_id,game_system,mission,points,attacker_id,defender_id,attacker_force_id,defender_force_id,attacker_vp,defender_vp,result,winner_id,attacker_list,defender_list,notes"
