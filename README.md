@@ -13,6 +13,9 @@ npm start
 # open http://localhost:3847
 ```
 
+Default admin login: `admin` / `change-me`  
+(override with `CAMPAIGN_ADMIN_PASSWORD`)
+
 ## Deploy (Render)
 - Runtime: Node
 - Build: `npm install`
@@ -22,22 +25,5 @@ npm start
 ## Archive
 Previous TypeScript/Prisma/Vite build is on branch `archive/previous-build`.
 
-## Status (Oct 2026)
-**Done on main**
-- Old `frontend/` and `backend/` trees removed
-- New `package.json`, `campaign_rules.md`, `rules.html`
-- Sample `data/` (players, forces, games, systems, meta)
-- Schema stubs
-
-**Still needed (copy from local project)**
-- `server.js` (full Node API)
-- `index.html`, `campaign_map.html`, `login.html`, `player_admin.html`, `forces.html`, `systems.html`, `games.html`
-- `js/api.js`, `js/map.js`
-- `Sunset Heresy-ff-02.png` logo
-
-```bash
-git clone https://github.com/orangespacegeek/HH-Map-Campaign-Interface.git
-cd HH-Map-Campaign-Interface
-# copy the files above from your project folder, then:
-git add -A && git commit -m "Add remaining Sunset Heresy app sources" && git push origin main
-```
+## Status
+`main` holds the full Sunset Heresy Node + static HTML build (server, pages, js, data, schema, logo).
