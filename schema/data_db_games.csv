@@ -1,0 +1,2 @@
+game_id,turn,played_on,sys_id,game_system,mission,points,attacker_id,defender_id,attacker_force_id,defender_force_id,attacker_vp,defender_vp,result,winner_id,attacker_list,defender_list,notes
+17,3,2026-08-22,4,HH,Onslaught,3000,1,2,12,5,7,5,attacker_win,1,The Ironfire 3000,Stone Gauntlet 3000,Warlord duel: both survived.

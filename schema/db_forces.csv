@@ -1,0 +1,21 @@
+Name,code,type,required,foreign_key,example,notes
+Force ID,force_id,number,yes,PK,12,Unique army id and map-token id. Never reuse. Future named characters attach to this id. There is no separate fleet_id.
+Owner,player_id,number,yes,db_players.player_id,1,Person who fields this army. One player may have many forces; each is its own token on the map.
+Force Name,force_name,string,yes,,14th Grand Battalion,Public name on the map and in battle reports. This replaced fleet_name.
+Game System,game_system,"enum (HH, AT, AI, LI)",yes,,HH,HH = Age of Darkness 28mm. AT = Adeptus Titanicus. AI = Aeronautica Imperialis. LI = Legions Imperialis. A Titanicus army is a separate force (and a separate map token) from 28mm titan support.
+Force Type,force_type,"enum (Legion, Solar Auxilia, Mechanicum, Dark Mechanicum, Questoris, Legio Titanicus, Custodes, Silent Sisterhood, Militia, Blackshields, Daemons, Knights-Errant)",yes,,Legion,What the army is. Not the player.
+Allegiance,allegiance,"enum (Loyalist, Traitor, Blackshield)",yes,,Traitor,"Army allegiance. May differ from the player (Shattered Legions, Blackshields)."
+Legion,legion,"enum (I Dark Angels, III Emperor's Children, IV Iron Warriors, V White Scars, VI Space Wolves, VII Imperial Fists, VIII Night Lords, IX Blood Angels, X Iron Hands, XII World Eaters, XIII Ultramarines, XIV Death Guard, XV Thousand Sons, XVI Sons of Horus, XVII Word Bearers, XVIII Salamanders, XIX Raven Guard, XX Alpha Legion)",no,,IV Iron Warriors,"Required when force_type is Legion. Omit II and XI unless the campaign allows Lost Legions. For Blackshields, leave empty or record suspected origin."
+Subfaction,subfaction,string,no,,Stor-Bezashk,"House name (Questoris), Legio name (Titanicus), cohort (Auxilia), taghmata / forge world (Mechanicum)."
+Unique Allies,allies,"array of enum (Custodes, Silent Sisterhood, Daemons, Knights-Errant)",no,,Daemons,"Comma-separated. Empty means none. Regular allies (other Legions, Auxilia, Knights, Mechanicum) are not unique and do not belong here."
+Organisation,organisation,string,no,,The Ironfire,"Rite of War (HH), maniple (AT), formation (LI), or wing (AI)."
+Warlord Name,warlord_name,string,no,,Warsmith Voss,"Display label only, not an entity. Do not encode death, wounds, or relics here. A future db_characters sheet would add warlord_id as an FK beside this label."
+Primarch Present,primarch_present,boolean,yes,,FALSE,List-building flag only (does this army include a Primarch). Not a character record.
+Titan Support 28mm,titan_support,boolean,yes,,FALSE,HH only: can field Legio Titanicus as Lords of War. Not the same as an AT force token.
+Typical Points,points,number,no,,3000,Usual list size. Actual game size is recorded on db_games.points.
+Home System,home_sys_id,number,no,db_systems.sys_id,4,Origin / recruitment base. Distinct from current map position (sys_id).
+Location,sys_id,number,yes,db_systems.sys_id,4,"Current campaign-map position. Who is in a system is derived from this column. When status is in_warp, this is the system just left."
+Destination,dest_sys_id,number,no,db_systems.sys_id,7,Movement order. Must be empty or a warp-linked neighbour of Location. Required when status is in_warp. Clear on arrival.
+Strength,strength,number,yes,,6,Map combat power of this token. Suggested range 1-10. Separate from tabletop points.
+Status,status,"enum (active, damaged, in_warp, refitting, rebuilding, destroyed, retired)",yes,,active,"Map and campaign status of the token. active/damaged/refitting = in Location. in_warp = moving to Destination. destroyed/retired keep the row for history. This is army status, not warlord status."
+Notes,notes,text,no,,Siege cadre. Flagship damaged at Mezoa.,"Army-level lore and map notes. Named-character wounds, death, and relics do not belong here."

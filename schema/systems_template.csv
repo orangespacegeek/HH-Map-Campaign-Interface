@@ -1,2 +1,14 @@
 sys_id,sys_name,sys_type,sys_power,sys_loyal,sys_traitor,sys_neut,sys_controller,sys_struct,sys_links,sys_notes,sys_x,sys_y
-1,Port Maw,Hub,5,0,0,0,Neutral,,,H hub,,
+1,Port Maw,Fleet Anchorage,5,3,3,0,Contested,"Orbital docks","2,3,4",Sub-sector capital,400,270
+2,Aeolus,Civilised,2,4,1,0,Loyalist,,"1,5",,530,250
+3,Marinas,Agri,2,2,0,0,Loyalist,Grain silos,"1,6",,650,230
+4,Mezoa,Forge World,4,2,6,1,Traitor,"Shipyard, Manufactorum","1,5,7",Dark Mechanicum treaties.,390,185
+5,Electris,Mining,2,1,1,0,Contested,Ore processors,"2,4,8",,280,220
+6,Acre,Hive,3,0,3,0,Traitor,Hive spires,"3,7",,720,320
+7,Bretz,Fortress,3,5,2,0,Loyalist,Void fortresses,"4,6,9",,480,360
+8,TR/0524,Dead World,1,0,0,0,Neutral,,"5,10",Survey designation only,180,300
+9,Kueghan,Knight World,3,4,0,0,Loyalist,Knight keeps,"7,11",,560,420
+10,Ortho,Death World,1,0,2,0,Traitor,,"8,12",,220,400
+11,Lethe,Shrine,2,6,1,0,Loyalist,Cathedral complex,"9,13",,640,480
+12,Kiliman IV,Mining,2,1,4,0,Traitor,Deep mines,"10,13",,320,480
+13,Walpurgia,Void Station,2,0,0,0,Neutral,Relay array,"11,12",,480,520

@@ -1,0 +1,11 @@
+Name,code,type,required,foreign_key,example,notes
+Player ID,player_id,number,yes,PK,1,Stable unique id for the human. Never reuse. Named characters will not use this id; they will belong to a force.
+Player Name,player_name,string,yes,,Alex Chen,Real name or club name.
+Display Name,display_name,string,no,,The Warsmith,"The human at the table, not the model. Do not use this as a warlord identity."
+Contact,contact,string,no,,discord:vox#1234,Discord handle or other contact.
+Status,status,"enum (active, inactive, waitlist)",yes,,active,Only active players can be assigned to games.
+Role,role,"enum (player, marshal, admin)",yes,,player,Marshals resolve map disputes. Admins edit schema/data.
+Allegiance,allegiance,"enum (Loyalist, Traitor, Blackshield)",yes,,Traitor,Political side. Individual armies live on db_forces and may differ (e.g. a Loyalist shattered remnant).
+Starting System,start_sys_id,number,no,db_systems.sys_id,4,Personal HQ / where they join the map. Force tokens have their own sys_id.
+Notes,notes,text,no,,Prefers weekend games.,Logistics and house-rule notes. Not army lore.
+Joined On,joined_at,date,no,,2026-08-01,ISO date.

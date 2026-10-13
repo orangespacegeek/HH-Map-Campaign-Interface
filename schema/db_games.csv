@@ -1,0 +1,19 @@
+Name,code,type,required,foreign_key,example,notes
+Game ID,game_id,number,yes,PK,17,Unique battle id. Never use sys_id here.
+Campaign Turn,turn,number,yes,,3,Which campaign round this battle belongs to.
+Played On,played_on,date,no,,2026-08-22,Calendar date of the tabletop game.
+System,sys_id,number,yes,db_systems.sys_id,4,Where the battle was fought. Both force tokens should be in this system at the time of the game.
+Game System,game_system,"enum (HH, AT, AI, LI)",yes,,HH,Must match both forces game_system.
+Mission,mission,string,no,,Onslaught,Mission name or pack.
+Points Limit,points,number,no,,3000,Agreed points size for this battle.
+Attacker,attacker_id,number,yes,db_players.player_id,1,Must own attacker_force_id.
+Defender,defender_id,number,yes,db_players.player_id,2,Must own defender_force_id.
+Attacker Force,attacker_force_id,number,yes,db_forces.force_id,12,The map token that attacked. There is no separate fleet FK. Future characters in this battle hang off this force_id plus game_id.
+Defender Force,defender_force_id,number,yes,db_forces.force_id,5,The map token that defended. Same rules as attacker_force_id.
+Attacker VP,attacker_vp,number,yes,,7,Victory points scored.
+Defender VP,defender_vp,number,yes,,5,Victory points scored.
+Result,result,"enum (attacker_win, defender_win, draw, conceded, in_progress)",yes,,attacker_win,Use in_progress for scheduled but unplayed games.
+Winner,winner_id,number,no,db_players.player_id,1,"The winning player, not a warlord. Must match attacker_id or defender_id. Empty when result is draw or in_progress."
+Attacker List,attacker_list,string,no,,The Ironfire 3000,Optional snapshot of the list / rite used that day. Force record may change later.
+Defender List,defender_list,string,no,,Stone Gauntlet 3000,Same as above.
+Notes,notes,text,no,,Warlord duel: both survived. Traitor titan support delayed.,"Free text for narrative. Named-character outcomes (duels, death, relics) stay here until a db_characters sheet exists. Do not add structured kill/relic columns on this sheet."

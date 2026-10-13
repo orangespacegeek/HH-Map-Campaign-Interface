@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Sunset Heresy – Campaign Tracker</title>
+  <style>
+    :root {
+      --bg: #0a0a12;
+      --panel: #12121e;
+      --panel-2: #1a1a28;
+      --border: #3a3a55;
+      --text: #e8e0c8;
+      --muted: #9a9080;
+      --accent: #f0c040;
+      --loyal: #3b82f6;
+      --loyal-fill: #1e3a5f;
+      --traitor: #ef4444;
+      --traitor-fill: #5c1a1a;
+      --contested: #eab308;
+      --blackshield: #a78bfa;
+      --success: #22c55e;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+
+    /* Shared site header + nav */
+    .site-header {
+      flex-shrink: 0;
+      background: #0e0e18;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 30;
+    }
+    .site-header-inner {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.5rem 0.85rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .site-header img { height: 36px; width: auto; flex-shrink: 0; }
+    .site-header .titles { flex: 1; min-width: 0; }
+    .site-header h1 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+      line-height: 1.2;
+    }
+    .site-header .sub {
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+    .site-nav {
+      display: flex;
+      gap: 0.15rem;
+      overflow-x: auto;
+      padding: 0 0.5rem 0.45rem;
+      max-width: 1100px;
+      margin: 0 auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+    }
+    .site-nav::-webkit-scrollbar { display: none; }
+    .site-nav a {
+      flex-shrink: 0;
+      padding: 0.35rem 0.7rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--muted);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .site-nav a:hover { color: var(--text); background: var(--panel-2); }
+    .site-nav a.active {
+      color: var(--accent);
+      background: rgba(240, 192, 64, 0.12);
+    }
+
+    main {
+      flex: 1;
+      padding: 1.1rem 1rem calc(1.5rem + var(--safe-bottom));
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    .hero {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      margin-bottom: 1.4rem;
+      padding: 1.1rem 1.2rem;
+      background: linear-gradient(135deg, #12121e 0%, #1a1520 50%, #0e0e18 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }
+    .hero-text { flex: 1; min-width: 200px; }
+    .hero-text h2 {
+      font-size: 1.35rem;
+      color: var(--accent);
+      margin-bottom: 0.35rem;
+    }
+    .hero-text p {
+      font-size: 0.9rem;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .hero-meta {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      font-size: 0.82rem;
+    }
+    .hero-meta span {
+      display: flex;
+      justify-content: space-between;
+      gap: 1.5rem;
+      padding: 0.35rem 0.6rem;
+      background: var(--panel-2);
+      border-radius: 6px;
+      border: 1px solid var(--border);
+    }
+    .hero-meta .k { color: var(--muted); }
+    .hero-meta .v { font-weight: 600; color: var(--text); }
+
+    .turn-panel {
+      display: none;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.05rem;
+      margin-bottom: 1.2rem;
+    }
+    .turn-panel.open { display: block; }
+    .turn-panel h3 {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.65rem;
+    }
+    .phase-track {
+      display: flex;
+      gap: 0.35rem;
+      margin-bottom: 0.85rem;
+      flex-wrap: wrap;
+    }
+    .phase-step {
+      flex: 1;
+      min-width: 90px;
+      text-align: center;
+      padding: 0.45rem 0.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .phase-step.current {
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+      box-shadow: 0 0 0 1px rgba(240,192,64,0.25);
+    }
+    .phase-step.done {
+      border-color: #3a5a3a;
+      color: #86efac;
+    }
+    .turn-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    .turn-actions button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0.5rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .turn-actions button.primary {
+      background: var(--accent);
+      color: #0a0a12;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    .turn-actions button:hover { border-color: var(--accent); }
+    .turn-actions select {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.45rem 0.6rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+    }
+    .turn-log {
+      margin-top: 0.75rem;
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .turn-log .victory {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      gap: 0.65rem;
+      margin-bottom: 1.3rem;
+    }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem 0.9rem;
+      text-align: center;
+    }
+    .stat .num {
+      font-size: 1.45rem;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1.15;
+    }
+    .stat .label {
+      font-size: 0.68rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 0.75rem;
+      margin-bottom: 1.3rem;
+    }
+    .card {
+      display: block;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.05rem;
+      text-decoration: none;
+      color: inherit;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .card:hover {
+      border-color: var(--accent);
+      background: #161622;
+    }
+    .card .icon {
+      font-size: 1.3rem;
+      margin-bottom: 0.4rem;
+    }
+    .card h3 {
+      font-size: 1rem;
+      color: var(--accent);
+      margin-bottom: 0.3rem;
+    }
+    .card p {
+      font-size: 0.82rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem 1.05rem;
+      margin-bottom: 1rem;
+    }
+    .panel h3 {
+      font-size: 0.78rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.7rem;
+    }
+    .score-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.6rem;
+    }
+    .score-row:last-child { margin-bottom: 0; }
+    .score-label {
+      width: 72px;
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .score-label.loyal { color: var(--loyal); }
+    .score-label.traitor { color: var(--traitor); }
+    .score-bar {
+      flex: 1;
+      height: 10px;
+      background: #1a1a28;
+      border-radius: 5px;
+      overflow: hidden;
+    }
+    .score-bar > div { height: 100%; border-radius: 5px; }
+    .score-val {
+      font-size: 0.9rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      min-width: 2rem;
+      text-align: right;
+    }
+
+    .recent-list { list-style: none; }
+    .recent-list li {
+      padding: 0.55rem 0;
+      border-bottom: 1px solid #1f1f30;
+      font-size: 0.88rem;
+    }
+    .recent-list li:last-child { border-bottom: none; }
+    .recent-list .meta {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.15rem;
+    }
+    .badge {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 600;
+    }
+    .badge.win { background: #14532d; color: var(--success); }
+    .badge.traitor { background: var(--traitor-fill); color: var(--traitor); }
+    .badge.loyalist { background: var(--loyal-fill); color: var(--loyal); }
+
+    footer {
+      text-align: center;
+      padding: 0.75rem;
+      font-size: 0.72rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="site-header-inner">
+      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
+      <div class="titles">
+        <h1>Sunset Heresy</h1>
+        <div class="sub">Port Maw Sub-Sector · Campaign Tracker</div>
+      </div>
+    </div>
+    <nav class="site-nav">
+      <a href="index.html" class="active">Dashboard</a>
+      <a href="campaign_map.html">Map</a>
+      <a href="player_admin.html" data-role="campaign_admin">Players</a>
+      <a href="forces.html">Forces</a>
+      <a href="systems.html">Systems</a>
+      <a href="games.html">Battles</a>
+      <a href="rules.html">Rules</a>
+      <span id="nav-auth"></span>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="hero-text">
+        <h2>Port Maw burns</h2>
+        <p>Track forces, systems, and battles across the sub-sector. This prototype uses local sample data — open any section to manage campaign state.</p>
+      </div>
+      <div class="hero-meta" id="hero-meta">
+        <span><span class="k">Campaign turn</span><span class="v" id="meta-turn">—</span></span>
+        <span><span class="k">Phase</span><span class="v" id="meta-phase">—</span></span>
+        <span><span class="k">Systems</span><span class="v" id="meta-systems">—</span></span>
+      </div>
+    </section>
+
+    <div class="turn-panel" id="turn-panel">
+      <h3>Campaign turn control</h3>
+      <div class="phase-track" id="phase-track">
+        <div class="phase-step" data-phase="Logistics">Logistics</div>
+        <div class="phase-step" data-phase="Movement">Movement</div>
+        <div class="phase-step" data-phase="Battles">Battles</div>
+      </div>
+      <div class="turn-actions">
+        <button type="button" class="primary" id="btn-advance">Advance phase</button>
+        <select id="set-phase" aria-label="Set phase">
+          <option value="Logistics">Logistics</option>
+          <option value="Movement">Movement</option>
+          <option value="Battles">Battles</option>
+        </select>
+        <button type="button" id="btn-set-phase">Set phase</button>
+      </div>
+      <div class="turn-log" id="turn-log"></div>
+    </div>
+
+    <div class="stats" id="stats">
+      <div class="stat"><div class="num">1</div><div class="label">Players</div></div>
+      <div class="stat"><div class="num">1</div><div class="label">Forces</div></div>
+      <div class="stat"><div class="num" style="color:var(--traitor)">1</div><div class="label">Battles logged</div></div>
+      <div class="stat"><div class="num">13</div><div class="label">Systems</div></div>
+    </div>
+
+    <div class="grid">
+      <a class="card" href="campaign_map.html">
+        <div class="icon">🗺️</div>
+        <h3>Sector Map</h3>
+        <p>Interactive Port Maw map with control colours, force presence, and system details.</p>
+      </a>
+      <a class="card" href="player_admin.html">
+        <div class="icon">👥</div>
+        <h3>Players</h3>
+        <p>Add and edit players, allegiance, status, and starting systems.</p>
+      </a>
+      <a class="card" href="forces.html">
+        <div class="icon">⚔️</div>
+        <h3>Forces</h3>
+        <p>Army tokens on the map — strength, location, legion, and status.</p>
+      </a>
+      <a class="card" href="systems.html">
+        <div class="icon">🪐</div>
+        <h3>Systems</h3>
+        <p>Power levels, loyalty scores, controllers, and infrastructure.</p>
+      </a>
+      <a class="card" href="games.html">
+        <div class="icon">📜</div>
+        <h3>Battle Log</h3>
+        <p>Recorded games, results, victory points, and narrative notes.</p>
+      </a>
+      <a class="card" href="rules.html">
+        <div class="icon">📖</div>
+        <h3>Campaign Rules</h3>
+        <p>Actions, logistics, movement, battles, and victory conditions.</p>
+      </a>
+    </div>
+
+    <div class="panel">
+      <h3>Campaign score (prototype)</h3>
+      <div class="score-row">
+        <span class="score-label loyal">Loyalist</span>
+        <div class="score-bar"><div style="width:35%;background:var(--loyal)"></div></div>
+        <span class="score-val">14</span>
+      </div>
+      <div class="score-row">
+        <span class="score-label traitor">Traitor</span>
+        <div class="score-bar"><div style="width:65%;background:var(--traitor)"></div></div>
+        <span class="score-val">26</span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>Recent battle</h3>
+      <ul class="recent-list">
+        <li>
+          <strong>Onslaught</strong> at Mezoa · Turn 3
+          <span class="badge win" style="margin-left:0.4rem">Attacker win</span>
+          <div class="meta">14th Grand Battalion (The Warsmith) 7 – 5 Stone Gauntlet · HH 3000 pts</div>
+        </li>
+      </ul>
+    </div>
+  </main>
+
+  <footer id="footer-note">Sunset Heresy prototype · open via the Node server for shared data</footer>
+  <script src="js/api.js"></script>
+  <script>
+    function updatePhaseTrack(phase) {
+      const order = ["Logistics", "Movement", "Battles"];
+      const idx = order.indexOf(phase);
+      document.querySelectorAll(".phase-step").forEach((el) => {
+        const p = el.dataset.phase;
+        el.classList.remove("current", "done");
+        const i = order.indexOf(p);
+        if (p === phase) el.classList.add("current");
+        else if (i >= 0 && idx >= 0 && i < idx) el.classList.add("done");
+      });
+      const sel = document.getElementById("set-phase");
+      if (sel && phase) sel.value = phase;
+    }
+
+    function updateScores(meta) {
+      const loyal = Number(meta.loyal_score) || 0;
+      const traitor = Number(meta.traitor_score) || 0;
+      const total = Math.max(loyal + traitor, 1);
+      const rows = document.querySelectorAll(".score-row");
+      if (rows[0]) {
+        rows[0].querySelector(".score-bar > div").style.width = Math.round((loyal / total) * 100) + "%";
+        rows[0].querySelector(".score-val").textContent = loyal;
+      }
+      if (rows[1]) {
+        rows[1].querySelector(".score-bar > div").style.width = Math.round((traitor / total) * 100) + "%";
+        rows[1].querySelector(".score-val").textContent = traitor;
+      }
+    }
+
+    function updateHero(meta, systemCount) {
+      document.getElementById("meta-turn").textContent = meta.turn ?? "—";
+      document.getElementById("meta-phase").textContent = meta.phase ?? "—";
+      document.getElementById("meta-systems").textContent = systemCount ?? "—";
+      updatePhaseTrack(meta.phase);
+      updateScores(meta);
+      const log = document.getElementById("turn-log");
+      if (meta.victor) {
+        log.innerHTML = `<span class="victory">Victor: ${meta.victor}</span> — ${meta.victory_reason || ""}`;
+      }
+    }
+
+    function advanceLabel(phase) {
+      if (phase === "Logistics") return "Advance to Movement";
+      if (phase === "Movement") return "Advance to Battles (apply moves)";
+      return "End turn & score → next Logistics";
+    }
+
+    async function refreshDashboard() {
+      const [players, forces, games, systems, meta] = await Promise.all([
+        SH.list("players"),
+        SH.list("forces"),
+        SH.list("games"),
+        SH.list("systems"),
+        SH.getMeta()
+      ]);
+      document.getElementById("stats").innerHTML = `
+        <div class="stat"><div class="num">${players.length}</div><div class="label">Players</div></div>
+        <div class="stat"><div class="num">${forces.length}</div><div class="label">Forces</div></div>
+        <div class="stat"><div class="num" style="color:var(--traitor)">${games.length}</div><div class="label">Battles logged</div></div>
+        <div class="stat"><div class="num">${systems.length}</div><div class="label">Systems</div></div>
+      `;
+      updateHero(meta, systems.length);
+      const btn = document.getElementById("btn-advance");
+      if (btn) btn.textContent = advanceLabel(meta.phase);
+      return meta;
+    }
+
+    document.getElementById("btn-advance").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      try {
+        const result = await SH.advancePhase();
+        const notes = (result.log || []).join(" · ");
+        log.textContent = notes || `Now turn ${result.to.turn}, ${result.to.phase}`;
+        if (result.victory) {
+          log.innerHTML += `<br><span class="victory">Victor: ${result.victory.winner}</span> — ${result.victory.reason}`;
+        }
+        await refreshDashboard();
+      } catch (err) {
+        log.textContent = err.message || "Advance failed";
+      }
+    });
+
+    document.getElementById("btn-set-phase").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      const phase = document.getElementById("set-phase").value;
+      try {
+        await SH.setPhase(phase);
+        log.textContent = `Phase set to ${phase} (no scoring side effects)`;
+        await refreshDashboard();
+      } catch (err) {
+        log.textContent = err.message || "Set phase failed";
+      }
+    });
+
+    (async () => {
+      try {
+        await SH.probe();
+        await SH.applyNavPermissions();
+        const isAdmin = SH.role === "campaign_admin";
+        document.getElementById("turn-panel").classList.toggle("open", isAdmin);
+        // Hide players card for non-admins
+        document.querySelectorAll('a.card[href="player_admin.html"]').forEach((el) => {
+          el.style.display = isAdmin ? "" : "none";
+        });
+        await refreshDashboard();
+        const footer = document.getElementById("footer-note");
+        if (footer) {
+          footer.textContent = SH.mode === "server"
+            ? "Shared server mode · data in /data on the host"
+            : "Local-only mode · start node server.js for shared campaign data";
+        }
+      } catch (err) {
+        console.error(err);
+      }
+    })();
+  </script>
+</body>
+</html>

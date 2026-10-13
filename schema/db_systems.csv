@@ -1,0 +1,13 @@
+Name,code,type,required,foreign_key,example,notes
+System ID,sys_id,number,yes,PK,4,One row per system. Do not store systems as columns.
+System Name,sys_name,string,yes,,Mezoa,Public map name.
+System Type,sys_type,"enum (Forge World, Hive, Agri, Civilised, Fortress, Knight World, Death World, Dead World, Mining, Shrine, Warp Rift, Void Station, Fleet Anchorage)",yes,,Forge World,Drives production and special rules.
+Power Level,sys_power,number,yes,,4,Strategic value. Suggested range 1-5. Winner typically gains this many campaign points.
+Loyalist Level,sys_loyal,number,yes,,2,Influence 0-10. Raise after Loyalist wins here; lower after losses.
+Traitor Level,sys_traitor,number,yes,,6,Influence 0-10. Same as loyalist level for the other side.
+Neutrality Modifier,sys_neut,number,no,,1,Resistance to flipping. Subtract from influence gains if you want stubborn worlds.
+Controller,sys_controller,"enum (Loyalist, Traitor, Contested, Unaligned)",yes,,Traitor,Who currently holds the map node. Contested if both levels are equal and greater than 0. Unaligned if both are 0 (or Blackshield-held).
+Infrastructure,sys_struct,"array of enum (Shipyard, Titan Forge, Manufactorum, Spaceport, Bastion, Void Shield, Warp Beacon, Knight Keep)",no,,"Shipyard, Manufactorum",Comma-separated in Sheets. Empty means undeveloped.
+Warp Links,sys_links,array of sys_id,yes,db_systems.sys_id,"2, 5, 7",Comma-separated destination system ids. No 3-link cap. Treat links as two-way unless you note otherwise.
+Notes,sys_notes,text,no,,Dark Mechanicum treaties. Orbital shipyards still intact.,Special rules and lore. Do not store occupying forces here; derive them from db_forces.sys_id.
+System Durability, sys_durability, yes, , 5, This is how many battles the system can survive before its Power Level drops

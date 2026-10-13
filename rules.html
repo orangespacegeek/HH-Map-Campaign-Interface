@@ -14,6 +14,7 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
     body { display: flex; flex-direction: column; min-height: 100vh; }
+
     .site-header { flex-shrink: 0; background: #0e0e18; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; }
     .site-header-inner { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.85rem; max-width: 800px; margin: 0 auto; }
     .site-header img { height: 36px; width: auto; }
@@ -25,18 +26,61 @@
     .site-nav a { flex-shrink: 0; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; white-space: nowrap; }
     .site-nav a:hover { color: var(--text); background: var(--panel-2); }
     .site-nav a.active { color: var(--accent); background: rgba(240, 192, 64, 0.12); }
-    main { flex: 1; padding: 1.25rem 1rem calc(2rem + var(--safe-bottom)); max-width: 800px; width: 100%; margin: 0 auto; line-height: 1.55; }
-    main h2 { font-size: 1.15rem; color: var(--accent); margin: 1.5rem 0 0.6rem; padding-bottom: 0.35rem; border-bottom: 1px solid var(--border); }
+
+    main {
+      flex: 1;
+      padding: 1.25rem 1rem calc(2rem + var(--safe-bottom));
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto;
+      line-height: 1.55;
+    }
+    main h2 {
+      font-size: 1.15rem;
+      color: var(--accent);
+      margin: 1.5rem 0 0.6rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--border);
+    }
     main h2:first-child { margin-top: 0; }
-    main h3 { font-size: 0.95rem; color: var(--text); margin: 1rem 0 0.4rem; }
+    main h3 {
+      font-size: 0.95rem;
+      color: var(--text);
+      margin: 1rem 0 0.4rem;
+    }
     main p, main li { font-size: 0.92rem; color: var(--text); margin-bottom: 0.5rem; }
     main ul, main ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
     main li { margin-bottom: 0.3rem; }
     main strong { color: var(--accent); font-weight: 600; }
-    .callout { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 0 10px 10px 0; padding: 0.75rem 1rem; margin: 0.9rem 0; font-size: 0.88rem; }
-    .actions-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.6rem; margin: 0.75rem 0 1rem; }
-    .action-card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 0.7rem 0.85rem; }
-    .action-card .cost { font-size: 0.7rem; color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.2rem; }
+    .callout {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: 0 10px 10px 0;
+      padding: 0.75rem 1rem;
+      margin: 0.9rem 0;
+      font-size: 0.88rem;
+    }
+    .actions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 0.6rem;
+      margin: 0.75rem 0 1rem;
+    }
+    .action-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.7rem 0.85rem;
+    }
+    .action-card .cost {
+      font-size: 0.7rem;
+      color: var(--accent);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.2rem;
+    }
     .action-card .name { font-weight: 600; margin-bottom: 0.25rem; }
     .action-card .desc { font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
   </style>
@@ -63,41 +107,79 @@
   </header>
   <script src="js/api.js"></script>
   <script>SH.applyNavPermissions();</script>
+
   <main>
     <h2>Campaign Turn</h2>
     <p>Each player gets <strong>2 Actions</strong> per Campaign Turn.</p>
     <div class="callout">Turn order: <strong>Logistics → Movement → Battles</strong></div>
+
     <h2>Forces</h2>
     <p>Each Force starts at <strong>Strength 3</strong>. Losing a battle reduces Strength by 1. At Strength 0 the Force is destroyed (three losses wipe a Force).</p>
     <p>A Force regains 1 Strength if it does not fight for a full Campaign Turn, and only while it sits in an allegiance-controlled system with no opposing Forces present.</p>
     <p>Each player starts the campaign with <strong>2 Forces</strong>.</p>
+
     <h2>Logistics</h2>
     <div class="actions-grid">
-      <div class="action-card"><div class="cost">2 Actions</div><div class="name">Generate Force</div><div class="desc">New Force at Strength 3, only in allegiance-controlled system with no opposing Forces.</div></div>
-      <div class="action-card"><div class="cost">1 Action</div><div class="name">Reinforce</div><div class="desc">+1 Strength (max 3), allegiance-controlled system (opposing Forces allowed).</div></div>
-      <div class="action-card"><div class="cost">1 Action</div><div class="name">Fortify</div><div class="desc">+1 System Durability (max 10), allegiance-controlled system (opposing Forces allowed).</div></div>
+      <div class="action-card">
+        <div class="cost">2 Actions</div>
+        <div class="name">Generate Force</div>
+        <div class="desc">New Force at Strength 3. Only in an allegiance-controlled system with no opposing Forces.</div>
+      </div>
+      <div class="action-card">
+        <div class="cost">1 Action</div>
+        <div class="name">Reinforce</div>
+        <div class="desc">+1 Strength (max 3). Allegiance-controlled system; opposing Forces may be present.</div>
+      </div>
+      <div class="action-card">
+        <div class="cost">1 Action</div>
+        <div class="name">Fortify</div>
+        <div class="desc">+1 System Durability (max 10). Allegiance-controlled system; opposing Forces may be present.</div>
+      </div>
     </div>
+
     <h2>Movement</h2>
     <div class="actions-grid">
-      <div class="action-card"><div class="cost">1 Action</div><div class="name">Move</div><div class="desc">Order a Force from its current system to a connected system.</div></div>
-      <div class="action-card"><div class="cost">0 Actions</div><div class="name">Hold</div><div class="desc">Remain in the current system.</div></div>
+      <div class="action-card">
+        <div class="cost">1 Action</div>
+        <div class="name">Move</div>
+        <div class="desc">Order a Force you own from its current system to a connected system.</div>
+      </div>
+      <div class="action-card">
+        <div class="cost">0 Actions</div>
+        <div class="name">Hold</div>
+        <div class="desc">Force remains in place.</div>
+      </div>
     </div>
+
     <h2>Battles</h2>
-    <p>When opposing Forces share a system they are paired for battle (including Forces that just moved in).</p>
-    <p>If one side has more Forces, excess battles are distributed so each Force on the smaller side may fight multiple times.</p>
+    <h3>Assignment</h3>
+    <p>When opposing Forces share a system, they are paired for battle. Forces that just moved in still fight.</p>
+    <p>If one side outnumbers the other, the smaller side’s Forces fight multiple times so every opposing Force is engaged. Example: 2 Loyalist vs 5 Traitor → one Loyalist Force fights three times, the other twice.</p>
+
+    <h3>Resolution</h3>
     <ul>
-      <li><strong>Losing Force:</strong> Strength −1; destroyed at 0.</li>
+      <li><strong>Loser:</strong> Strength −1; destroyed at 0.</li>
       <li><strong>Draw:</strong> both count as losing.</li>
-      <li><strong>Winning Force:</strong> +1 to their faction score (sys_loyal or sys_traitor) in that system.</li>
+      <li><strong>Winner:</strong> +1 to their faction score on that system (sys_loyal or sys_traitor).</li>
     </ul>
+
     <h2>System Control</h2>
-    <p>Control = sys_loyal − sys_traitor. Positive = Loyalist, negative = Traitor, zero = Contested.</p>
-    <p>Each battle reduces system durability by 1. At durability 0, further battles reduce system Power Level by 1.</p>
-    <h2>Victory</h2>
+    <p>Systems begin with admin-set <strong>sys_loyal</strong> and <strong>sys_traitor</strong> (default 0).</p>
+    <p>Control = sys_loyal − sys_traitor:</p>
     <ul>
-      <li>Twice the opponent’s Campaign Score after 3 turns, or</li>
-      <li>Control more than 70% of systems after 3 turns, or</li>
-      <li>All remaining enemy Forces reduced to Strength 1 (opponent wins)</li>
+      <li>Positive → Loyalist control</li>
+      <li>Negative → Traitor control</li>
+      <li>Zero → Contested</li>
+    </ul>
+    <p>Each system has <strong>Durability</strong> (default 5, max 10). Every battle lowers durability by 1. After durability hits 0, further battles reduce the system’s Power Level by 1.</p>
+
+    <h2>Scoring &amp; Victory</h2>
+    <p>At the end of each Campaign Turn, each side adds the Power Level of systems it controls to its Campaign Score.</p>
+    <p>After 3 Campaign Turns, victory if any of these hold:</p>
+    <ul>
+      <li>One side has <strong>twice</strong> the Campaign Score of the other</li>
+      <li>One side controls <strong>more than 70%</strong> of systems</li>
+      <li>One side’s remaining Forces are all at Strength 1 (opponent wins)</li>
     </ul>
   </main>
 </body>

@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Sunset Heresy – Player Admin</title>
+  <style>
+    :root {
+      --bg: #0a0a12;
+      --panel: #12121e;
+      --panel-2: #1a1a28;
+      --border: #3a3a55;
+      --text: #e8e0c8;
+      --muted: #9a9080;
+      --accent: #f0c040;
+      --loyal: #3b82f6;
+      --loyal-fill: #1e3a5f;
+      --traitor: #ef4444;
+      --traitor-fill: #5c1a1a;
+      --blackshield: #a78bfa;
+      --blackshield-fill: #2e1065;
+      --success: #22c55e;
+      --warn: #eab308;
+      --danger: #ef4444;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      min-height: 100%;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+
+    header {
+      flex-shrink: 0;
+      background: #0e0e18;
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+    header .header-row {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.5rem 1rem 0.25rem;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    header img {
+      height: 36px;
+      width: auto;
+    }
+    header h1 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--accent);
+      letter-spacing: 0.02em;
+    }
+    header .sub {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+    .header-actions {
+      margin-left: auto;
+      display: flex;
+      gap: 0.5rem;
+    }
+    .site-nav {
+      display: flex;
+      gap: 0.15rem;
+      overflow-x: auto;
+      padding: 0 0.5rem 0.45rem;
+      max-width: 1100px;
+      margin: 0 auto;
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+    }
+    .site-nav::-webkit-scrollbar { display: none; }
+    .site-nav a {
+      flex-shrink: 0;
+      padding: 0.35rem 0.7rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      color: var(--muted);
+      text-decoration: none;
+      white-space: nowrap;
+    }
+    .site-nav a:hover { color: var(--text); background: var(--panel-2); }
+    .site-nav a.active {
+      color: var(--accent);
+      background: rgba(240, 192, 64, 0.12);
+    }
+
+    main {
+      flex: 1;
+      padding: 1rem;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+      padding-bottom: calc(1.5rem + var(--safe-bottom));
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+      align-items: center;
+    }
+    .search {
+      flex: 1;
+      min-width: 160px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.55rem 0.75rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+    }
+    .search:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+    .chip {
+      padding: 0.35rem 0.7rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 0.75rem;
+      cursor: pointer;
+      user-select: none;
+    }
+    .chip.active {
+      background: var(--panel-2);
+      color: var(--text);
+      border-color: var(--accent);
+    }
+    .chip.loyal.active { border-color: var(--loyal); color: var(--loyal); }
+    .chip.traitor.active { border-color: var(--traitor); color: var(--traitor); }
+    .chip.blackshield.active { border-color: var(--blackshield); color: var(--blackshield); }
+
+    button, .btn {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0.5rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button:hover, .btn:hover {
+      border-color: var(--accent);
+      background: #222233;
+    }
+    button.primary {
+      background: var(--accent);
+      color: #0a0a12;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    button.primary:hover {
+      filter: brightness(1.08);
+    }
+    button.danger {
+      border-color: var(--danger);
+      color: var(--danger);
+    }
+    button.ghost {
+      background: transparent;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 0.6rem;
+      margin-bottom: 1.1rem;
+    }
+    .stat {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.7rem 0.85rem;
+      text-align: center;
+    }
+    .stat .num {
+      font-size: 1.4rem;
+      font-weight: 700;
+      color: var(--accent);
+      line-height: 1.2;
+    }
+    .stat .label {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 0.15rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .table-wrap {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+    }
+    th {
+      text-align: left;
+      padding: 0.65rem 0.85rem;
+      background: #0e0e18;
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--border);
+      white-space: nowrap;
+    }
+    td {
+      padding: 0.7rem 0.85rem;
+      border-bottom: 1px solid #1f1f30;
+      vertical-align: middle;
+    }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    tr.selected td { background: rgba(240,192,64,0.06); }
+
+    .badge {
+      display: inline-block;
+      padding: 0.18rem 0.5rem;
+      border-radius: 4px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    .badge.loyalist { background: var(--loyal-fill); color: var(--loyal); }
+    .badge.traitor { background: var(--traitor-fill); color: var(--traitor); }
+    .badge.blackshield { background: var(--blackshield-fill); color: var(--blackshield); }
+    .badge.active { background: #14532d; color: var(--success); }
+    .badge.inactive { background: #3f3f46; color: #a1a1aa; }
+    .badge.waitlist { background: #422006; color: var(--warn); }
+    .badge.player { background: #1e293b; color: #94a3b8; }
+    .badge.marshal { background: #312e81; color: #a5b4fc; }
+    .badge.admin { background: #3b1d0b; color: var(--accent); }
+
+    .row-actions {
+      display: flex;
+      gap: 0.35rem;
+      flex-wrap: wrap;
+    }
+    .row-actions button {
+      padding: 0.3rem 0.55rem;
+      font-size: 0.75rem;
+    }
+
+    .empty {
+      text-align: center;
+      padding: 2.5rem 1rem;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    /* Modal / drawer */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.55);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .overlay.open {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .drawer {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: min(420px, 100%);
+      height: 100%;
+      background: var(--panel);
+      border-left: 1px solid var(--border);
+      z-index: 50;
+      transform: translateX(100%);
+      transition: transform 0.28s ease;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -8px 0 24px rgba(0,0,0,0.4);
+    }
+    .drawer.open { transform: translateX(0); }
+    .drawer-header {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      padding: 0.85rem 1rem;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+    .drawer-header h2 {
+      font-size: 1.05rem;
+      color: var(--accent);
+      flex: 1;
+    }
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      -webkit-overflow-scrolling: touch;
+    }
+    .drawer-footer {
+      padding: 0.85rem 1rem calc(0.85rem + var(--safe-bottom));
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 0.5rem;
+      flex-shrink: 0;
+    }
+    .drawer-footer button { flex: 1; }
+
+    .form-group {
+      margin-bottom: 0.9rem;
+    }
+    .form-group label {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.3rem;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.55rem 0.7rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+    .form-group textarea {
+      min-height: 72px;
+      resize: vertical;
+    }
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.7rem;
+    }
+    .form-hint {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 0.25rem;
+    }
+
+    .detail-section {
+      margin-top: 1.2rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--border);
+    }
+    .detail-section h3 {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.6rem;
+    }
+    .force-card {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .force-card .name {
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+    .force-card .meta {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 0.2rem;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: calc(1.2rem + var(--safe-bottom));
+      left: 50%;
+      transform: translateX(-50%) translateY(120%);
+      background: var(--panel-2);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      padding: 0.65rem 1.1rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      z-index: 60;
+      transition: transform 0.25s ease;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    @media (max-width: 640px) {
+      th.hide-sm, td.hide-sm { display: none; }
+      .form-row { grid-template-columns: 1fr; }
+      main { padding: 0.75rem; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-row">
+      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
+      <div>
+        <h1>Player Admin</h1>
+        <div class="sub">Sunset Heresy campaign</div>
+      </div>
+      <div class="header-actions">
+        <button type="button" class="ghost" id="btn-export" title="Download players as CSV">Export</button>
+        <button type="button" class="primary" id="btn-add">+ Player</button>
+      </div>
+    </div>
+    <nav class="site-nav">
+      <a href="index.html">Dashboard</a>
+      <a href="campaign_map.html">Map</a>
+      <a href="player_admin.html" class="active" data-role="campaign_admin">Players</a>
+      <a href="forces.html">Forces</a>
+      <a href="systems.html">Systems</a>
+      <a href="games.html">Battles</a>
+      <a href="rules.html">Rules</a>
+      <span id="nav-auth"></span>
+    </nav>
+  </header>
+
+  <main>
+    <div id="access-denied" class="empty" hidden style="padding:2rem;text-align:center">
+      <p style="margin-bottom:0.75rem">Campaign admin login required to manage players.</p>
+      <p><a href="login.html" style="color:var(--accent)">Log in</a></p>
+    </div>
+    <div id="admin-body">
+    <div class="stats" id="stats"></div>
+
+    <div class="toolbar">
+      <input type="search" class="search" id="search" placeholder="Search name, display, contact…" />
+      <div class="filters" id="filters">
+        <span class="chip active" data-filter="all">All</span>
+        <span class="chip" data-filter="active">Active</span>
+        <span class="chip" data-filter="inactive">Inactive</span>
+        <span class="chip" data-filter="waitlist">Waitlist</span>
+        <span class="chip loyal" data-filter="Loyalist">Loyalist</span>
+        <span class="chip traitor" data-filter="Traitor">Traitor</span>
+        <span class="chip blackshield" data-filter="Blackshield">Blackshield</span>
+      </div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Player</th>
+            <th class="hide-sm">Display</th>
+            <th>Allegiance</th>
+            <th>Status</th>
+            <th class="hide-sm">Role</th>
+            <th class="hide-sm">Forces</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="empty" id="empty" hidden>No players match the current filters.</div>
+    </div>
+    </div><!-- /admin-body -->
+  </main>
+
+  <div class="overlay" id="overlay"></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-labelledby="drawer-title">
+    <div class="drawer-header">
+      <h2 id="drawer-title">Add Player</h2>
+      <button type="button" class="ghost" id="btn-close" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-body">
+      <form id="form" autocomplete="off">
+        <input type="hidden" id="f-id" />
+        <div class="form-group">
+          <label for="f-name">Player Name *</label>
+          <input id="f-name" required maxlength="80" placeholder="Alex Chen" />
+        </div>
+        <div class="form-group">
+          <label for="f-display">Display Name</label>
+          <input id="f-display" maxlength="80" placeholder="The Warsmith" />
+          <div class="form-hint">Public handle at the table — not a warlord name.</div>
+        </div>
+        <div class="form-group">
+          <label for="f-contact">Contact</label>
+          <input id="f-contact" maxlength="120" placeholder="discord:vox#1234" />
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="f-status">Status *</label>
+            <select id="f-status" required>
+              <option value="active">Active</option>
+              <option value="inactive">Inactive</option>
+              <option value="waitlist">Waitlist</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f-role">Role *</label>
+            <select id="f-role" required>
+              <option value="player">Player</option>
+              <option value="marshal">Marshal</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="f-allegiance">Allegiance *</label>
+            <select id="f-allegiance" required>
+              <option value="Loyalist">Loyalist</option>
+              <option value="Traitor">Traitor</option>
+              <option value="Blackshield">Blackshield</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="f-start-sys">Starting System</label>
+            <select id="f-start-sys">
+              <option value="">— None —</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="f-joined">Joined</label>
+          <input type="date" id="f-joined" />
+        </div>
+        <div class="form-group">
+          <label for="f-notes">Notes</label>
+          <textarea id="f-notes" maxlength="500" placeholder="Logistics preferences, house rules…"></textarea>
+        </div>
+      </form>
+
+      <div class="detail-section" id="forces-section" hidden>
+        <h3>Forces owned</h3>
+        <div id="forces-list"></div>
+      </div>
+    </div>
+    <div class="drawer-footer">
+      <button type="button" class="danger ghost" id="btn-delete" hidden>Delete</button>
+      <button type="button" class="primary" id="btn-save">Save</button>
+    </div>
+  </aside>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="js/api.js"></script>
+  <script>
+    // Shared storage via SH (server when available, localStorage fallback)
+    const SYSTEMS = [
+      { id: 1, name: "Port Maw" },
+      { id: 2, name: "Aeolus" },
+      { id: 3, name: "Marinas" },
+      { id: 4, name: "Mezoa" },
+      { id: 5, name: "Electris" },
+      { id: 6, name: "Acre" },
+      { id: 7, name: "Bretz" },
+      { id: 8, name: "TR/0524" },
+      { id: 9, name: "Kueghan" },
+      { id: 10, name: "Ortho" },
+      { id: 11, name: "Lethe" },
+      { id: 12, name: "Kiliman IV" },
+      { id: 13, name: "Walpurgia" }
+    ];
+
+    let players = [];
+    let forces = [];
+    let filter = "all";
+    let searchQ = "";
+    let editingId = null;
+
+    async function reload() {
+      players = await SH.list("players");
+      forces = await SH.list("forces");
+      renderTable();
+      const badgeHost = document.querySelector(".header-actions");
+      if (badgeHost && !document.getElementById("mode-badge")) {
+        const span = document.createElement("span");
+        span.id = "mode-badge";
+        span.innerHTML = SH.statusBadgeHtml();
+        badgeHost.prepend(span);
+      } else if (document.getElementById("mode-badge")) {
+        document.getElementById("mode-badge").innerHTML = SH.statusBadgeHtml();
+      }
+    }
+
+    // --- DOM refs ---
+    const tbody = document.getElementById("tbody");
+    const empty = document.getElementById("empty");
+    const statsEl = document.getElementById("stats");
+    const overlay = document.getElementById("overlay");
+    const drawer = document.getElementById("drawer");
+    const drawerTitle = document.getElementById("drawer-title");
+    const form = document.getElementById("form");
+    const forcesSection = document.getElementById("forces-section");
+    const forcesList = document.getElementById("forces-list");
+    const btnDelete = document.getElementById("btn-delete");
+    const toast = document.getElementById("toast");
+
+    // Populate system select
+    const sysSelect = document.getElementById("f-start-sys");
+    SYSTEMS.forEach(s => {
+      const opt = document.createElement("option");
+      opt.value = s.id;
+      opt.textContent = s.name;
+      sysSelect.appendChild(opt);
+    });
+
+    function systemName(id) {
+      if (!id) return "—";
+      const s = SYSTEMS.find(x => x.id === Number(id));
+      return s ? s.name : `#${id}`;
+    }
+
+    function nextId() {
+      return players.reduce((m, p) => Math.max(m, p.player_id), 0) + 1;
+    }
+
+    function forceCount(playerId) {
+      return forces.filter(f => f.player_id === playerId).length;
+    }
+
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add("show");
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => toast.classList.remove("show"), 2200);
+    }
+
+    function renderStats() {
+      const total = players.length;
+      const active = players.filter(p => p.status === "active").length;
+      const loyal = players.filter(p => p.allegiance === "Loyalist").length;
+      const traitor = players.filter(p => p.allegiance === "Traitor").length;
+      const black = players.filter(p => p.allegiance === "Blackshield").length;
+      statsEl.innerHTML = `
+        <div class="stat"><div class="num">${total}</div><div class="label">Players</div></div>
+        <div class="stat"><div class="num">${active}</div><div class="label">Active</div></div>
+        <div class="stat"><div class="num" style="color:var(--loyal)">${loyal}</div><div class="label">Loyalist</div></div>
+        <div class="stat"><div class="num" style="color:var(--traitor)">${traitor}</div><div class="label">Traitor</div></div>
+        <div class="stat"><div class="num" style="color:var(--blackshield)">${black}</div><div class="label">Blackshield</div></div>
+      `;
+    }
+
+    function filtered() {
+      let list = players.slice();
+      if (filter === "active" || filter === "inactive" || filter === "waitlist") {
+        list = list.filter(p => p.status === filter);
+      } else if (filter === "Loyalist" || filter === "Traitor" || filter === "Blackshield") {
+        list = list.filter(p => p.allegiance === filter);
+      }
+      if (searchQ) {
+        const q = searchQ.toLowerCase();
+        list = list.filter(p =>
+          (p.player_name || "").toLowerCase().includes(q) ||
+          (p.display_name || "").toLowerCase().includes(q) ||
+          (p.contact || "").toLowerCase().includes(q)
+        );
+      }
+      return list.sort((a, b) => a.player_id - b.player_id);
+    }
+
+    function renderTable() {
+      const list = filtered();
+      tbody.innerHTML = "";
+      empty.hidden = list.length > 0;
+      list.forEach(p => {
+        const tr = document.createElement("tr");
+        if (editingId === p.player_id) tr.classList.add("selected");
+        const all = p.allegiance.toLowerCase();
+        tr.innerHTML = `
+          <td>${p.player_id}</td>
+          <td>
+            <strong>${escapeHtml(p.player_name)}</strong>
+            <div style="font-size:0.72rem;color:var(--muted)">${escapeHtml(p.contact || "")}</div>
+          </td>
+          <td class="hide-sm">${escapeHtml(p.display_name || "—")}</td>
+          <td><span class="badge ${all}">${p.allegiance}</span></td>
+          <td><span class="badge ${p.status}">${p.status}</span></td>
+          <td class="hide-sm"><span class="badge ${p.role}">${p.role}</span></td>
+          <td class="hide-sm">${forceCount(p.player_id)}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" data-edit="${p.player_id}">Edit</button>
+              <button type="button" data-invite="${p.player_id}">Invite</button>
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      renderStats();
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function openDrawer(player) {
+      editingId = player ? player.player_id : null;
+      drawerTitle.textContent = player ? `Edit Player #${player.player_id}` : "Add Player";
+      document.getElementById("f-id").value = player ? player.player_id : "";
+      document.getElementById("f-name").value = player ? player.player_name : "";
+      document.getElementById("f-display").value = player ? (player.display_name || "") : "";
+      document.getElementById("f-contact").value = player ? (player.contact || "") : "";
+      document.getElementById("f-status").value = player ? player.status : "active";
+      document.getElementById("f-role").value = player ? player.role : "player";
+      document.getElementById("f-allegiance").value = player ? player.allegiance : "Loyalist";
+      document.getElementById("f-start-sys").value = player && player.start_sys_id ? player.start_sys_id : "";
+      document.getElementById("f-joined").value = player ? (player.joined_at || "") : new Date().toISOString().slice(0, 10);
+      document.getElementById("f-notes").value = player ? (player.notes || "") : "";
+
+      btnDelete.hidden = !player;
+      if (player) {
+        const owned = forces.filter(f => f.player_id === player.player_id);
+        forcesSection.hidden = false;
+        if (owned.length === 0) {
+          forcesList.innerHTML = `<div style="color:var(--muted);font-size:0.85rem">No forces assigned yet.</div>`;
+        } else {
+          forcesList.innerHTML = owned.map(f => `
+            <div class="force-card">
+              <div class="name">${escapeHtml(f.force_name)}</div>
+              <div class="meta">${f.game_system} · ${f.allegiance}${f.legion ? " · " + escapeHtml(f.legion) : ""} · Str ${f.strength} · ${systemName(f.sys_id)}</div>
+            </div>
+          `).join("");
+        }
+      } else {
+        forcesSection.hidden = true;
+      }
+
+      overlay.classList.add("open");
+      drawer.classList.add("open");
+      renderTable();
+      setTimeout(() => document.getElementById("f-name").focus(), 280);
+    }
+
+    function closeDrawer() {
+      overlay.classList.remove("open");
+      drawer.classList.remove("open");
+      editingId = null;
+      form.reset();
+      renderTable();
+    }
+
+    async function savePlayer() {
+      if (!form.reportValidity()) return;
+      const idVal = document.getElementById("f-id").value;
+      const payload = {
+        player_id: idVal ? Number(idVal) : undefined,
+        player_name: document.getElementById("f-name").value.trim(),
+        display_name: document.getElementById("f-display").value.trim() || null,
+        contact: document.getElementById("f-contact").value.trim() || null,
+        status: document.getElementById("f-status").value,
+        role: document.getElementById("f-role").value,
+        allegiance: document.getElementById("f-allegiance").value,
+        start_sys_id: document.getElementById("f-start-sys").value
+          ? Number(document.getElementById("f-start-sys").value)
+          : null,
+        notes: document.getElementById("f-notes").value.trim() || null,
+        joined_at: document.getElementById("f-joined").value || null
+      };
+      try {
+        await SH.save("players", payload);
+        await reload();
+        closeDrawer();
+        showToast(idVal ? "Player updated" : "Player added");
+      } catch (err) {
+        showToast("Save failed: " + err.message);
+      }
+    }
+
+    async function deletePlayer() {
+      if (!editingId) return;
+      if (!confirm(`Delete player #${editingId}? Forces stay in the forces list but lose their owner link.`)) return;
+      try {
+        await SH.remove("players", editingId);
+        await reload();
+        closeDrawer();
+        showToast("Player deleted");
+      } catch (err) {
+        showToast("Delete failed: " + err.message);
+      }
+    }
+
+    function exportCsv() {
+      const headers = [
+        "player_id","player_name","display_name","contact","status","role",
+        "allegiance","start_sys_id","notes","joined_at"
+      ];
+      const rows = players.map(p =>
+        headers.map(h => {
+          let v = p[h] == null ? "" : String(p[h]);
+          if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+            v = '"' + v.replace(/"/g, '""') + '"';
+          }
+          return v;
+        }).join(",")
+      );
+      const csv = [headers.join(","), ...rows].join("\n");
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "db_players.csv";
+      a.click();
+      URL.revokeObjectURL(a.href);
+      showToast("CSV exported");
+    }
+
+    // Events
+    document.getElementById("btn-add").addEventListener("click", () => openDrawer(null));
+    document.getElementById("btn-close").addEventListener("click", closeDrawer);
+    overlay.addEventListener("click", closeDrawer);
+    document.getElementById("btn-save").addEventListener("click", savePlayer);
+    document.getElementById("btn-delete").addEventListener("click", deletePlayer);
+    document.getElementById("btn-export").addEventListener("click", exportCsv);
+
+    tbody.addEventListener("click", async (e) => {
+      const inviteBtn = e.target.closest("[data-invite]");
+      if (inviteBtn) {
+        try {
+          const result = await SH.createInvite(Number(inviteBtn.dataset.invite));
+          alert(`Invite code for player #${result.player_id}:\n\n${result.invite_code}\n\nShare this once. They set a password on first login.`);
+        } catch (err) {
+          showToast(err.message || "Invite failed");
+        }
+        return;
+      }
+      const btn = e.target.closest("[data-edit]");
+      if (!btn) return;
+      const id = Number(btn.dataset.edit);
+      const p = players.find(x => x.player_id === id);
+      if (p) openDrawer(p);
+    });
+
+    document.getElementById("search").addEventListener("input", (e) => {
+      searchQ = e.target.value.trim();
+      renderTable();
+    });
+
+    document.getElementById("filters").addEventListener("click", (e) => {
+      const chip = e.target.closest(".chip");
+      if (!chip) return;
+      document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+      chip.classList.add("active");
+      filter = chip.dataset.filter;
+      renderTable();
+    });
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && drawer.classList.contains("open")) closeDrawer();
+    });
+
+    // Init — campaign admin only for full player records
+    (async () => {
+      try {
+        await SH.probe();
+        await SH.applyNavPermissions();
+        if (!SH.canEditPlayers()) {
+          document.getElementById("admin-body").hidden = true;
+          document.getElementById("access-denied").hidden = false;
+          document.getElementById("btn-add").hidden = true;
+          document.getElementById("btn-export").hidden = true;
+          return;
+        }
+        await reload();
+      } catch (err) {
+        console.error(err);
+        showToast("Could not load players");
+      }
+    })();
+  </script>
+</body>
+</html>
