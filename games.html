@@ -132,7 +132,7 @@
         <div class="form-row">
           <div class="form-group">
             <label for="f-turn">Turn *</label>
-            <input type="number" id="f-turn" required min="1" value="3" />
+            <input type="number" id="f-turn" required min="1" />
           </div>
           <div class="form-group">
             <label for="f-date">Played on</label>
@@ -166,24 +166,25 @@
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="f-att">Attacker (player id)</label>
-            <input type="number" id="f-att" min="1" value="1" />
+            <label for="f-att">Attacker</label>
+            <select id="f-att" required></select>
           </div>
           <div class="form-group">
-            <label for="f-def">Defender (player id)</label>
-            <input type="number" id="f-def" min="1" value="2" />
+            <label for="f-def">Defender</label>
+            <select id="f-def" required></select>
           </div>
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="f-att-force">Attacker force id</label>
-            <input type="number" id="f-att-force" min="1" />
+            <label for="f-att-force">Attacker force</label>
+            <select id="f-att-force" required></select>
           </div>
           <div class="form-group">
-            <label for="f-def-force">Defender force id</label>
-            <input type="number" id="f-def-force" min="1" />
+            <label for="f-def-force">Defender force</label>
+            <select id="f-def-force" required></select>
           </div>
         </div>
+        <p class="hint" id="side-hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4;margin:-0.3rem 0 0.8rem">Forces are the ones in the chosen system. Your side lists your own forces. The other side lists opposing players in that system.</p>
         <div class="form-row">
           <div class="form-group">
             <label for="f-att-vp">Attacker VP</label>
@@ -230,19 +231,23 @@
 
   <script src="js/api.js"></script>
   <script>
-    const SYSTEMS = [
-      { id: 1, name: "Port Maw" }, { id: 2, name: "Aeolus" }, { id: 3, name: "Marinas" },
-      { id: 4, name: "Mezoa" }, { id: 5, name: "Electris" }, { id: 6, name: "Acre" },
-      { id: 7, name: "Bretz" }, { id: 8, name: "TR/0524" }, { id: 9, name: "Kueghan" },
-      { id: 10, name: "Ortho" }, { id: 11, name: "Lethe" }, { id: 12, name: "Kiliman IV" },
-      { id: 13, name: "Walpurgia" }
-    ];
-
     let games = [];
+    let players = [];
+    let forces = [];
+    let systems = [];
+    let meta = {};
     let searchQ = "", editingId = null;
+    let fillingSides = false;
 
     async function reload() {
-      games = await SH.list("games");
+      [games, players, forces, systems, meta] = await Promise.all([
+        SH.list("games"),
+        SH.list("players"),
+        SH.list("forces"),
+        SH.list("systems"),
+        SH.getMeta()
+      ]);
+      fillSystemSelect();
       render();
       let badge = document.getElementById("mode-badge");
       if (!badge) {
@@ -259,16 +264,29 @@
     const drawer = document.getElementById("drawer");
     const toast = document.getElementById("toast");
 
-    const sysSel = document.getElementById("f-sys");
-    SYSTEMS.forEach(s => {
-      const o = document.createElement("option");
-      o.value = s.id; o.textContent = s.name;
-      sysSel.appendChild(o);
-    });
-
     function systemName(id) {
-      const s = SYSTEMS.find(x => x.id === Number(id));
-      return s ? s.name : `#${id}`;
+      const s = systems.find(x => Number(x.sys_id) === Number(id));
+      return s ? s.sys_name : `#${id}`;
+    }
+    function playerName(id) {
+      const p = players.find(x => Number(x.player_id) === Number(id));
+      return p ? (p.display_name || "Unknown commander") : "Unknown commander";
+    }
+    function forceName(id) {
+      const f = forces.find(x => Number(x.force_id) === Number(id));
+      return f ? f.force_name : "";
+    }
+    function fillSystemSelect() {
+      const sel = document.getElementById("f-sys");
+      const current = sel.value;
+      sel.innerHTML = "";
+      systems.slice().sort((a, b) => String(a.sys_name).localeCompare(String(b.sys_name))).forEach(s => {
+        const o = document.createElement("option");
+        o.value = s.sys_id;
+        o.textContent = s.sys_name;
+        sel.appendChild(o);
+      });
+      if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
     }
     function nextId() { return games.reduce((m, g) => Math.max(m, g.game_id), 0) + 1; }
     function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -345,7 +363,7 @@
           </div>
           <div class="meta">
             Turn ${g.turn} · ${g.played_on || "undated"} · ${g.game_system || "HH"} ${g.points ? g.points + " pts" : ""}
-            · Att #${g.attacker_id} vs Def #${g.defender_id}
+            · ${esc(playerName(g.attacker_id))}${g.attacker_force_id ? " (" + esc(forceName(g.attacker_force_id)) + ")" : ""} vs ${esc(playerName(g.defender_id))}${g.defender_force_id ? " (" + esc(forceName(g.defender_force_id)) + ")" : ""}
             ${g.attacker_list || g.defender_list ? "<br>" + esc(g.attacker_list || "—") + " vs " + esc(g.defender_list || "—") : ""}
           </div>
           ${g.notes ? `<div class="notes">${esc(g.notes)}</div>` : ""}
@@ -359,26 +377,106 @@
       renderStats();
     }
 
+    function forcesFor(sysId, playerId, includeId) {
+      return forces.filter(f => {
+        if (includeId != null && includeId !== "" && Number(f.force_id) === Number(includeId)) return Number(f.player_id) === Number(playerId);
+        if (f.status === "destroyed") return false;
+        if (Number(f.sys_id) !== Number(sysId)) return false;
+        return Number(f.player_id) === Number(playerId);
+      });
+    }
+    function allegianceOf(playerId) {
+      const p = players.find(x => Number(x.player_id) === Number(playerId));
+      return p ? p.allegiance : "";
+    }
+    function playersWithForces(sysId, includeId) {
+      const ids = new Set(forces.filter(f => f.status !== "destroyed" && Number(f.sys_id) === Number(sysId)).map(f => Number(f.player_id)));
+      if (includeId != null && includeId !== "") ids.add(Number(includeId));
+      return players.filter(p => ids.has(Number(p.player_id)));
+    }
+    function setOptions(sel, rows, selected) {
+      sel.innerHTML = "";
+      if (!rows.length) {
+        const o = document.createElement("option");
+        o.value = "";
+        o.textContent = "None in this system";
+        sel.appendChild(o);
+        return;
+      }
+      rows.forEach(row => {
+        const o = document.createElement("option");
+        o.value = row.value;
+        o.textContent = row.label;
+        sel.appendChild(o);
+      });
+      if (selected != null && [...sel.options].some(o => o.value === String(selected))) sel.value = String(selected);
+    }
+    function refreshSides(preferred) {
+      if (fillingSides) return;
+      fillingSides = true;
+      const pref = preferred || {};
+      const sysId = document.getElementById("f-sys").value;
+      const attSel = document.getElementById("f-att");
+      const defSel = document.getElementById("f-def");
+      const me = myPlayerId();
+      let attackers = playersWithForces(sysId, pref.attacker_id);
+      if (SH.role === "player" && me != null) {
+        const self = players.find(p => Number(p.player_id) === me);
+        attackers = self ? [self] : [];
+      }
+      const wantAtt = pref.attacker_id != null ? pref.attacker_id : (attSel.value || (me != null ? me : ""));
+      setOptions(attSel, attackers.map(p => ({
+        value: p.player_id,
+        label: (p.display_name || "Unknown") + (p.allegiance ? " · " + p.allegiance : "")
+      })), wantAtt);
+      const attackerId = attSel.value;
+      const attForces = forcesFor(sysId, attackerId, pref.attacker_force_id);
+      setOptions(document.getElementById("f-att-force"), attForces.map(f => ({
+        value: f.force_id,
+        label: f.force_name + " · Str " + (f.strength ?? "—")
+      })), pref.attacker_force_id != null ? pref.attacker_force_id : document.getElementById("f-att-force").value);
+
+      const attAlleg = allegianceOf(attackerId);
+      let defenders = playersWithForces(sysId, pref.defender_id).filter(p => Number(p.player_id) !== Number(attackerId));
+      if (attAlleg) {
+        defenders = defenders.filter(p => !p.allegiance || p.allegiance !== attAlleg || Number(p.player_id) === Number(pref.defender_id));
+      }
+      setOptions(defSel, defenders.map(p => ({
+        value: p.player_id,
+        label: (p.display_name || "Unknown") + (p.allegiance ? " · " + p.allegiance : "")
+      })), pref.defender_id != null ? pref.defender_id : defSel.value);
+      const defenderId = defSel.value;
+      const defForces = forcesFor(sysId, defenderId, pref.defender_force_id);
+      setOptions(document.getElementById("f-def-force"), defForces.map(f => ({
+        value: f.force_id,
+        label: f.force_name + " · Str " + (f.strength ?? "—")
+      })), pref.defender_force_id != null ? pref.defender_force_id : document.getElementById("f-def-force").value);
+      fillingSides = false;
+    }
+
     function openDrawer(g) {
       editingId = g ? g.game_id : null;
       document.getElementById("drawer-title").textContent = g ? `Edit Battle #${g.game_id}` : "Log Battle";
       document.getElementById("f-id").value = g ? g.game_id : "";
-      document.getElementById("f-turn").value = g ? g.turn : 3;
+      document.getElementById("f-turn").value = g ? g.turn : (meta.turn || 1);
       document.getElementById("f-date").value = g ? (g.played_on || "") : new Date().toISOString().slice(0, 10);
-      document.getElementById("f-sys").value = g ? g.sys_id : 4;
+      const ownForce = forces.find(f => SH.role === "player" && myPlayerId() != null && Number(f.player_id) === myPlayerId() && f.status !== "destroyed");
+      document.getElementById("f-sys").value = g ? g.sys_id : (ownForce ? ownForce.sys_id : (systems[0] && systems[0].sys_id));
       document.getElementById("f-gsys").value = g ? (g.game_system || "HH") : "HH";
       document.getElementById("f-mission").value = g ? (g.mission || "") : "";
       document.getElementById("f-points").value = g ? (g.points || "") : 3000;
-      document.getElementById("f-att").value = g ? g.attacker_id : 1;
-      document.getElementById("f-def").value = g ? g.defender_id : 2;
-      document.getElementById("f-att-force").value = g ? (g.attacker_force_id || "") : "";
-      document.getElementById("f-def-force").value = g ? (g.defender_force_id || "") : "";
       document.getElementById("f-att-vp").value = g ? (g.attacker_vp ?? 0) : 0;
       document.getElementById("f-def-vp").value = g ? (g.defender_vp ?? 0) : 0;
       document.getElementById("f-result").value = g ? g.result : "attacker_win";
       document.getElementById("f-att-list").value = g ? (g.attacker_list || "") : "";
       document.getElementById("f-def-list").value = g ? (g.defender_list || "") : "";
       document.getElementById("f-notes").value = g ? (g.notes || "") : "";
+      refreshSides(g ? {
+        attacker_id: g.attacker_id,
+        defender_id: g.defender_id,
+        attacker_force_id: g.attacker_force_id,
+        defender_force_id: g.defender_force_id
+      } : { attacker_id: myPlayerId() });
       document.getElementById("btn-delete").hidden = !g || !canDeleteGame(g);
       overlay.classList.add("open");
       drawer.classList.add("open");
@@ -396,6 +494,10 @@
       const result = document.getElementById("f-result").value;
       const attId = Number(document.getElementById("f-att").value);
       const defId = Number(document.getElementById("f-def").value);
+      if (!attId || !defId) {
+        showToast("Choose an attacker and a defender in this system");
+        return;
+      }
       let winner = null;
       if (result === "attacker_win") winner = attId;
       else if (result === "defender_win") winner = defId;
@@ -450,6 +552,9 @@
       }
     }
 
+    document.getElementById("f-sys").addEventListener("change", () => refreshSides());
+    document.getElementById("f-att").addEventListener("change", () => refreshSides());
+    document.getElementById("f-def").addEventListener("change", () => refreshSides());
     document.getElementById("btn-add").addEventListener("click", () => openDrawer(null));
     document.getElementById("btn-close").addEventListener("click", closeDrawer);
     overlay.addEventListener("click", closeDrawer);

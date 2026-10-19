@@ -1,0 +1,10 @@
+.env
+.git
+node_modules
+data/accounts.json
+data/sessions.json
+data/invites.json
+data/notifications.json
+data/feedback.json
+data/*.tmp-*
+*.log

@@ -1,0 +1,30 @@
+# Sunset Heresy on Render.
+# Applying this blueprint creates a paid web service. Free instances cannot
+# mount a disk, and this app's campaign JSON must survive restarts.
+# As of 19 October 2026, plan 0.5c-512mb is $7/month and disks are $0.25/GB/month
+# (1 GB below is $0.25/month). See https://render.com/pricing
+services:
+  - type: web
+    name: sunset-heresy
+    runtime: node
+    plan: 0.5c-512mb
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATA_DIR
+        value: /var/data
+      - key: CAMPAIGN_ADMIN_LOGIN
+        value: admin
+      - key: CAMPAIGN_ADMIN_PASSWORD
+        sync: false
+      - key: DISCORD_FEEDBACK_WEBHOOK
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+    disk:
+      name: campaign-data
+      mountPath: /var/data
+      sizeGB: 1

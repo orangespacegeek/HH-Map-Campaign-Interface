@@ -20,10 +20,20 @@
  *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
  *   Login and signup are rate-limited per IP (see AUTH_MAX_ATTEMPTS).
  *
- * Public reads:
+ * Public reads (no private action notes, no contact details):
  *   GET /api/public/players|forces|systems|games|meta
+ *   GET /health and GET /api/health
  *
- * Protected writes use session cookie or Authorization: Bearer <token>
+ * Protected writes use session cookie or Authorization: Bearer <token>.
+ * Cookie-authenticated writes must come from the same origin (or CORS_ORIGINS)
+ * and send header X-SH-Request: 1.
+ *
+ * Tester tools:
+ *   POST /api/feedback                 (logged in) { message, page? }
+ *   GET  /api/feedback                 (campaign_admin)
+ *   GET  /api/admin/backup             (campaign_admin) campaign JSON download
+ *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET" }
+ *   node server.js reset-campaign [--keep-systems] [--purge-accounts]
  *
  * Env:
  *   PORT, HOST, DATA_DIR (default ./data)
@@ -32,6 +42,9 @@
  *     first boot a random password is generated and printed once)
  *   CAMPAIGN_ADMIN_FORCE_PASSWORD=1  (with PASSWORD set: re-hash admin on boot
  *     and invalidate every session)
+ *   CORS_ORIGINS (optional comma-separated extra origins; same-origin is always allowed)
+ *   DISCORD_FEEDBACK_WEBHOOK (optional; off when unset)
+ *   MAX_BODY_BYTES (default 1048576)
  *
  * Static files are an allow-list (HTML pages, js/, css/, images). data/, schema/,
  * server source, and dotfiles are not served.
@@ -61,7 +74,8 @@ const COLLECTIONS = {
   accounts: { file: "accounts.json", idKey: "account_id" },
   sessions: { file: "sessions.json", idKey: "token" },
   invites: { file: "invites.json", idKey: "invite_id" },
-  notifications: { file: "notifications.json", idKey: "notification_id" }
+  notifications: { file: "notifications.json", idKey: "notification_id" },
+  feedback: { file: "feedback.json", idKey: "feedback_id" }
 };
 
 const PUBLIC_PAGES = new Set([
@@ -73,7 +87,9 @@ const PUBLIC_PAGES = new Set([
   "systems.html",
   "games.html",
   "rules.html",
-  "actions.html"
+  "actions.html",
+  "account.html",
+  "feedback.html"
 ]);
 
 const PUBLIC_TYPES = {
@@ -96,13 +112,26 @@ function ensureDataDir() {
   if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, { recursive: true });
 }
 
+function atomicWrite(fp, text) {
+  const tmp = fp + ".tmp-" + process.pid + "-" + crypto.randomBytes(4).toString("hex");
+  try {
+    fs.writeFileSync(tmp, text);
+    fs.renameSync(tmp, fp);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch (_) {}
+    throw err;
+  }
+}
+
 function readCollection(name) {
   const spec = COLLECTIONS[name];
   if (!spec) return null;
   const fp = path.join(DATA, spec.file);
   if (!fs.existsSync(fp)) {
     const empty = name === "meta" ? {} : [];
-    fs.writeFileSync(fp, JSON.stringify(empty, null, 2));
+    atomicWrite(fp, JSON.stringify(empty, null, 2));
     return empty;
   }
   return JSON.parse(fs.readFileSync(fp, "utf8"));
@@ -112,7 +141,7 @@ function writeCollection(name, data) {
   const spec = COLLECTIONS[name];
   if (!spec) throw new Error("Unknown collection");
   const fp = path.join(DATA, spec.file);
-  fs.writeFileSync(fp, JSON.stringify(data, null, 2));
+  atomicWrite(fp, JSON.stringify(data, null, 2));
 }
 
 function nextId(list, idKey) {
@@ -253,7 +282,7 @@ function sessionCookie(req, token, maxAgeSeconds) {
 // Per-IP brake on password guessing and invite-code spraying. In-memory only;
 // a process restart clears it, which is enough for a small tester group.
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
-const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15 };
+const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15, feedback: 10 };
 const authBuckets = new Map();
 
 function clientIp(req) {
@@ -502,6 +531,7 @@ function mePayload(account) {
     account_id: account.account_id,
     role: account.role,
     label: account.label,
+    login: account.login || null,
     player_id: account.player_id,
     provider: account.provider || "local"
   };
@@ -513,40 +543,129 @@ function mePayload(account) {
   return base;
 }
 
+function httpError(status, message) {
+  const err = new Error(message);
+  err.status = status;
+  return err;
+}
+
+function configuredOrigins() {
+  return String(process.env.CORS_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function isAllowedOrigin(req, origin) {
+  if (!origin) return false;
+  if (configuredOrigins().includes(origin)) return true;
+  let url;
+  try {
+    url = new URL(origin);
+  } catch {
+    return false;
+  }
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "")
+    .split(",")[0]
+    .trim();
+  if (!host || url.host !== host) return false;
+  const proto = String(req.headers["x-forwarded-proto"] || "")
+    .split(",")[0]
+    .trim();
+  if (proto && url.protocol !== proto + ":") return false;
+  return true;
+}
+
+function corsHeaders(req) {
+  const headers = { Vary: "Origin" };
+  const origin = req.headers.origin;
+  if (!origin || origin === "null" || !isAllowedOrigin(req, origin)) return headers;
+  headers["Access-Control-Allow-Origin"] = origin;
+  headers["Access-Control-Allow-Credentials"] = "true";
+  headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS";
+  headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-SH-Request";
+  return headers;
+}
+
 function send(res, status, body, extraHeaders = {}) {
+  const req = res.req;
   const payload = typeof body === "string" ? body : JSON.stringify(body);
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
-    "Access-Control-Allow-Origin": reqOrigin(res) || "*",
-    "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Credentials": "true",
     "Cache-Control": "no-store",
+    ...(req ? corsHeaders(req) : {}),
     ...extraHeaders
   });
   res.end(payload);
 }
 
-// stash origin for CORS on credentialed requests
-let _lastOrigin = "*";
-function reqOrigin(res) {
-  return _lastOrigin;
+// Cookie-authenticated writes must be same-origin (or on CORS_ORIGINS) and
+// carry X-SH-Request, which a cross-site form cannot set.
+function assertCsrf(req) {
+  if (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS") return null;
+  if (!parseCookies(req).sh_session) return null;
+  const origin = req.headers.origin;
+  if (origin && origin !== "null" && !isAllowedOrigin(req, origin)) {
+    return "Cross-origin write blocked";
+  }
+  if (req.headers["x-sh-request"] !== "1") {
+    return "Write blocked. Refresh the page and try again.";
+  }
+  if (origin && origin !== "null") return null;
+  const referer = req.headers.referer || req.headers.referrer || "";
+  if (referer) {
+    try {
+      if (isAllowedOrigin(req, new URL(referer).origin)) return null;
+    } catch (_) {}
+  }
+  const auth = req.headers.authorization || "";
+  if (auth.toLowerCase().startsWith("bearer ")) return null;
+  return "Write blocked. Refresh the page and try again.";
 }
+
+const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES) || 1024 * 1024;
 
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on("data", (c) => chunks.push(c));
+    let size = 0;
+    let settled = false;
+    let tooBig = false;
+    function fail(err) {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    }
+    req.on("data", (c) => {
+      if (settled || tooBig) return;
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        tooBig = true;
+        fail(httpError(413, "Request body too large"));
+        // Answer first, then drop the rest of the upload.
+        setImmediate(() => {
+          if (!req.destroyed) req.destroy();
+        });
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => {
+      if (settled) return;
+      settled = true;
       const raw = Buffer.concat(chunks).toString("utf8");
       if (!raw) return resolve(null);
       try {
         resolve(JSON.parse(raw));
-      } catch (e) {
-        reject(new Error("Invalid JSON body"));
+      } catch (_) {
+        reject(httpError(400, "Invalid JSON body"));
       }
     });
-    req.on("error", reject);
+    req.on("error", (err) => {
+      if (settled) return;
+      if (err && (err.code === "ECONNRESET" || err.code === "EPIPE")) return;
+      fail(err);
+    });
   });
 }
 
@@ -2136,7 +2255,21 @@ async function handleCampaign(req, res, parts, method) {
     return send(res, 200, { ok: true, from, to: { turn: meta.turn, phase: meta.phase }, meta });
   }
 
-  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase" });
+  if (action === "reset" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    if (body.confirm !== "RESET") {
+      return send(res, 400, { error: 'Send { "confirm": "RESET" } to reset the campaign' });
+    }
+    const result = resetCampaign({
+      keep_systems: !!body.keep_systems,
+      purge_accounts: !!body.purge_accounts
+    });
+    return send(res, 200, result);
+  }
+
+  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase|reset" });
 }
 
 /**
@@ -2454,15 +2587,266 @@ async function handleActions(req, res, parts, method) {
   });
 }
 
+function publicMeta(meta) {
+  const hidden = new Set(["player_actions", "admin_pin"]);
+  const safe = {};
+  Object.keys(meta || {}).forEach((key) => {
+    if (hidden.has(key)) return;
+    if (/password|secret|token|pin|hash/i.test(key)) return;
+    safe[key] = meta[key];
+  });
+  return safe;
+}
+
+function publicAccount(account) {
+  return {
+    account_id: account.account_id,
+    role: account.role,
+    label: account.label,
+    login: account.login || null,
+    player_id: account.player_id,
+    provider: account.provider || "local",
+    created_at: account.created_at || null
+  };
+}
+
+function baselineSystemsPath() {
+  return path.join(ROOT, "data", "baseline", "systems.json");
+}
+
+function loadBaselineSystems() {
+  const fp = baselineSystemsPath();
+  if (!fs.existsSync(fp)) return null;
+  const data = JSON.parse(fs.readFileSync(fp, "utf8"));
+  if (!Array.isArray(data)) return null;
+  return data;
+}
+
+function defaultHomeSystem(player, owned, systems) {
+  const ids = new Set(systems.map((s) => Number(s.sys_id)));
+  const candidates = [
+    Number(player.start_sys_id),
+    owned[0] && Number(owned[0].home_sys_id),
+    owned[0] && Number(owned[0].sys_id)
+  ];
+  for (const id of candidates) {
+    if (id && ids.has(id)) return id;
+  }
+  return systems[0] ? Number(systems[0].sys_id) : 1;
+}
+
+function buildStartingForces(players, existingForces, systems) {
+  const out = [];
+  let next = 1;
+  players.forEach((player) => {
+    const owned = existingForces.filter((f) => Number(f.player_id) === Number(player.player_id));
+    const home = defaultHomeSystem(player, owned, systems);
+    for (let n = 0; n < 2; n++) {
+      const prev = owned[n];
+      const fallback =
+        (player.display_name || player.player_name || "Force") + (n === 0 ? " I" : " II");
+      out.push({
+        force_id: next++,
+        player_id: player.player_id,
+        force_name: (prev && prev.force_name) || fallback,
+        game_system: (prev && prev.game_system) || "HH",
+        force_type: (prev && prev.force_type) || "Legion",
+        allegiance: player.allegiance || (prev && prev.allegiance) || "",
+        legion: (prev && prev.legion) || "",
+        subfaction: (prev && prev.subfaction) || "",
+        allies: (prev && prev.allies) || "",
+        organisation: (prev && prev.organisation) || "",
+        warlord_name: (prev && prev.warlord_name) || "",
+        primarch_present: false,
+        titan_support: false,
+        points: prev && prev.points != null ? prev.points : 3000,
+        home_sys_id: home,
+        sys_id: home,
+        dest_sys_id: null,
+        strength: 3,
+        status: "active",
+        notes: n === 0 && prev && prev.notes ? prev.notes : "Starting force",
+        fought_this_turn: false
+      });
+    }
+  });
+  return out;
+}
+
+function resetCampaign(options = {}) {
+  const previous = readCollection("meta") || {};
+  const players = readCollection("players");
+  const existingForces = readCollection("forces");
+  let systems = readCollection("systems");
+  let systemsRestored = false;
+  if (!options.keep_systems) {
+    const baseline = loadBaselineSystems();
+    if (baseline) {
+      systems = baseline;
+      systemsRestored = true;
+      writeCollection("systems", systems);
+    }
+  }
+  const forces = buildStartingForces(players, existingForces, systems);
+  const games = readCollection("games");
+  const now = new Date().toISOString();
+  const meta = {
+    campaign_name: previous.campaign_name || "Sunset Heresy",
+    subsector: previous.subsector || "",
+    turn: 1,
+    phase: "Logistics",
+    loyal_score: 0,
+    traitor_score: 0,
+    last_advanced_at: now,
+    player_actions: {},
+    phase_log: [
+      {
+        at: now,
+        from: { turn: previous.turn || null, phase: previous.phase || null },
+        to: { turn: 1, phase: "Logistics" },
+        notes: ["Campaign reset to turn 1, Logistics, with two starting forces per player"]
+      }
+    ],
+    victor: null,
+    victory_reason: null
+  };
+  writeCollection("meta", meta);
+  writeCollection("forces", forces);
+  writeCollection("games", []);
+  writeCollection("notifications", []);
+
+  let accountsRemoved = 0;
+  const accounts = readCollection("accounts");
+  if (options.purge_accounts) {
+    const kept = accounts.filter((a) => a.role === "campaign_admin");
+    accountsRemoved = accounts.length - kept.length;
+    writeCollection("accounts", kept);
+    clearAllSessions();
+  }
+
+  return {
+    ok: true,
+    turn: 1,
+    phase: "Logistics",
+    players: players.length,
+    forces: forces.length,
+    games_cleared: games.length,
+    systems_restored: systemsRestored,
+    systems_kept: !systemsRestored,
+    accounts_kept: options.purge_accounts
+      ? accounts.length - accountsRemoved
+      : accounts.length,
+    accounts_removed: accountsRemoved
+  };
+}
+
+function feedbackWebhookUrl() {
+  const url = String(process.env.DISCORD_FEEDBACK_WEBHOOK || "").trim();
+  if (!url) return "";
+  if (!/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/[^\s]+$/.test(url)) {
+    console.warn("DISCORD_FEEDBACK_WEBHOOK is set but is not a Discord webhook URL. Feedback will be stored only.");
+    return "";
+  }
+  return url;
+}
+
+async function notifyFeedbackWebhook(entry) {
+  const url = feedbackWebhookUrl();
+  if (!url) return false;
+  const who = entry.label || entry.login || "player";
+  const where = entry.page ? "\nPage: " + entry.page : "";
+  const content = ("**Sunset Heresy feedback** from " + who + where + "\n" + entry.message).slice(0, 1900);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content })
+    });
+    if (!res.ok) {
+      console.error("Discord feedback webhook returned " + res.status);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("Discord feedback webhook failed: " + (err && err.message ? err.message : "error"));
+    return false;
+  }
+}
+
+async function handleFeedback(req, res, method) {
+  if (method === "GET") {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const list = readCollection("feedback")
+      .slice()
+      .sort((a, b) => Number(b.feedback_id) - Number(a.feedback_id));
+    return send(res, 200, { feedback: list });
+  }
+  if (method === "POST") {
+    const limited = rateLimitAuth(req, "feedback");
+    if (limited) return sendRateLimited(res, limited);
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["player", "campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    const message = clipText(body.message, 2000);
+    if (!message) return send(res, 400, { error: "Message is required" });
+    const page = clipText(body.page, 200);
+    const list = readCollection("feedback");
+    const entry = {
+      feedback_id: nextId(list, "feedback_id"),
+      message,
+      page: page || null,
+      account_id: auth.account.account_id,
+      player_id: auth.account.player_id || null,
+      login: auth.account.login || null,
+      label: auth.account.label || null,
+      role: auth.account.role,
+      created_at: new Date().toISOString(),
+      webhook_delivered: false
+    };
+    entry.webhook_delivered = await notifyFeedbackWebhook(entry);
+    list.push(entry);
+    writeCollection("feedback", list);
+    return send(res, 201, { ok: true, feedback: entry });
+  }
+  return send(res, 405, { error: "Method not allowed" });
+}
+
+function backupPayload() {
+  const accounts = readCollection("accounts").map(publicAccount);
+  return {
+    exported_at: new Date().toISOString(),
+    note: "Password hashes and sessions are omitted. Invite codes are included so a restore can keep tester sign-up working. Treat this file as secret.",
+    players: readCollection("players"),
+    forces: readCollection("forces"),
+    systems: readCollection("systems"),
+    games: readCollection("games"),
+    meta: readCollection("meta"),
+    accounts,
+    invites: readCollection("invites"),
+    notifications: readCollection("notifications"),
+    feedback: readCollection("feedback")
+  };
+}
+
+function handleBackup(req, res) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const day = new Date().toISOString().slice(0, 10);
+  return send(res, 200, backupPayload(), {
+    "Content-Disposition": 'attachment; filename="sunset-heresy-backup-' + day + '.json"'
+  });
+}
+
 async function handlePublic(req, res, parts, method) {
   if (method !== "GET") return send(res, 405, { error: "Method not allowed" });
   const collection = parts[1];
 
   if (collection === "meta") {
-    const meta = readCollection("meta");
-    // strip secrets if any ever stored on meta
-    const { admin_pin, ...safe } = meta;
-    return send(res, 200, safe);
+    return send(res, 200, publicMeta(readCollection("meta")));
   }
   if (collection === "players") {
     return send(res, 200, readCollection("players").map(publicPlayer));
@@ -2485,9 +2869,11 @@ async function handlePublic(req, res, parts, method) {
 async function handleApi(req, res, pathname) {
   const parts = pathname.replace(/^\/api\//, "").split("/").filter(Boolean);
   const method = req.method;
-  _lastOrigin = req.headers.origin || "*";
 
   if (method === "OPTIONS") return send(res, 204, "");
+
+  const csrf = assertCsrf(req);
+  if (csrf) return send(res, 403, { error: csrf });
 
   // Auth routes
   if (parts[0] === "auth") return handleAuth(req, res, parts, method);
@@ -2509,13 +2895,19 @@ async function handleApi(req, res, pathname) {
   }
   if (parts[0] === "inbox") return handleInbox(req, res, parts, method);
 
+  if (parts[0] === "feedback") return handleFeedback(req, res, method);
+
+  if (parts[0] === "admin" && parts[1] === "backup" && method === "GET") {
+    return handleBackup(req, res);
+  }
+
   // Public sanitized routes
   if (parts[0] === "public") return handlePublic(req, res, parts, method);
 
   const collection = parts[0];
   const idPart = parts[1];
 
-  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites" || collection === "notifications") {
+  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites" || collection === "notifications" || collection === "feedback") {
     return send(res, 404, { error: "Unknown collection" });
   }
 
@@ -2548,7 +2940,9 @@ async function handleApi(req, res, pathname) {
     }
     if (role === "campaign_admin" || collection === "systems" || collection === "games" || collection === "meta") {
       const data = readCollection(collection);
-      if (collection === "meta") return send(res, 200, data);
+      if (collection === "meta") {
+        return send(res, 200, role === "campaign_admin" ? data : publicMeta(data));
+      }
       if (idPart != null) {
         const row = data.find((r) => String(r[spec.idKey]) === String(idPart));
         if (!row) return send(res, 404, { error: "Not found" });
@@ -2575,9 +2969,11 @@ async function handleApi(req, res, pathname) {
 
   if (method === "PUT" && collection === "meta") {
     if (!isAdmin) return send(res, 403, { error: "Campaign admin only" });
-    const body = await readBody(req);
-    writeCollection("meta", body || {});
-    return send(res, 200, body || {});
+    const body = (await readBody(req)) || {};
+    const prev = readCollection("meta") || {};
+    if (body.player_actions === undefined) body.player_actions = prev.player_actions || {};
+    writeCollection("meta", body);
+    return send(res, 200, body);
   }
 
   if (method === "PUT" && !idPart && collection !== "meta") {
@@ -2627,14 +3023,30 @@ async function handleApi(req, res, pathname) {
       if (isAdmin) {
         // full edit
       } else if (isPlayer && existing.player_id === auth.account.player_id) {
-        // player may edit safe self fields only
-        const allowed = ["display_name", "contact", "notes"];
         const safe = { ...existing };
-        allowed.forEach((k) => {
-          if (body[k] !== undefined) safe[k] = body[k];
-        });
+        if (body.display_name !== undefined) {
+          const name = clipText(body.display_name, 80);
+          if (!name) return send(res, 400, { error: "Display name is required" });
+          safe.display_name = name;
+        }
+        if (body.contact !== undefined) {
+          const contact = clipText(body.contact, 120);
+          safe.contact = contact || null;
+        }
+        if (body.notes !== undefined) {
+          const notes = clipText(body.notes, 500);
+          safe.notes = notes || null;
+        }
         list[idx] = safe;
         writeCollection(collection, list);
+        if (body.display_name !== undefined) {
+          const accounts = readCollection("accounts");
+          const acc = accounts.find((a) => a.account_id === auth.account.account_id);
+          if (acc) {
+            acc.label = safe.display_name;
+            writeCollection("accounts", accounts);
+          }
+        }
         return send(res, 200, list[idx]);
       } else {
         return send(res, 403, { error: "Cannot edit this player" });
@@ -2700,22 +3112,48 @@ async function handleApi(req, res, pathname) {
   return send(res, 405, { error: "Method not allowed" });
 }
 
+function logRequest(req, res, pathname, started) {
+  res.on("finish", () => {
+    const ms = Date.now() - started;
+    console.log(
+      new Date().toISOString() +
+        " " +
+        req.method +
+        " " +
+        pathname +
+        " " +
+        res.statusCode +
+        " " +
+        ms +
+        "ms"
+    );
+  });
+}
+
 ensureDataDir();
-bootstrapAdmin();
 
 const server = http.createServer(async (req, res) => {
+  const started = Date.now();
+  let pathname = "/";
   try {
     const url = new URL(req.url || "/", `http://${req.headers.host || "localhost"}`);
-    const pathname = decodeURIComponent(url.pathname);
+    pathname = decodeURIComponent(url.pathname);
+    logRequest(req, res, pathname, started);
+    if (pathname === "/health" || pathname === "/api/health") {
+      send(res, 200, { ok: true, service: "sunset-heresy" });
+      return;
+    }
     if (pathname.startsWith("/api/")) {
       await handleApi(req, res, pathname);
       return;
     }
     serveStatic(req, res, pathname);
   } catch (err) {
-    console.error(err);
+    const status = Number(err && err.status) || 500;
+    if (status >= 500) console.error(err);
+    if (res.headersSent) return;
     try {
-      send(res, 500, { error: err.message || "Server error" });
+      send(res, status, { error: status >= 500 ? "Server error" : err.message || "Request failed" });
     } catch (_) {
       res.writeHead(500);
       res.end("Server error");
@@ -2723,9 +3161,32 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, HOST, () => {
-  console.log(`Sunset Heresy server http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
-  console.log(`Roles: visitor (public) · player · campaign_admin`);
-  console.log(`Login: POST /api/auth/login  ·  Signup: POST /api/auth/signup  ·  Me: GET /api/auth/me`);
-  console.log(`Public data: /api/public/{players|forces|systems|games|meta}`);
-});
+function startServer() {
+  bootstrapAdmin();
+  server.listen(PORT, HOST, () => {
+    console.log(`Sunset Heresy server http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
+    console.log(`Data directory: ${DATA}`);
+    console.log(`Roles: visitor (public) · player · campaign_admin`);
+    console.log(`Login: POST /api/auth/login  ·  Signup: POST /api/auth/signup  ·  Me: GET /api/auth/me`);
+    console.log(`Public data: /api/public/{players|forces|systems|games|meta}`);
+    console.log(`Health: /health`);
+    if (feedbackWebhookUrl()) console.log("Discord feedback webhook: enabled");
+    else console.log("Discord feedback webhook: off (set DISCORD_FEEDBACK_WEBHOOK to enable)");
+  });
+}
+
+if (require.main === module) {
+  const cmd = process.argv[2];
+  if (cmd === "reset-campaign") {
+    const result = resetCampaign({
+      keep_systems: process.argv.includes("--keep-systems"),
+      purge_accounts: process.argv.includes("--purge-accounts")
+    });
+    console.log(JSON.stringify(result, null, 2));
+  } else if (!cmd) {
+    startServer();
+  } else {
+    console.error("Unknown command. Use: node server.js   or   node server.js reset-campaign [--keep-systems] [--purge-accounts]");
+    process.exit(1);
+  }
+}

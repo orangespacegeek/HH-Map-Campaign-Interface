@@ -115,7 +115,7 @@
   }
 
   function authHeaders() {
-    const h = { "Content-Type": "application/json" };
+    const h = { "Content-Type": "application/json", "X-SH-Request": "1" };
     if (token) h.Authorization = "Bearer " + token;
     return h;
   }
@@ -357,7 +357,7 @@
     }
     const res = await fetch(apiBase() + "/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-SH-Request": "1" },
       credentials: "include",
       body: JSON.stringify(creds)
     });
@@ -402,7 +402,7 @@
     if (mode !== "server") throw new Error("Sign up needs the live server");
     const res = await fetch(apiBase() + "/api/auth/signup", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-SH-Request": "1" },
       credentials: "include",
       body: JSON.stringify(body || {})
     });
@@ -519,6 +519,61 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not update messages");
+    return data;
+  }
+
+  async function submitFeedback(body) {
+    await probe();
+    if (mode !== "server") throw new Error("Feedback needs the live server");
+    const res = await fetch(apiBase() + "/api/feedback", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not send feedback");
+    return data;
+  }
+
+  async function listFeedback() {
+    await probe();
+    const res = await fetch(apiBase() + "/api/feedback", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load feedback");
+    return data;
+  }
+
+  async function downloadBackup() {
+    await probe();
+    if (mode !== "server") throw new Error("Backup needs the live server");
+    const res = await fetch(apiBase() + "/api/admin/backup", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Could not download backup");
+    }
+    return res.blob();
+  }
+
+  async function resetCampaign(body) {
+    await probe();
+    if (mode !== "server") throw new Error("Reset needs the live server");
+    const res = await fetch(apiBase() + "/api/campaign/reset", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Reset failed");
     return data;
   }
 
@@ -668,12 +723,27 @@
     return '<span class="mode-badge server">Live</span>';
   }
 
+  function navHere(file) {
+    const path = (typeof location !== "undefined" && location.pathname) || "";
+    return path === "/" + file || path.endsWith("/" + file) ? " active" : "";
+  }
+
   function navAuthHtml() {
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
-      return '<a href="login.html">' + escapeHtml(name) + '</a><a href="#" id="nav-logout">Log out</a>';
+      return (
+        '<a href="account.html" class="' +
+        navHere("account.html").trim() +
+        '">' +
+        escapeHtml(name) +
+        "</a>" +
+        '<a href="feedback.html" class="' +
+        navHere("feedback.html").trim() +
+        '">Feedback</a>' +
+        '<a href="#" id="nav-logout">Log out</a>'
+      );
     }
-    return '<a href="login.html">Log in</a>';
+    return '<a href="login.html"' + (navHere("login.html") ? ' class="active"' : "") + ">Log in</a>";
   }
 
   function escapeHtml(s) {
@@ -681,7 +751,8 @@
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   async function applyNavPermissions() {
@@ -771,6 +842,10 @@
     logout,
     me,
     setPassword,
+    submitFeedback,
+    listFeedback,
+    downloadBackup,
+    resetCampaign,
     confirmGame,
     disputeGame,
     voidGame,
