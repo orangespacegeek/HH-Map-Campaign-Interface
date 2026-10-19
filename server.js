@@ -32,8 +32,9 @@
  *   POST /api/feedback                 (logged in) { message, page? }
  *   GET  /api/feedback                 (campaign_admin)
  *   GET  /api/admin/backup             (campaign_admin) campaign JSON download
- *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET" }
- *   node server.js reset-campaign [--keep-systems] [--purge-accounts]
+ *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET", keep_map?, keep_control? }
+ *   node server.js reset-campaign [--keep-map] [--keep-control] [--purge-accounts]
+ *   --keep-control requires --keep-map.
  *
  * Env:
  *   PORT, HOST, DATA_DIR (default ./data)
@@ -2262,8 +2263,19 @@ async function handleCampaign(req, res, parts, method) {
     if (body.confirm !== "RESET") {
       return send(res, 400, { error: 'Send { "confirm": "RESET" } to reset the campaign' });
     }
+    if (body.keep_systems) {
+      return send(res, 400, {
+        error: "keep_systems has been replaced by keep_map and keep_control."
+      });
+    }
+    if (body.keep_control && !body.keep_map) {
+      return send(res, 400, {
+        error: "Keep current system control requires Keep current map."
+      });
+    }
     const result = resetCampaign({
-      keep_systems: !!body.keep_systems,
+      keep_map: !!body.keep_map,
+      keep_control: !!body.keep_control,
       purge_accounts: !!body.purge_accounts
     });
     return send(res, 200, result);
@@ -2673,23 +2685,58 @@ function buildStartingForces(players, existingForces, systems) {
   return out;
 }
 
+function withStartingControl(system, baselineById) {
+  const base = baselineById.get(Number(system.sys_id));
+  if (base) {
+    return {
+      ...system,
+      sys_loyal: Number(base.sys_loyal || 0),
+      sys_traitor: Number(base.sys_traitor || 0),
+      sys_neut: Number(base.sys_neut || 0),
+      sys_controller: base.sys_controller
+    };
+  }
+  return {
+    ...system,
+    sys_loyal: 0,
+    sys_traitor: 0,
+    sys_neut: 0,
+    sys_controller: "Contested"
+  };
+}
+
 function resetCampaign(options = {}) {
+  const keepMap = !!options.keep_map;
+  const keepControl = !!options.keep_control;
+  if (keepControl && !keepMap) {
+    throw httpError(400, "Keep current system control requires Keep current map.");
+  }
   const previous = readCollection("meta") || {};
   const players = readCollection("players");
   const existingForces = readCollection("forces");
   let systems = readCollection("systems");
+  const baseline = loadBaselineSystems();
   let systemsRestored = false;
-  if (!options.keep_systems) {
-    const baseline = loadBaselineSystems();
+  let controlReset = false;
+  if (!keepMap) {
     if (baseline) {
       systems = baseline;
       systemsRestored = true;
       writeCollection("systems", systems);
     }
+  } else if (!keepControl) {
+    const byId = new Map((baseline || []).map((s) => [Number(s.sys_id), s]));
+    systems = recomputeControllers(systems.map((s) => withStartingControl(s, byId)));
+    controlReset = true;
+    writeCollection("systems", systems);
   }
   const forces = buildStartingForces(players, existingForces, systems);
   const games = readCollection("games");
   const now = new Date().toISOString();
+  let mapNote = "Baseline map restored";
+  if (keepMap && keepControl) mapNote = "Current map and system control kept";
+  else if (keepMap) mapNote = "Current map kept; system control reset to starting values";
+  else if (!systemsRestored) mapNote = "Baseline map was missing, so the current map was left in place";
   const meta = {
     campaign_name: previous.campaign_name || "Sunset Heresy",
     subsector: previous.subsector || "",
@@ -2704,7 +2751,7 @@ function resetCampaign(options = {}) {
         at: now,
         from: { turn: previous.turn || null, phase: previous.phase || null },
         to: { turn: 1, phase: "Logistics" },
-        notes: ["Campaign reset to turn 1, Logistics, with two starting forces per player"]
+        notes: ["Campaign reset to turn 1, Logistics, with two starting forces per player. " + mapNote]
       }
     ],
     victor: null,
@@ -2732,7 +2779,10 @@ function resetCampaign(options = {}) {
     forces: forces.length,
     games_cleared: games.length,
     systems_restored: systemsRestored,
-    systems_kept: !systemsRestored,
+    map_kept: keepMap,
+    control_kept: keepMap && keepControl,
+    control_reset_to_start: controlReset,
+    systems_kept: keepMap || !systemsRestored,
     accounts_kept: options.purge_accounts
       ? accounts.length - accountsRemoved
       : accounts.length,
@@ -3178,15 +3228,31 @@ function startServer() {
 if (require.main === module) {
   const cmd = process.argv[2];
   if (cmd === "reset-campaign") {
-    const result = resetCampaign({
-      keep_systems: process.argv.includes("--keep-systems"),
-      purge_accounts: process.argv.includes("--purge-accounts")
-    });
-    console.log(JSON.stringify(result, null, 2));
+    if (process.argv.includes("--keep-systems")) {
+      console.error("--keep-systems has been replaced. Use --keep-map, and add --keep-control to also keep loyal/traitor control.");
+      process.exit(1);
+    }
+    const keepMap = process.argv.includes("--keep-map");
+    const keepControl = process.argv.includes("--keep-control");
+    if (keepControl && !keepMap) {
+      console.error("--keep-control requires --keep-map. System control is restored with the baseline map unless you keep the current map.");
+      process.exit(1);
+    }
+    try {
+      const result = resetCampaign({
+        keep_map: keepMap,
+        keep_control: keepControl,
+        purge_accounts: process.argv.includes("--purge-accounts")
+      });
+      console.log(JSON.stringify(result, null, 2));
+    } catch (err) {
+      console.error(err.message || "Reset failed");
+      process.exit(1);
+    }
   } else if (!cmd) {
     startServer();
   } else {
-    console.error("Unknown command. Use: node server.js   or   node server.js reset-campaign [--keep-systems] [--purge-accounts]");
+    console.error("Unknown command. Use: node server.js   or   node server.js reset-campaign [--keep-map] [--keep-control] [--purge-accounts]");
     process.exit(1);
   }
 }

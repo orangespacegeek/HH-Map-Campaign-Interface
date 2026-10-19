@@ -74,22 +74,30 @@ The invite table shows whether each code is active, used, revoked, or expired, a
 
 The files in `data/` are a sample already in progress (turn 3, Battles, one force). A fresh campaign is turn 1, Logistics, with two strength-3 forces per player in that player's starting system. Accounts are kept.
 
-From the dashboard, as campaign admin:
+From the dashboard, as campaign admin, choose **Reset campaign** and type `RESET`. Two checkboxes sit in that dialog. **Keep current map** comes first. **Keep current system control** stays disabled until the map is kept.
 
-1. Leave **Keep current system control** unchecked to restore the Port Maw starting map from `data/baseline/systems.json`. Check it only if you have edited system loyalty and want to keep that.
-2. Choose **Reset campaign** and type `RESET`.
+| Keep current map | Keep current system control | Result |
+| --- | --- | --- |
+| Unchecked (default) | Disabled | Restore `data/baseline/systems.json`: systems, links, positions, power, durability, and control. |
+| Checked | Unchecked | Keep the current systems, links, positions, power, and durability. Loyal and traitor control returns to the starting values for those systems. |
+| Checked | Checked | Keep the current map and the current loyal/traitor control on each system. |
+
+Starting control, when the map is kept but control is not: a system that exists in the baseline gets that file's `sys_loyal`, `sys_traitor`, and `sys_neut`. A system added later, with no baseline row, starts at 0 / 0, which is Contested. The controller label is recalculated from those numbers. The campaign totals (`loyal_score` and `traitor_score`) always return to 0, because the new campaign has not scored a turn yet.
 
 Or from a shell, with `DATA_DIR` set if the live data is not `./data`:
 
 ```bash
 npm run reset-campaign
-npm run reset-campaign -- --keep-systems
+npm run reset-campaign -- --keep-map
+npm run reset-campaign -- --keep-map --keep-control
 npm run reset-campaign -- --purge-accounts
 ```
 
+`--keep-control` without `--keep-map` is rejected and changes nothing. Sending `keep_control` without `keep_map` to the API does the same.
+
 `--purge-accounts` is the only switch that deletes logins. It removes player accounts and sessions and leaves the campaign admin. The player roster stays. Do not use it for a normal fresh start.
 
-Reset clears battles, notifications, scores, the victor, and private action notes. It does not remove the admin account.
+Reset clears battles, notifications, the campaign score, the victor, and private action notes. It does not remove the admin account.
 
 Before a reset on a live game, use **Download backup** on the dashboard. The file includes players, forces, systems, games, meta (including private action notes), invites, notifications, and feedback. Password hashes and sessions are left out. Invite codes are included, so treat the file as secret.
 

@@ -152,12 +152,90 @@
     }
     .keep-sys {
       display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      font-size: 0.78rem;
-      color: var(--muted);
+      align-items: flex-start;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      margin-bottom: 0.25rem;
     }
-    .keep-sys input { accent-color: var(--accent); }
+    .keep-sys input { accent-color: var(--accent); margin-top: 0.15rem; }
+    .keep-sys.is-disabled { color: var(--muted); }
+    .reset-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.62);
+      z-index: 80;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 0.75rem;
+      padding-bottom: calc(0.75rem + var(--safe-bottom));
+    }
+    .reset-overlay[hidden] { display: none; }
+    .reset-dialog {
+      width: min(440px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem 1rem 0.9rem;
+      max-height: min(92vh, 680px);
+      overflow: auto;
+    }
+    .reset-dialog h3 {
+      color: var(--accent);
+      font-size: 1.05rem;
+      text-transform: none;
+      letter-spacing: 0;
+      margin-bottom: 0.4rem;
+    }
+    .reset-dialog p,
+    .reset-dialog .field-hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-bottom: 0.75rem;
+    }
+    .reset-dialog .field-hint { margin: 0 0 0.8rem 1.45rem; }
+    .reset-dialog label.confirm-label {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.3rem;
+    }
+    .reset-dialog input[type="text"] {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.6rem 0.7rem;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: inherit;
+    }
+    .reset-dialog input[type="text"]:focus { outline: none; border-color: var(--accent); }
+    .reset-actions { display: flex; gap: 0.5rem; margin-top: 0.85rem; }
+    .reset-actions button {
+      flex: 1;
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0.6rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .reset-actions button.primary {
+      background: var(--accent);
+      color: #0a0a12;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    @media (min-width: 700px) {
+      .reset-overlay { align-items: center; }
+    }
     .turn-panel h3 {
       font-size: 0.78rem;
       color: var(--muted);
@@ -428,7 +506,6 @@
         <button type="button" id="btn-set-phase">Set phase</button>
         <button type="button" id="btn-backup">Download backup</button>
         <button type="button" id="btn-reset">Reset campaign</button>
-        <label class="keep-sys"><input type="checkbox" id="keep-systems" /> Keep current system control</label>
       </div>
       <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts.</p>
       <div class="turn-log" id="turn-log"></div>
@@ -510,6 +587,23 @@
   </main>
 
   <footer id="footer-note">Loading campaign…</footer>
+
+  <div class="reset-overlay" id="reset-overlay" hidden>
+    <div class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+      <h3 id="reset-title">Reset campaign</h3>
+      <p>Clears battles, sets turn 1 / Logistics, zeroes the campaign score, and gives every player two strength-3 forces. Accounts stay.</p>
+      <label class="keep-sys" for="keep-map"><input type="checkbox" id="keep-map" /> Keep current map</label>
+      <p class="field-hint" id="keep-map-hint">Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.</p>
+      <label class="keep-sys is-disabled" id="keep-control-label" for="keep-control"><input type="checkbox" id="keep-control" disabled /> Keep current system control</label>
+      <p class="field-hint">Available only when the current map is kept. That leaves each system's loyal and traitor scores as they are. Otherwise those scores return to their starting values on this map.</p>
+      <label class="confirm-label" for="reset-confirm">Type RESET to confirm</label>
+      <input type="text" id="reset-confirm" autocomplete="off" autocapitalize="characters" />
+      <div class="reset-actions">
+        <button type="button" id="reset-cancel">Cancel</button>
+        <button type="button" class="primary" id="reset-go">Reset campaign</button>
+      </div>
+    </div>
+  </div>
   <script src="js/api.js"></script>
   <script>
     function updatePhaseTrack(phase) {
@@ -744,19 +838,67 @@
       }
     });
 
-    document.getElementById("btn-reset").addEventListener("click", async () => {
+    const resetOverlay = document.getElementById("reset-overlay");
+    const keepMapInput = document.getElementById("keep-map");
+    const keepControlInput = document.getElementById("keep-control");
+    const keepControlLabel = document.getElementById("keep-control-label");
+    const keepMapHint = document.getElementById("keep-map-hint");
+
+    function syncResetOptions() {
+      const keepMap = keepMapInput.checked;
+      if (!keepMap) {
+        keepControlInput.checked = false;
+        keepControlInput.disabled = true;
+        keepControlLabel.classList.add("is-disabled");
+        keepMapHint.textContent = "Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.";
+      } else {
+        keepControlInput.disabled = false;
+        keepControlLabel.classList.remove("is-disabled");
+        keepMapHint.textContent = "The current systems, links, positions, power, and durability stay. Control is a separate choice.";
+      }
+    }
+
+    function openResetDialog() {
+      keepMapInput.checked = false;
+      syncResetOptions();
+      document.getElementById("reset-confirm").value = "";
+      resetOverlay.hidden = false;
+      document.getElementById("reset-confirm").focus();
+    }
+
+    function closeResetDialog() {
+      resetOverlay.hidden = true;
+    }
+
+    keepMapInput.addEventListener("change", syncResetOptions);
+
+    document.getElementById("btn-reset").addEventListener("click", openResetDialog);
+    document.getElementById("reset-cancel").addEventListener("click", () => {
+      closeResetDialog();
+      document.getElementById("turn-log").textContent = "Reset cancelled.";
+    });
+    resetOverlay.addEventListener("click", (event) => {
+      if (event.target === resetOverlay) closeResetDialog();
+    });
+
+    document.getElementById("reset-go").addEventListener("click", async () => {
       const log = document.getElementById("turn-log");
-      const typed = window.prompt("This clears battles, sets turn 1 / Logistics, zeroes scores, and gives every player two strength-3 forces. Accounts stay unless you later choose otherwise. Type RESET to continue.");
+      const typed = document.getElementById("reset-confirm").value.trim();
       if (typed !== "RESET") {
-        log.textContent = "Reset cancelled.";
+        log.textContent = "Type RESET to confirm.";
         return;
       }
       try {
         const result = await SH.resetCampaign({
           confirm: "RESET",
-          keep_systems: document.getElementById("keep-systems").checked
+          keep_map: keepMapInput.checked,
+          keep_control: keepControlInput.checked
         });
-        const mapNote = result.systems_restored ? "Starting map restored." : "System control left as it was.";
+        closeResetDialog();
+        let mapNote = "Baseline map restored.";
+        if (result.control_kept) mapNote = "Current map and system control kept.";
+        else if (result.control_reset_to_start) mapNote = "Current map kept. System control reset to starting values.";
+        else if (!result.systems_restored) mapNote = "Baseline map was missing, so the current map was left in place.";
         log.textContent = `Campaign reset. ${result.forces} forces, ${result.players} players. ${mapNote}`;
         await refreshDashboard();
       } catch (err) {
