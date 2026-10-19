@@ -556,19 +556,21 @@
   }
 
   function navAuthHtml() {
+    const onLogin = /(?:^|\/)login\.html$/.test(location.pathname);
+    const active = onLogin ? ' class="active"' : "";
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
-      return '<a href="login.html">' + escapeHtml(name) + '</a><a href="#" id="nav-logout">Log out</a>';
+      return '<a href="login.html"' + active + ">" + escapeHtml(name) + '</a><a href="#" id="nav-logout">Log out</a>';
     }
-    return '<a href="login.html">Log in</a>';
+    return '<a href="login.html"' + active + ">Log in</a>";
   }
 
   function escapeHtml(s) {
     return String(s ?? "")
-      .replace(/&/g, "&")
-      .replace(/</g, "<")
-      .replace(/>/g, ">")
-      .replace(/"/g, """);
+      .replace(/\u0026/g, "\u0026amp;")
+      .replace(/\u003c/g, "\u0026lt;")
+      .replace(/\u003e/g, "\u0026gt;")
+      .replace(/\u0022/g, "\u0026quot;");
   }
 
   async function applyNavPermissions() {
