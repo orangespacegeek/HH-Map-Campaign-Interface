@@ -470,23 +470,56 @@
   }
 
   async function confirmGame(id) {
+    return postGameAction(id, "confirm");
+  }
+
+  async function disputeGame(id, note) {
+    return postGameAction(id, "dispute", { note: note || "" });
+  }
+
+  async function voidGame(id) {
+    return postGameAction(id, "void");
+  }
+
+  async function postGameAction(id, action, body) {
     await probe();
-    if (mode === "server") {
-      const res = await fetch(apiBase() + "/api/games/" + id + "/confirm", {
-        method: "POST",
-        headers: authHeaders(),
-        credentials: "include"
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "API " + res.status);
-      return data;
-    }
-    const listData = localRead("games");
-    const idx = listData.findIndex((g) => String(g.game_id) === String(id));
-    if (idx < 0) throw new Error("Not found");
-    listData[idx].result_state = "applied";
-    localWrite("games", listData);
-    return listData[idx];
+    if (mode !== "server") throw new Error("This needs the live server");
+    const res = await fetch(apiBase() + "/api/games/" + id + "/" + action, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "API " + res.status);
+    return data;
+  }
+
+  async function inbox() {
+    await probe();
+    if (mode !== "server") return { actions: [], mine: [], notifications: [], action_count: 0, unread_count: 0 };
+    const res = await fetch(apiBase() + "/api/inbox", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load actions");
+    return data;
+  }
+
+  async function markInboxRead() {
+    await probe();
+    if (mode !== "server") return { ok: true };
+    const res = await fetch(apiBase() + "/api/inbox/read", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: "{}"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not update messages");
+    return data;
   }
 
   async function setPassword(body) {
@@ -671,6 +704,58 @@
     }
     const badge = document.getElementById("mode-badge");
     if (badge) badge.innerHTML = statusBadgeHtml();
+    refreshWaitingBadge();
+  }
+
+  function ensureWaitingStyle() {
+    if (document.getElementById("sh-waiting-style")) return;
+    const style = document.createElement("style");
+    style.id = "sh-waiting-style";
+    style.textContent =
+      "#nav-waiting{display:inline-flex;align-items:center;gap:0.35rem}" +
+      ".nav-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.15rem;height:1.15rem;padding:0 0.32rem;border-radius:999px;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;line-height:1}" +
+      ".nav-dot{width:0.45rem;height:0.45rem;border-radius:50%;background:#f0c040;box-shadow:0 0 0 2px rgba(240,192,64,0.25)}";
+    document.head.appendChild(style);
+  }
+
+  async function refreshWaitingBadge() {
+    if (!isLoggedIn() || mode !== "server") return;
+    const nav = document.querySelector(".site-nav");
+    if (!nav) return;
+    ensureWaitingStyle();
+    let data = null;
+    try {
+      data = await inbox();
+    } catch (_) {
+      return;
+    }
+    let link = document.getElementById("nav-waiting");
+    if (!link) {
+      link = document.createElement("a");
+      link.id = "nav-waiting";
+      link.href = "actions.html";
+      const slot = document.getElementById("nav-auth");
+      if (slot) nav.insertBefore(link, slot);
+      else nav.appendChild(link);
+    }
+    const here = /(?:^|\/)actions\.html$/.test(location.pathname || "");
+    link.className = here ? "active" : "";
+    link.replaceChildren();
+    link.append(document.createTextNode("Actions"));
+    const count = Number(data.action_count) || 0;
+    const unread = Number(data.unread_count) || 0;
+    if (count > 0) {
+      const pill = document.createElement("span");
+      pill.className = "nav-badge";
+      pill.textContent = count > 9 ? "9+" : String(count);
+      link.appendChild(pill);
+    } else if (unread > 0) {
+      const dot = document.createElement("span");
+      dot.className = "nav-dot";
+      dot.title = "New messages";
+      link.appendChild(dot);
+    }
+    link.setAttribute("aria-label", count > 0 ? "Actions waiting, " + count : "Actions");
   }
 
   global.SH = {
@@ -687,6 +772,11 @@
     me,
     setPassword,
     confirmGame,
+    disputeGame,
+    voidGame,
+    inbox,
+    markInboxRead,
+    refreshWaitingBadge,
     createInvite,
     listInvites,
     issueInvite,

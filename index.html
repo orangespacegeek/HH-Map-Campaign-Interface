@@ -297,6 +297,11 @@
       letter-spacing: 0.04em;
       margin-bottom: 0.7rem;
     }
+    #waiting-panel { border-color: #7f1d1d; }
+    #waiting-panel a.more { color: var(--accent); font-size: 0.85rem; font-weight: 600; }
+    .wait-item { padding: 0.45rem 0; border-bottom: 1px solid #1f1f30; font-size: 0.88rem; }
+    .wait-item:last-of-type { border-bottom: none; }
+    .wait-item .meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.12rem; }
     .score-row {
       display: flex;
       align-items: center;
@@ -410,6 +415,12 @@
         <button type="button" id="btn-set-phase">Set phase</button>
       </div>
       <div class="turn-log" id="turn-log"></div>
+    </div>
+
+    <div class="panel" id="waiting-panel" hidden>
+      <h3 id="waiting-title">Actions waiting</h3>
+      <div id="waiting-body"></div>
+      <a class="more" href="actions.html">Open actions</a>
     </div>
 
     <div class="stats" id="stats">
@@ -548,6 +559,56 @@
       return meta;
     }
 
+    function escDash(s) {
+      return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    async function refreshWaitingPanel() {
+      const panel = document.getElementById("waiting-panel");
+      if (!panel) return;
+      if (!SH.isLoggedIn() || SH.mode !== "server") {
+        panel.hidden = true;
+        return;
+      }
+      let data;
+      try {
+        data = await SH.inbox();
+      } catch (_) {
+        panel.hidden = true;
+        return;
+      }
+      const actions = data.actions || [];
+      const mine = (data.mine || []).filter((m) => m.result_state === "pending" || m.result_state === "disputed");
+      const unread = Number(data.unread_count) || 0;
+      if (!actions.length && !mine.length && !unread) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      const title = document.getElementById("waiting-title");
+      const count = actions.length;
+      title.textContent = count ? "Actions waiting · " + count : "Messages";
+      const lines = [];
+      actions.slice(0, 4).forEach((item) => {
+        const verb = item.duty === "admin"
+          ? (item.result_state === "disputed" ? "Disputed result to resolve" : "Pending result to resolve")
+          : "Confirm or dispute";
+        lines.push(
+          `<div class="wait-item"><strong>${escDash(verb)}</strong> · ${escDash(item.system_name)} · ${escDash(item.attacker_name || "—")} vs ${escDash(item.defender_name || "—")}<div class="meta">Submitted by ${escDash(item.proposed_by_name || "—")}</div></div>`
+        );
+      });
+      mine.slice(0, 3).forEach((item) => {
+        const label = item.result_state === "disputed" ? "Your result was disputed" : "Your result is pending";
+        lines.push(
+          `<div class="wait-item"><strong>${label}</strong> · ${escDash(item.system_name)}<div class="meta">${escDash(item.attacker_name || "—")} vs ${escDash(item.defender_name || "—")}</div></div>`
+        );
+      });
+      if (!lines.length && unread) {
+        lines.push(`<div class="wait-item"><strong>${unread} new message${unread === 1 ? "" : "s"}</strong><div class="meta">Open actions to read them.</div></div>`);
+      }
+      document.getElementById("waiting-body").innerHTML = lines.join("");
+    }
+
     document.getElementById("btn-advance").addEventListener("click", async () => {
       const log = document.getElementById("turn-log");
       try {
@@ -586,6 +647,7 @@
           el.style.display = isAdmin ? "" : "none";
         });
         await refreshDashboard();
+        await refreshWaitingPanel();
         const footer = document.getElementById("footer-note");
         if (footer) {
           footer.textContent = SH.mode === "server"

@@ -67,6 +67,7 @@
     .badge.in_progress { background: #3f3f46; color: #a1a1aa; }
     .badge.pending { background: #422006; color: var(--warn); }
     .badge.applied { background: #14532d; color: var(--success); }
+    .badge.disputed { background: #7f1d1d; color: #fecaca; }
 
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
     .overlay.open { opacity: 1; pointer-events: auto; }
@@ -338,6 +339,7 @@
             <span class="title">${esc(g.mission || "Battle")} · ${esc(systemName(g.sys_id))}</span>
             <span class="badge ${g.result}">${resultLabel(g.result)}</span>
             ${g.result_state === "pending" ? `<span class="badge pending">Awaiting confirm</span>` : ""}
+            ${g.result_state === "disputed" ? `<span class="badge disputed">Disputed</span>` : ""}
             ${g.result_state === "applied" ? `<span class="badge applied">Applied</span>` : ""}
             <span class="score">${g.attacker_vp ?? "—"} – ${g.defender_vp ?? "—"}</span>
           </div>
@@ -459,6 +461,7 @@
         try {
           await SH.confirmGame(confirmBtn.dataset.confirm);
           await reload();
+          SH.refreshWaitingBadge();
           showToast("Result confirmed");
         } catch (err) {
           showToast(err.message || "Confirm failed");

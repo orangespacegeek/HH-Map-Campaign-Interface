@@ -60,7 +60,8 @@ const COLLECTIONS = {
   meta: { file: "meta.json", idKey: null },
   accounts: { file: "accounts.json", idKey: "account_id" },
   sessions: { file: "sessions.json", idKey: "token" },
-  invites: { file: "invites.json", idKey: "invite_id" }
+  invites: { file: "invites.json", idKey: "invite_id" },
+  notifications: { file: "notifications.json", idKey: "notification_id" }
 };
 
 const PUBLIC_PAGES = new Set([
@@ -71,7 +72,8 @@ const PUBLIC_PAGES = new Set([
   "forces.html",
   "systems.html",
   "games.html",
-  "rules.html"
+  "rules.html",
+  "actions.html"
 ]);
 
 const PUBLIC_TYPES = {
@@ -1045,6 +1047,10 @@ function sanitizeGameBody(body) {
   delete body.resolution;
   delete body.result_state;
   delete body.proposed_by;
+  delete body.proposed_at;
+  delete body.disputed_by;
+  delete body.disputed_at;
+  delete body.dispute_note;
   delete body.applied_at;
   delete body.assigned;
 }
@@ -1339,7 +1345,20 @@ function settleGame(game, previous, state, games, actor) {
     apply = true;
     game.proposed_by = previous.proposed_by;
   } else {
+    const freshProposal =
+      !previous ||
+      previous.result_state !== "pending" ||
+      !sameProposal(previous, game) ||
+      Number(previous.proposed_by) !== Number(actor.player_id);
     game.proposed_by = Number(actor.player_id);
+    game.proposed_at = freshProposal
+      ? new Date().toISOString()
+      : previous.proposed_at || new Date().toISOString();
+    if (freshProposal) {
+      game.disputed_by = null;
+      game.disputed_at = null;
+      game.dispute_note = null;
+    }
   }
   if (apply) {
     game.result_state = "applied";
@@ -1476,6 +1495,7 @@ async function createBattle(res, auth, body) {
   list.push(body);
   writeCollection("games", list);
   saveBattleState(state);
+  announceBattleChange(null, body, auth.account);
   return send(res, 201, body);
 }
 
@@ -1492,6 +1512,7 @@ async function updateBattle(res, auth, existing, list, idx, body) {
   list[idx] = merged;
   writeCollection("games", list);
   saveBattleState(state);
+  announceBattleChange(previous, merged, auth.account);
   return send(res, 200, merged);
 }
 
@@ -1540,15 +1561,13 @@ async function confirmBattle(req, res, idPart) {
     return send(res, 403, { error: "You can only confirm a battle you are taking part in" });
   }
   if (existing.result_state === "applied" && existing.resolution) return send(res, 200, existing);
-  if (!isDecisive(existing.result) || existing.result_state !== "pending") {
-    return send(res, 409, { error: "This battle has no result waiting for confirmation" });
+  const canApply =
+    existing.result_state === "pending" || (isAdmin && existing.result_state === "disputed");
+  if (!isDecisive(existing.result) || !canApply) {
+    return send(res, 409, { error: "This battle has no result waiting to be applied" });
   }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "Waiting for your opponent to confirm this result" });
-  }
-  const meta = readCollection("meta");
-  if (!isAdmin && (meta.phase || "") !== "Battles") {
-    return send(res, 409, { error: "Battles can only be confirmed during the Battles phase" });
   }
   const previous = cloneData(existing);
   const game = cloneData(existing);
@@ -1557,7 +1576,316 @@ async function confirmBattle(req, res, idPart) {
   list[idx] = game;
   writeCollection("games", list);
   saveBattleState(state);
+  announceBattleChange(previous, game, auth.account);
   return send(res, 200, game);
+}
+
+function playerLabel(playerId) {
+  const players = readCollection("players");
+  const player = players.find((p) => Number(p.player_id) === Number(playerId));
+  if (!player) return "Player " + playerId;
+  return player.display_name || "Player " + playerId;
+}
+
+function battlePlace(game) {
+  const systems = readCollection("systems");
+  const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
+  const where = sys && sys.sys_name ? sys.sys_name : "system " + game.sys_id;
+  return "battle #" + game.game_id + " at " + where;
+}
+
+function resultPhrase(result) {
+  return (
+    {
+      attacker_win: "an attacker win",
+      defender_win: "a defender win",
+      draw: "a draw",
+      conceded: "a concession"
+    }[result] || "a result"
+  );
+}
+
+function otherParticipant(game, playerId) {
+  if (Number(game.attacker_id) === Number(playerId)) return Number(game.defender_id);
+  if (Number(game.defender_id) === Number(playerId)) return Number(game.attacker_id);
+  return null;
+}
+
+function writeNotices(entries) {
+  if (!entries || !entries.length) return;
+  const list = readCollection("notifications");
+  entries.forEach((entry) => {
+    list.push({
+      notification_id: nextId(list, "notification_id"),
+      player_id: entry.player_id == null ? null : Number(entry.player_id),
+      audience: entry.audience || "player",
+      kind: entry.kind,
+      text: entry.text,
+      ref: entry.ref || null,
+      read: false,
+      created_at: new Date().toISOString()
+    });
+  });
+  writeCollection("notifications", list.length > 500 ? list.slice(list.length - 500) : list);
+}
+
+function announceBattleChange(previous, game, actor) {
+  if (!game) return;
+  const notices = [];
+  const ref = { type: "game", game_id: game.game_id };
+  const title = battlePlace(game);
+  const prevState = previous ? previous.result_state : null;
+  const proposalChanged =
+    !previous ||
+    !sameProposal(previous, game) ||
+    Number(previous.proposed_by) !== Number(game.proposed_by) ||
+    prevState !== "pending";
+
+  if (game.result_state === "pending" && proposalChanged && actor.role !== "campaign_admin") {
+    const opponent = otherParticipant(game, game.proposed_by);
+    if (opponent) {
+      notices.push({
+        player_id: opponent,
+        audience: "player",
+        kind: "battle_result_submitted",
+        text: playerLabel(game.proposed_by) + " submitted " + resultPhrase(game.result) + " for " + title,
+        ref
+      });
+    }
+  }
+
+  if (game.result_state === "applied" && prevState !== "applied") {
+    const adminDidIt = actor.role === "campaign_admin";
+    const who = adminDidIt ? "The campaign admin" : playerLabel(actor.player_id);
+    const targets = new Set();
+    if (adminDidIt) {
+      if (game.attacker_id) targets.add(Number(game.attacker_id));
+      if (game.defender_id) targets.add(Number(game.defender_id));
+    } else if (game.proposed_by) {
+      targets.add(Number(game.proposed_by));
+    }
+    targets.forEach((pid) => {
+      if (!pid || (!adminDidIt && Number(pid) === Number(actor.player_id))) return;
+      notices.push({
+        player_id: pid,
+        audience: "player",
+        kind: adminDidIt ? "battle_result_applied" : "battle_result_confirmed",
+        text: adminDidIt
+          ? who + " applied the result for " + title
+          : who + " confirmed your result for " + title,
+        ref
+      });
+    });
+  }
+
+  writeNotices(notices);
+}
+
+async function disputeBattle(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["player", "campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const body = (await readBody(req)) || {};
+  const note = clipText(body.note, 300);
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  const isAdmin = auth.account.role === "campaign_admin";
+  const playerId = Number(auth.account.player_id);
+  if (!isAdmin && !isParticipant(existing, playerId)) {
+    return send(res, 403, { error: "You can only dispute a battle you are taking part in" });
+  }
+  if (!isAdmin && Number(existing.proposed_by) === playerId) {
+    return send(res, 403, { error: "You can't dispute your own result" });
+  }
+  if (existing.result_state !== "pending") {
+    return send(res, 409, { error: "Only a result waiting for confirmation can be disputed" });
+  }
+  const game = cloneData(existing);
+  if (game.resolution) {
+    const state = battleState();
+    reverseResolution(game, state, list);
+    saveBattleState(state);
+  }
+  game.result_state = "disputed";
+  game.resolution = null;
+  game.disputed_by = playerId || null;
+  game.disputed_at = new Date().toISOString();
+  game.dispute_note = note || null;
+  list[idx] = game;
+  writeCollection("games", list);
+  const title = battlePlace(game);
+  const who = isAdmin ? "The campaign admin" : playerLabel(playerId);
+  const ref = { type: "game", game_id: game.game_id };
+  const notices = [
+    {
+      player_id: null,
+      audience: "campaign_admin",
+      kind: "battle_result_disputed",
+      text: who + " disputed " + resultPhrase(game.result) + " for " + title,
+      ref
+    }
+  ];
+  if (game.proposed_by && Number(game.proposed_by) !== playerId) {
+    notices.push({
+      player_id: Number(game.proposed_by),
+      audience: "player",
+      kind: "battle_result_disputed",
+      text: who + " disputed your result for " + title,
+      ref
+    });
+  }
+  writeNotices(notices);
+  return send(res, 200, game);
+}
+
+async function voidBattle(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  if (!["pending", "disputed", "applied"].includes(existing.result_state)) {
+    return send(res, 409, { error: "This battle has no result to void" });
+  }
+  const game = cloneData(existing);
+  if (game.resolution) {
+    const state = battleState();
+    reverseResolution(game, state, list);
+    saveBattleState(state);
+  }
+  game.result = "in_progress";
+  game.winner_id = null;
+  game.result_state = "open";
+  game.proposed_by = null;
+  game.proposed_at = null;
+  game.disputed_by = null;
+  game.disputed_at = null;
+  game.dispute_note = null;
+  game.resolution = null;
+  list[idx] = game;
+  writeCollection("games", list);
+  const title = battlePlace(game);
+  const ref = { type: "game", game_id: game.game_id };
+  const notices = [];
+  [existing.attacker_id, existing.defender_id].forEach((pid) => {
+    if (!pid) return;
+    notices.push({
+      player_id: Number(pid),
+      audience: "player",
+      kind: "battle_result_voided",
+      text: "The campaign admin voided the result for " + title,
+      ref
+    });
+  });
+  writeNotices(notices);
+  return send(res, 200, game);
+}
+
+function describeWaitingGame(game) {
+  const players = readCollection("players");
+  const forces = readCollection("forces");
+  const systems = readCollection("systems");
+  function pname(id) {
+    if (id == null || id === "") return null;
+    const player = players.find((p) => Number(p.player_id) === Number(id));
+    return player ? player.display_name || "Player " + id : "Player " + id;
+  }
+  function fname(id) {
+    if (id == null || id === "") return null;
+    const force = forces.find((f) => Number(f.force_id) === Number(id));
+    return force ? force.force_name : "Force " + id;
+  }
+  const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
+  return {
+    type: "battle_result",
+    game_id: game.game_id,
+    result_state: game.result_state || "open",
+    result: game.result,
+    turn: game.turn || null,
+    sys_id: game.sys_id,
+    system_name: sys && sys.sys_name ? sys.sys_name : "System " + game.sys_id,
+    mission: game.mission || null,
+    attacker_id: game.attacker_id,
+    defender_id: game.defender_id,
+    attacker_name: pname(game.attacker_id),
+    defender_name: pname(game.defender_id),
+    attacker_force: fname(game.attacker_force_id),
+    defender_force: fname(game.defender_force_id),
+    attacker_vp: game.attacker_vp ?? null,
+    defender_vp: game.defender_vp ?? null,
+    proposed_by: game.proposed_by == null ? null : Number(game.proposed_by),
+    proposed_by_name: pname(game.proposed_by),
+    proposed_at: game.proposed_at || null,
+    disputed_by: game.disputed_by == null ? null : Number(game.disputed_by),
+    disputed_by_name: pname(game.disputed_by),
+    disputed_at: game.disputed_at || null,
+    dispute_note: game.dispute_note || null,
+    notes: game.notes || null
+  };
+}
+
+function inboxFor(account) {
+  const games = readCollection("games");
+  const notes = readCollection("notifications");
+  const isAdmin = account.role === "campaign_admin";
+  const pid = account.player_id == null ? null : Number(account.player_id);
+  const actions = [];
+  const mine = [];
+  games
+    .slice()
+    .sort((a, b) => Number(b.game_id) - Number(a.game_id))
+    .forEach((game) => {
+      const state = game.result_state;
+      const card = describeWaitingGame(game);
+      const proposedBy = game.proposed_by == null ? null : Number(game.proposed_by);
+      const involved = pid != null && isParticipant(game, pid);
+      if (state === "pending" && involved && proposedBy !== pid) {
+        actions.push({ ...card, duty: "confirm" });
+      } else if (isAdmin && (state === "pending" || state === "disputed")) {
+        actions.push({ ...card, duty: "admin" });
+      }
+      if (pid != null && proposedBy === pid && (state === "pending" || state === "disputed" || state === "applied")) {
+        mine.push({ ...card, duty: state === "applied" ? "done" : "waiting" });
+      }
+    });
+  const visibleNotes = notes
+    .filter((n) => {
+      if (n.audience === "campaign_admin") return isAdmin;
+      return pid != null && Number(n.player_id) === pid;
+    })
+    .slice()
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, 40);
+  return {
+    actions,
+    mine: mine.slice(0, 20),
+    notifications: visibleNotes,
+    action_count: actions.length,
+    unread_count: visibleNotes.filter((n) => !n.read).length
+  };
+}
+
+async function handleInbox(req, res, parts, method) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["player", "campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  if (method === "GET" && !parts[1]) return send(res, 200, inboxFor(auth.account));
+  if (method === "POST" && parts[1] === "read") {
+    const isAdmin = auth.account.role === "campaign_admin";
+    const pid = auth.account.player_id == null ? null : Number(auth.account.player_id);
+    const list = readCollection("notifications");
+    list.forEach((n) => {
+      if (n.audience === "campaign_admin" && isAdmin) n.read = true;
+      else if ((!n.audience || n.audience === "player") && pid != null && Number(n.player_id) === pid) n.read = true;
+    });
+    writeCollection("notifications", list);
+    return send(res, 200, { ok: true });
+  }
+  return send(res, 404, { error: "Unknown inbox action" });
 }
 
 function checkVictory(meta, systems, forces) {
@@ -2173,6 +2501,13 @@ async function handleApi(req, res, pathname) {
   if (parts[0] === "games" && method === "POST" && parts[2] === "confirm") {
     return confirmBattle(req, res, parts[1]);
   }
+  if (parts[0] === "games" && method === "POST" && parts[2] === "dispute") {
+    return disputeBattle(req, res, parts[1]);
+  }
+  if (parts[0] === "games" && method === "POST" && parts[2] === "void") {
+    return voidBattle(req, res, parts[1]);
+  }
+  if (parts[0] === "inbox") return handleInbox(req, res, parts, method);
 
   // Public sanitized routes
   if (parts[0] === "public") return handlePublic(req, res, parts, method);
@@ -2180,7 +2515,7 @@ async function handleApi(req, res, pathname) {
   const collection = parts[0];
   const idPart = parts[1];
 
-  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites") {
+  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites" || collection === "notifications") {
     return send(res, 404, { error: "Unknown collection" });
   }
 
