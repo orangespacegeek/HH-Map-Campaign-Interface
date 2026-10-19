@@ -8,11 +8,17 @@
  *   campaign_admin  – full campaign management
  *
  * Auth (local for now; OAuth providers can plug in later):
- *   POST /api/auth/login          { login, password }  or  { invite_code, password }
+ *   POST /api/auth/login          { login, password }
+ *                                 legacy: { invite_code, password } claims a pre-made player
  *   POST /api/auth/logout
  *   GET  /api/auth/me
- *   POST /api/auth/set-password   (logged in) { password }
- *   POST /api/auth/create-invite  (campaign_admin) { player_id } → invite_code
+ *   POST /api/auth/set-password   (logged in) { password, current_password }
+ *   POST /api/auth/create-invite  (campaign_admin) legacy: { player_id } → invite_code
+ *   GET  /api/auth/invites        (campaign_admin) list tester invite codes
+ *   POST /api/auth/invites        (campaign_admin) { note?, expires_in_days?, max_uses? }
+ *   POST /api/auth/invites/revoke (campaign_admin) { invite_id }
+ *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
+ *   Login and signup are rate-limited per IP (see AUTH_MAX_ATTEMPTS).
  *
  * Public reads:
  *   GET /api/public/players|forces|systems|games|meta
@@ -45,7 +51,8 @@ const COLLECTIONS = {
   games: { file: "games.json", idKey: "game_id" },
   meta: { file: "meta.json", idKey: null },
   accounts: { file: "accounts.json", idKey: "account_id" },
-  sessions: { file: "sessions.json", idKey: "token" }
+  sessions: { file: "sessions.json", idKey: "token" },
+  invites: { file: "invites.json", idKey: "invite_id" }
 };
 
 const MIME = {
@@ -113,8 +120,161 @@ function randomToken() {
   return crypto.randomBytes(24).toString("hex");
 }
 
+// Unambiguous alphabet: no 0/O, 1/I/L, or 8/B, which are easy to misread when a code is shared.
+const INVITE_ALPHABET = "ACDEFGHJKLMNPQRSTUVWXYZ2345679";
+
 function randomInvite() {
-  return crypto.randomBytes(4).toString("hex").toUpperCase();
+  // 16 characters from a 29-letter alphabet (~78 bits). Rejection sampling avoids modulo bias.
+  const span = INVITE_ALPHABET.length * Math.floor(256 / INVITE_ALPHABET.length);
+  let out = "";
+  while (out.length < 16) {
+    const buf = crypto.randomBytes(32);
+    for (let i = 0; i < buf.length && out.length < 16; i++) {
+      if (buf[i] < span) out += INVITE_ALPHABET[buf[i] % INVITE_ALPHABET.length];
+    }
+  }
+  return out;
+}
+
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/;
+const ALLEGIANCES = ["Loyalist", "Traitor", "Blackshield"];
+const INVITE_MAX_USES_CAP = 25;
+
+function normalizeInviteCode(code) {
+  return String(code || "")
+    .replace(/[\s-]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function formatInviteCode(code) {
+  const c = normalizeInviteCode(code);
+  return c.replace(/(.{4})(?=.)/g, "$1-");
+}
+
+function inviteStatus(invite, now = Date.now()) {
+  if (!invite) return "invalid";
+  if (invite.revoked) return "revoked";
+  if (invite.expires_at && new Date(invite.expires_at).getTime() <= now) return "expired";
+  const max = Number(invite.max_uses) || 1;
+  const uses = Number(invite.uses) || 0;
+  if (uses >= max) return "used";
+  return "active";
+}
+
+function inviteError(invite) {
+  const status = inviteStatus(invite);
+  if (status === "invalid") return "Invalid invite code";
+  if (status === "revoked") return "This invite code has been revoked";
+  if (status === "expired") return "This invite code has expired";
+  if (status === "used") return "This invite code has already been used";
+  return null;
+}
+
+function publicInvite(invite) {
+  return {
+    invite_id: invite.invite_id,
+    code: normalizeInviteCode(invite.code),
+    code_display: formatInviteCode(invite.code),
+    note: invite.note || "",
+    max_uses: Number(invite.max_uses) || 1,
+    uses: Number(invite.uses) || 0,
+    expires_at: invite.expires_at || null,
+    revoked: !!invite.revoked,
+    revoked_at: invite.revoked_at || null,
+    created_at: invite.created_at,
+    created_by: invite.created_by || null,
+    status: inviteStatus(invite),
+    used_by: Array.isArray(invite.used_by) ? invite.used_by : []
+  };
+}
+
+function findInvite(invites, code) {
+  const want = normalizeInviteCode(code);
+  if (!want) return null;
+  return invites.find((i) => normalizeInviteCode(i.code) === want) || null;
+}
+
+function uniqueInviteCode(invites, accounts) {
+  const taken = new Set();
+  invites.forEach((i) => {
+    if (i.code) taken.add(normalizeInviteCode(i.code));
+  });
+  accounts.forEach((a) => {
+    if (a.invite_code) taken.add(normalizeInviteCode(a.invite_code));
+  });
+  for (let n = 0; n < 8; n++) {
+    const code = randomInvite();
+    if (!taken.has(code)) return code;
+  }
+  return crypto.randomBytes(12).toString("hex").toUpperCase();
+}
+
+function findAccountByLogin(accounts, login) {
+  const want = String(login || "").trim().toLowerCase();
+  if (!want) return null;
+  return accounts.find((a) => a.login && String(a.login).toLowerCase() === want) || null;
+}
+
+function clipText(value, max) {
+  return String(value == null ? "" : value).trim().slice(0, max);
+}
+
+function sessionCookie(req, token, maxAgeSeconds) {
+  const secure =
+    (req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ||
+    (req.connection && req.connection.encrypted);
+  return (
+    `sh_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}` +
+    (secure ? "; Secure" : "")
+  );
+}
+
+// Per-IP brake on password guessing and invite-code spraying. In-memory only;
+// a process restart clears it, which is enough for a small tester group.
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15 };
+const authBuckets = new Map();
+
+function clientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.trim()) {
+    const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  const sock = req.socket || req.connection;
+  return (sock && sock.remoteAddress) || "unknown";
+}
+
+function rateLimitAuth(req, action) {
+  const limit = AUTH_MAX_ATTEMPTS[action];
+  if (!limit) return null;
+  const now = Date.now();
+  const key = action + "|" + clientIp(req);
+  let bucket = authBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + AUTH_WINDOW_MS };
+    authBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (authBuckets.size > 4000) {
+    for (const [k, v] of authBuckets) {
+      if (v.resetAt <= now) authBuckets.delete(k);
+    }
+  }
+  if (bucket.count > limit) {
+    return { retryAfter: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) };
+  }
+  return null;
+}
+
+function sendRateLimited(res, limited) {
+  return send(
+    res,
+    429,
+    { error: "Too many attempts. Try again in " + limited.retryAfter + " seconds." },
+    { "Retry-After": String(limited.retryAfter) }
+  );
 }
 
 /** Ensure campaign admin account exists with env/default password.
@@ -357,30 +517,49 @@ async function handleAuth(req, res, parts, method) {
   }
 
   if (action === "login" && method === "POST") {
+    const limited = rateLimitAuth(req, "login");
+    if (limited) return sendRateLimited(res, limited);
     const body = (await readBody(req)) || {};
     const accounts = readCollection("accounts");
     let account = null;
 
     if (body.invite_code) {
+      const code = normalizeInviteCode(body.invite_code);
       account = accounts.find(
-        (a) => a.invite_code && a.invite_code.toUpperCase() === String(body.invite_code).toUpperCase()
+        (a) => a.invite_code && normalizeInviteCode(a.invite_code) === code
       );
       if (!account) return send(res, 401, { error: "Invalid invite code" });
-      // First login with invite: require password to set, or accept existing
+      const password = String(body.password || "");
       if (!account.pass_hash) {
-        if (!body.password || String(body.password).length < 6) {
+        if (password.length < 6 || password.length > 128) {
           return send(res, 400, { error: "Choose a password (at least 6 characters) to claim this account" });
         }
-        const { salt, hash } = hashPassword(body.password);
-        account.pass_hash = hash;
-        account.pass_salt = salt;
-        account.invite_code = null; // one-time
-        writeCollection("accounts", accounts);
-      } else if (!verifyPassword(body.password, account.pass_salt, account.pass_hash)) {
+      } else if (!verifyPassword(password, account.pass_salt, account.pass_hash)) {
         return send(res, 401, { error: "Wrong password" });
       }
+      // A legacy pre-made player has no username until they claim the code.
+      // Store one so they can sign in again after the code is consumed.
+      if (!account.login) {
+        const login = String(body.login == null ? "" : body.login).trim();
+        if (!LOGIN_RE.test(login)) {
+          return send(res, 400, {
+            error: "Choose a username (3–32 letters, numbers, dots, underscores, or hyphens) to claim this account"
+          });
+        }
+        if (findAccountByLogin(accounts, login)) {
+          return send(res, 409, { error: "That username is already taken" });
+        }
+        account.login = login;
+      }
+      if (!account.pass_hash) {
+        const { salt, hash } = hashPassword(password);
+        account.pass_hash = hash;
+        account.pass_salt = salt;
+      }
+      account.invite_code = null;
+      writeCollection("accounts", accounts);
     } else if (body.login) {
-      account = accounts.find((a) => a.login && a.login === body.login);
+      account = findAccountByLogin(accounts, body.login);
       if (!account || !verifyPassword(body.password, account.pass_salt, account.pass_hash)) {
         return send(res, 401, { error: "Invalid login or password" });
       }
@@ -389,14 +568,8 @@ async function handleAuth(req, res, parts, method) {
     }
 
     const { token, expires } = createSession(account.account_id);
-    const secure =
-      (req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ||
-      (req.connection && req.connection.encrypted);
-    const cookie =
-      `sh_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}` +
-      (secure ? "; Secure" : "");
     return send(res, 200, { ok: true, token, expires_at: expires.toISOString(), ...mePayload(account) }, {
-      "Set-Cookie": cookie
+      "Set-Cookie": sessionCookie(req, token, SESSION_DAYS * 86400)
     });
   }
 
@@ -428,6 +601,8 @@ async function handleAuth(req, res, parts, method) {
     return send(res, 200, { ok: true });
   }
 
+  // Legacy: attach a one-time code to a player the admin already created.
+  // Tester onboarding uses POST /api/auth/invites + POST /api/auth/signup instead.
   if (action === "create-invite" && method === "POST") {
     const auth = getSession(req);
     const gate = requireRole(auth, ["campaign_admin"]);
@@ -457,12 +632,186 @@ async function handleAuth(req, res, parts, method) {
       };
       accounts.push(account);
     } else {
+      // A replacement code must not erase a password the player already set.
       account.invite_code = code;
-      account.pass_hash = null;
-      account.pass_salt = null;
     }
     writeCollection("accounts", accounts);
     return send(res, 200, { invite_code: code, player_id: playerId, label: account.label });
+  }
+
+  if (action === "invites" && method === "GET") {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const invites = readCollection("invites");
+    const list = invites
+      .map(publicInvite)
+      .sort((a, b) => Number(b.invite_id) - Number(a.invite_id));
+    return send(res, 200, { invites: list });
+  }
+
+  if (action === "invites" && method === "POST" && !parts[2]) {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    const note = clipText(body.note, 120);
+    let maxUses = 1;
+    if (body.max_uses != null && body.max_uses !== "") {
+      maxUses = Number(body.max_uses);
+      if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > INVITE_MAX_USES_CAP) {
+        return send(res, 400, { error: "Use limit must be a whole number from 1 to 25" });
+      }
+    }
+    let expiresAt = null;
+    if (body.expires_in_days != null && body.expires_in_days !== "") {
+      const days = Number(body.expires_in_days);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        return send(res, 400, { error: "Expiry must be a whole number of days from 1 to 365, or left blank" });
+      }
+      expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    const invites = readCollection("invites");
+    const accounts = readCollection("accounts");
+    const row = {
+      invite_id: nextId(invites, "invite_id"),
+      code: uniqueInviteCode(invites, accounts),
+      note,
+      max_uses: maxUses,
+      uses: 0,
+      expires_at: expiresAt,
+      revoked: false,
+      revoked_at: null,
+      created_at: new Date().toISOString(),
+      created_by: auth.account.account_id,
+      used_by: []
+    };
+    invites.push(row);
+    writeCollection("invites", invites);
+    return send(res, 201, { ok: true, invite: publicInvite(row) });
+  }
+
+  if (action === "invites" && method === "POST" && parts[2] === "revoke") {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    const inviteId = Number(body.invite_id);
+    if (!inviteId) return send(res, 400, { error: "invite_id required" });
+    const invites = readCollection("invites");
+    const row = invites.find((i) => Number(i.invite_id) === inviteId);
+    if (!row) return send(res, 404, { error: "Invite not found" });
+    if (!row.revoked) {
+      row.revoked = true;
+      row.revoked_at = new Date().toISOString();
+      writeCollection("invites", invites);
+    }
+    return send(res, 200, { ok: true, invite: publicInvite(row) });
+  }
+
+  if (action === "signup" && method === "POST") {
+    const limited = rateLimitAuth(req, "signup");
+    if (limited) return sendRateLimited(res, limited);
+    const body = (await readBody(req)) || {};
+    const code = normalizeInviteCode(body.invite_code);
+    if (!code) return send(res, 400, { error: "Invite code is required" });
+
+    const login = String(body.login == null ? "" : body.login).trim();
+    if (!LOGIN_RE.test(login)) {
+      return send(res, 400, {
+        error: "Username must be 3–32 characters and use only letters, numbers, dots, underscores, or hyphens"
+      });
+    }
+    const password = String(body.password || "");
+    if (password.length < 6) {
+      return send(res, 400, { error: "Password must be at least 6 characters" });
+    }
+    if (password.length > 128) {
+      return send(res, 400, { error: "Password must be at most 128 characters" });
+    }
+    const playerName = String(body.player_name == null ? "" : body.player_name).trim();
+    if (!playerName) return send(res, 400, { error: "Player name is required" });
+    if (playerName.length > 80) return send(res, 400, { error: "Player name must be at most 80 characters" });
+    const displayName = String(body.display_name == null ? "" : body.display_name).trim();
+    if (!displayName) return send(res, 400, { error: "Display name is required" });
+    if (displayName.length > 80) return send(res, 400, { error: "Display name must be at most 80 characters" });
+    const allegiance = String(body.allegiance == null ? "" : body.allegiance).trim();
+    if (!ALLEGIANCES.includes(allegiance)) {
+      return send(res, 400, { error: "Allegiance must be Loyalist, Traitor, or Blackshield" });
+    }
+    const contactRaw = String(body.contact == null ? "" : body.contact).trim();
+    if (contactRaw.length > 120) return send(res, 400, { error: "Contact must be at most 120 characters" });
+    const notesRaw = String(body.notes == null ? "" : body.notes).trim();
+    if (notesRaw.length > 500) return send(res, 400, { error: "Notes must be at most 500 characters" });
+    const contact = contactRaw || null;
+    const notes = notesRaw || null;
+    let startSysId = null;
+    if (body.start_sys_id != null && body.start_sys_id !== "") {
+      startSysId = Number(body.start_sys_id);
+      if (!startSysId) return send(res, 400, { error: "Starting system is not valid" });
+      const systems = readCollection("systems");
+      if (!systems.some((s) => Number(s.sys_id) === startSysId)) {
+        return send(res, 400, { error: "Starting system is not valid" });
+      }
+    }
+
+    const invites = readCollection("invites");
+    const invite = findInvite(invites, code);
+    const rejection = inviteError(invite);
+    if (rejection) return send(res, 400, { error: rejection });
+
+    const accounts = readCollection("accounts");
+    if (findAccountByLogin(accounts, login)) {
+      return send(res, 409, { error: "That username is already taken" });
+    }
+
+    const players = readCollection("players");
+    const player = {
+      player_id: nextId(players, "player_id"),
+      player_name: playerName,
+      display_name: displayName,
+      contact,
+      status: "active",
+      role: "player",
+      allegiance,
+      start_sys_id: startSysId,
+      notes,
+      joined_at: new Date().toISOString().slice(0, 10)
+    };
+    const { salt, hash } = hashPassword(password);
+    const account = {
+      account_id: nextId(accounts, "account_id"),
+      role: "player",
+      label: displayName,
+      player_id: player.player_id,
+      login,
+      pass_hash: hash,
+      pass_salt: salt,
+      invite_code: null,
+      provider: "invite",
+      created_at: new Date().toISOString().slice(0, 10)
+    };
+    players.push(player);
+    accounts.push(account);
+    invite.uses = (Number(invite.uses) || 0) + 1;
+    if (!Array.isArray(invite.used_by)) invite.used_by = [];
+    invite.used_by.push({
+      account_id: account.account_id,
+      player_id: player.player_id,
+      login: account.login,
+      player_name: player.player_name,
+      display_name: player.display_name,
+      used_at: new Date().toISOString()
+    });
+    writeCollection("players", players);
+    writeCollection("accounts", accounts);
+    writeCollection("invites", invites);
+
+    const { token, expires } = createSession(account.account_id);
+    return send(res, 201, { ok: true, token, expires_at: expires.toISOString(), ...mePayload(account) }, {
+      "Set-Cookie": sessionCookie(req, token, SESSION_DAYS * 86400)
+    });
   }
 
   return send(res, 404, { error: "Unknown auth action" });
@@ -1175,7 +1524,7 @@ async function handleApi(req, res, pathname) {
   const collection = parts[0];
   const idPart = parts[1];
 
-  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions") {
+  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites") {
     return send(res, 404, { error: "Unknown collection" });
   }
 
@@ -1371,6 +1720,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Sunset Heresy server http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
   console.log(`Roles: visitor (public) · player · campaign_admin`);
-  console.log(`Login: POST /api/auth/login  ·  Me: GET /api/auth/me`);
+  console.log(`Login: POST /api/auth/login  ·  Signup: POST /api/auth/signup  ·  Me: GET /api/auth/me`);
   console.log(`Public data: /api/public/{players|forces|systems|games|meta}`);
 });

@@ -6,10 +6,11 @@
  *
  * Auth:
  *   await SH.login({ login, password })
- *   await SH.login({ invite_code, password })
+ *   await SH.signup({ invite_code, login, password, player_name, display_name, ... })
  *   await SH.logout()
  *   await SH.me()
  *   await SH.setPassword({ password, current_password })
+ *   await SH.listInvites() / issueInvite() / revokeInvite()   (campaign admin)
  *   SH.role
  *
  * Data:
@@ -396,6 +397,65 @@
     return meCache;
   }
 
+  async function signup(body) {
+    await probe();
+    if (mode !== "server") throw new Error("Sign up needs the live server");
+    const res = await fetch(apiBase() + "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Sign up failed");
+    if (data.token) {
+      token = data.token;
+      try {
+        localStorage.setItem("sh_session_token", token);
+      } catch (_) {}
+    }
+    meCache = data;
+    return data;
+  }
+
+  async function listInvites() {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/invites", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load invites");
+    return data;
+  }
+
+  async function issueInvite(body) {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/invites", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not create invite");
+    return data;
+  }
+
+  async function revokeInvite(inviteId) {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/invites/revoke", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify({ invite_id: inviteId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not revoke invite");
+    return data;
+  }
+
   async function createInvite(playerId) {
     await probe();
     const res = await fetch(apiBase() + "/api/auth/create-invite", {
@@ -565,10 +625,10 @@
 
   function escapeHtml(s) {
     return String(s ?? "")
-      .replace(/&/g, "&")
-      .replace(/</g, "<")
-      .replace(/>/g, ">")
-      .replace(/"/g, """);
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   async function applyNavPermissions() {
@@ -602,10 +662,14 @@
     getMeta,
     saveMeta,
     login,
+    signup,
     logout,
     me,
     setPassword,
     createInvite,
+    listInvites,
+    issueInvite,
+    revokeInvite,
     campaignStatus,
     advancePhase,
     setPhase,
