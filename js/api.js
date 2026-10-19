@@ -731,19 +731,96 @@
   function navAuthHtml() {
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
+      const active = navHere("account.html").trim();
       return (
-        '<a href="account.html" class="' +
-        navHere("account.html").trim() +
-        '">' +
+        '<a class="nav-account' +
+        (active ? " " + active : "") +
+        '" href="account.html">' +
         escapeHtml(name) +
-        "</a>" +
-        '<a href="feedback.html" class="' +
-        navHere("feedback.html").trim() +
-        '">Feedback</a>' +
-        '<a href="#" id="nav-logout">Log out</a>'
+        "</a>"
       );
     }
-    return '<a href="login.html"' + (navHere("login.html") ? ' class="active"' : "") + ">Log in</a>";
+    return '<a class="nav-login" href="login.html">Log in</a>';
+  }
+
+  function syncFeedbackLink() {
+    const menu = document.getElementById("site-menu");
+    if (!menu) return;
+    let link = menu.querySelector('a[href="feedback.html"]');
+    if (!isLoggedIn()) {
+      if (link) link.remove();
+      return;
+    }
+    if (!link) {
+      link = document.createElement("a");
+      link.href = "feedback.html";
+      link.textContent = "Feedback";
+      const logout = document.getElementById("nav-logout");
+      if (logout && logout.parentElement === menu) menu.insertBefore(link, logout);
+      else menu.appendChild(link);
+    }
+    const path = (location.pathname || "").split("/").pop() || "";
+    link.classList.toggle("active", path === "feedback.html");
+  }
+
+  function wireSiteMenu() {
+    const header = document.querySelector(".site-header");
+    const btn = document.querySelector(".nav-toggle");
+    const menu = document.getElementById("site-menu");
+    if (!header || !btn || !menu || btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    function setOpen(open) {
+      header.classList.toggle("menu-open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    }
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(!header.classList.contains("menu-open"));
+    });
+    menu.addEventListener("click", (e) => {
+      if (e.target.closest("a, button")) setOpen(false);
+    });
+    document.addEventListener("click", (e) => {
+      if (!header.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") setOpen(false);
+    });
+    const path = (location.pathname || "").split("/").pop() || "index.html";
+    menu.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href");
+      if (href === path || (path === "" && href === "index.html")) a.classList.add("active");
+    });
+  }
+
+  function labelResponsiveTables() {
+    document.querySelectorAll(".table-wrap table").forEach((table) => {
+      const headers = [...table.querySelectorAll("thead th")].map((th) => (th.textContent || "").trim());
+      table.querySelectorAll("tbody tr").forEach((tr) => {
+        [...tr.children].forEach((cell, i) => {
+          if (cell.tagName !== "TD") return;
+          const label = headers[i] || "";
+          if (cell.getAttribute("data-label") !== label) cell.setAttribute("data-label", label);
+        });
+      });
+    });
+  }
+
+  function bootChrome() {
+    wireSiteMenu();
+    labelResponsiveTables();
+    if (bootChrome.watching || !document.body) return;
+    bootChrome.watching = true;
+    let pending = false;
+    new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        labelResponsiveTables();
+      });
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
   function escapeHtml(s) {
@@ -765,52 +842,41 @@
     });
     const slot = document.getElementById("nav-auth");
     if (slot) slot.innerHTML = navAuthHtml();
+    syncFeedbackLink();
     const logoutBtn = document.getElementById("nav-logout");
     if (logoutBtn) {
-      logoutBtn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        await global.SH.logout();
-        location.href = "index.html";
-      });
+      logoutBtn.hidden = !isLoggedIn();
+      if (!logoutBtn.dataset.wired) {
+        logoutBtn.dataset.wired = "1";
+        logoutBtn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await global.SH.logout();
+          location.href = "index.html";
+        });
+      }
     }
     const badge = document.getElementById("mode-badge");
     if (badge) badge.innerHTML = statusBadgeHtml();
     refreshWaitingBadge();
   }
 
-  function ensureWaitingStyle() {
-    if (document.getElementById("sh-waiting-style")) return;
-    const style = document.createElement("style");
-    style.id = "sh-waiting-style";
-    style.textContent =
-      "#nav-waiting{display:inline-flex;align-items:center;gap:0.35rem}" +
-      ".nav-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.15rem;height:1.15rem;padding:0 0.32rem;border-radius:999px;background:#ef4444;color:#fff;font-size:0.68rem;font-weight:700;line-height:1}" +
-      ".nav-dot{width:0.45rem;height:0.45rem;border-radius:50%;background:#f0c040;box-shadow:0 0 0 2px rgba(240,192,64,0.25)}";
-    document.head.appendChild(style);
-  }
-
   async function refreshWaitingBadge() {
-    if (!isLoggedIn() || mode !== "server") return;
-    const nav = document.querySelector(".site-nav");
-    if (!nav) return;
-    ensureWaitingStyle();
+    const link = document.getElementById("nav-waiting");
+    if (!link) return;
+    if (!isLoggedIn() || mode !== "server") {
+      link.hidden = true;
+      return;
+    }
     let data = null;
     try {
       data = await inbox();
     } catch (_) {
+      link.hidden = true;
       return;
     }
-    let link = document.getElementById("nav-waiting");
-    if (!link) {
-      link = document.createElement("a");
-      link.id = "nav-waiting";
-      link.href = "actions.html";
-      const slot = document.getElementById("nav-auth");
-      if (slot) nav.insertBefore(link, slot);
-      else nav.appendChild(link);
-    }
+    link.hidden = false;
     const here = /(?:^|\/)actions\.html$/.test(location.pathname || "");
-    link.className = here ? "active" : "";
+    link.classList.toggle("active", here);
     link.replaceChildren();
     link.append(document.createTextNode("Actions"));
     const count = Number(data.action_count) || 0;
@@ -886,4 +952,7 @@
       return meCache;
     }
   };
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootChrome);
+  else bootChrome();
 })(typeof window !== "undefined" ? window : globalThis);

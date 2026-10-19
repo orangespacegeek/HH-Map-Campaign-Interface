@@ -166,7 +166,7 @@
       });
 
       g.appendChild(
-        svgEl("circle", { cx: p.x, cy: p.y, r: 30, fill: "transparent" })
+        svgEl("circle", { cx: p.x, cy: p.y, r: 36, fill: "transparent" })
       );
       g.appendChild(
         svgEl("circle", { class: "main", cx: p.x, cy: p.y, r: 20 })
@@ -506,6 +506,45 @@
     return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
+  function nodeNear(clientX, clientY) {
+    const el = document.elementFromPoint(clientX, clientY);
+    const direct = el && el.closest ? el.closest(".node") : null;
+    if (direct) return direct;
+    const pt = clientToSvg(clientX, clientY);
+    const rect = mapWrap.getBoundingClientRect();
+    const px = rect.width / (vb.w || 1);
+    const slop = 28 / (px || 1);
+    let best = null;
+    let bestD = slop;
+    document.querySelectorAll("#nodes .node").forEach((n) => {
+      const s = byId(Number(n.dataset.id));
+      if (!s) return;
+      const p = pos(s);
+      const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+      if (d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    });
+    return best;
+  }
+
+  function showMapProblem(message) {
+    const banner = document.getElementById("map-alert");
+    if (banner) {
+      banner.hidden = false;
+      banner.textContent = message;
+    }
+    const empty = document.getElementById("empty-msg");
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = message;
+    }
+    const detail = document.getElementById("detail");
+    if (detail) detail.hidden = true;
+    sheet.classList.add("open");
+  }
+
   function hideHint() {
     const hint = document.getElementById("map-hint");
     if (hint) hint.style.opacity = "0";
@@ -582,8 +621,7 @@
     pointers.delete(e.pointerId);
 
     if (isTap) {
-      const el = document.elementFromPoint(e.clientX, e.clientY);
-      const node = el && el.closest ? el.closest(".node") : null;
+      const node = nodeNear(e.clientX, e.clientY);
       if (node) selectSystem(Number(node.dataset.id));
       const now = Date.now();
       if (!node && now - lastTap < 300) {
@@ -670,15 +708,15 @@
   loadCampaign()
     .then(() => {
       if (!systems.length) {
-        document.getElementById("empty-msg").textContent =
-          "Could not load systems. Start the campaign server and refresh.";
+        showMapProblem("Could not load systems. Start the campaign server and refresh.");
         return;
       }
+      const banner = document.getElementById("map-alert");
+      if (banner) banner.hidden = true;
       renderMap();
     })
     .catch((err) => {
       console.error(err);
-      document.getElementById("empty-msg").textContent =
-        "Could not load campaign data.";
+      showMapProblem(err && err.message ? err.message : "Could not load campaign data.");
     });
 })();

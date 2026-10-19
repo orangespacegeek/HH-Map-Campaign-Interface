@@ -3,6 +3,20 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Edit your Sunset Heresy display name, contact, notes, and password." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – My account" />
+  <meta property="og:description" content="Edit your Sunset Heresy display name, contact, notes, and password." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – My account" />
+  <meta name="twitter:description" content="Edit your Sunset Heresy display name, contact, notes, and password." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – My account</title>
   <style>
     :root {
@@ -13,17 +27,6 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
     body { display: flex; flex-direction: column; min-height: 100vh; }
-    .site-header { flex-shrink: 0; background: #0e0e18; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; }
-    .site-header-inner { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.85rem; max-width: 1100px; margin: 0 auto; }
-    .site-header img { height: 36px; width: auto; }
-    .site-header .titles { flex: 1; min-width: 0; }
-    .site-header h1 { font-size: 1.05rem; font-weight: 600; color: var(--accent); line-height: 1.2; }
-    .site-header .sub { font-size: 0.7rem; color: var(--muted); }
-    .site-nav { display: flex; gap: 0.15rem; overflow-x: auto; padding: 0 0.5rem 0.45rem; max-width: 1100px; margin: 0 auto; scrollbar-width: none; }
-    .site-nav::-webkit-scrollbar { display: none; }
-    .site-nav a { flex-shrink: 0; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; white-space: nowrap; }
-    .site-nav a:hover { color: var(--text); background: var(--panel-2); }
-    .site-nav a.active { color: var(--accent); background: rgba(240, 192, 64, 0.12); }
     main { flex: 1; width: 100%; max-width: 560px; margin: 0 auto; padding: 1.1rem 1rem calc(2rem + var(--safe-bottom)); }
     h2 { color: var(--accent); font-size: 1.2rem; margin-bottom: 0.35rem; }
     .lead { color: var(--muted); font-size: 0.88rem; line-height: 1.45; margin-bottom: 1rem; }
@@ -47,27 +50,41 @@
     .who { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.8rem; line-height: 1.4; }
     a { color: var(--accent); }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
   <header class="site-header">
-    <div class="site-header-inner">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
         <h1>My account</h1>
-        <div class="sub">Sunset Heresy · Your profile</div>
-      </div>
-    </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
+        <span class="sub" id="header-sub">Name, contact, password</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
       <span id="nav-auth"></span>
-    </nav>
-  </header>
+    </div>
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
   <main>
     <h2>My account</h2>
     <p class="lead" id="lead">Sign in to edit the name other players see, your contact, and your password.</p>

@@ -711,9 +711,25 @@ function serveStatic(req, res, pathname) {
   }
   const ext = path.extname(fp).toLowerCase();
   const type = PUBLIC_TYPES[ext] || "application/octet-stream";
+  if (ext === ".html") {
+    const forwarded = req.headers["x-forwarded-proto"];
+    const proto = (forwarded ? String(forwarded).split(",")[0] : "http").trim() || "http";
+    const host = String(req.headers["x-forwarded-host"] || req.headers.host || "localhost").split(",")[0].trim();
+    const origin = proto + "://" + host;
+    const pathOnly = String(req.url || "/").split("?")[0];
+    let html = fs.readFileSync(fp, "utf8");
+    html = html.replaceAll("__OG_IMAGE__", origin + "/Sunset%20Heresy-ff-02.png").replaceAll("__OG_URL__", origin + pathOnly);
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff"
+    });
+    res.end(html);
+    return;
+  }
   res.writeHead(200, {
     "Content-Type": type,
-    "Cache-Control": ext === ".html" ? "no-store" : "public, max-age=3600",
+    "Cache-Control": "public, max-age=3600",
     "X-Content-Type-Options": "nosniff"
   });
   fs.createReadStream(fp).pipe(res);
