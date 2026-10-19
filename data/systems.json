@@ -12,7 +12,8 @@
     "sys_links": "2,3,4",
     "sys_notes": "Sub-sector capital",
     "sys_x": 400,
-    "sys_y": 270
+    "sys_y": 270,
+    "sys_durability": 5
   },
   {
     "sys_id": 2,
@@ -27,7 +28,8 @@
     "sys_links": "1,5",
     "sys_notes": "",
     "sys_x": 530,
-    "sys_y": 250
+    "sys_y": 250,
+    "sys_durability": 5
   },
   {
     "sys_id": 3,
@@ -42,7 +44,8 @@
     "sys_links": "1,6",
     "sys_notes": "",
     "sys_x": 650,
-    "sys_y": 230
+    "sys_y": 230,
+    "sys_durability": 5
   },
   {
     "sys_id": 4,
@@ -73,7 +76,8 @@
     "sys_links": "2,4,8",
     "sys_notes": "",
     "sys_x": 540,
-    "sys_y": 140
+    "sys_y": 140,
+    "sys_durability": 5
   },
   {
     "sys_id": 6,
@@ -88,7 +92,8 @@
     "sys_links": "3,7",
     "sys_notes": "",
     "sys_x": 430,
-    "sys_y": 70
+    "sys_y": 70,
+    "sys_durability": 5
   },
   {
     "sys_id": 7,
@@ -103,7 +108,8 @@
     "sys_links": "4,6,9",
     "sys_notes": "",
     "sys_x": 300,
-    "sys_y": 110
+    "sys_y": 110,
+    "sys_durability": 5
   },
   {
     "sys_id": 8,
@@ -118,7 +124,8 @@
     "sys_links": "5,10",
     "sys_notes": "Survey designation only",
     "sys_x": 160,
-    "sys_y": 70
+    "sys_y": 70,
+    "sys_durability": 5
   },
   {
     "sys_id": 9,
@@ -133,7 +140,8 @@
     "sys_links": "7,11",
     "sys_notes": "",
     "sys_x": 120,
-    "sys_y": 200
+    "sys_y": 200,
+    "sys_durability": 5
   },
   {
     "sys_id": 10,
@@ -148,7 +156,8 @@
     "sys_links": "8,12",
     "sys_notes": "",
     "sys_x": 140,
-    "sys_y": 320
+    "sys_y": 320,
+    "sys_durability": 5
   },
   {
     "sys_id": 11,
@@ -163,7 +172,8 @@
     "sys_links": "9,13",
     "sys_notes": "",
     "sys_x": 265,
-    "sys_y": 305
+    "sys_y": 305,
+    "sys_durability": 5
   },
   {
     "sys_id": 12,
@@ -178,7 +188,8 @@
     "sys_links": "10,13",
     "sys_notes": "",
     "sys_x": 300,
-    "sys_y": 390
+    "sys_y": 390,
+    "sys_durability": 5
   },
   {
     "sys_id": 13,
@@ -193,6 +204,7 @@
     "sys_links": "11,12",
     "sys_notes": "",
     "sys_x": 640,
-    "sys_y": 360
+    "sys_y": 360,
+    "sys_durability": 5
   }
 ]

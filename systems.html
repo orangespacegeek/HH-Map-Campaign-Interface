@@ -227,6 +227,7 @@
             <th>System</th>
             <th class="hide-sm">Type</th>
             <th>Power</th>
+            <th class="hide-sm">Dur</th>
             <th>Controller</th>
             <th class="hide-sm">Loyal / Traitor</th>
             <th></th>
@@ -264,8 +265,13 @@
           </div>
           <div class="form-group">
             <label for="f-power">Power Level</label>
-            <input type="number" id="f-power" min="1" max="5" value="3" />
+            <input type="number" id="f-power" min="0" max="5" value="3" />
           </div>
+        </div>
+        <div class="form-group">
+          <label for="f-dur">Durability</label>
+          <input type="number" id="f-dur" min="0" max="10" value="5" />
+          <div style="font-size:0.72rem;color:var(--muted);margin-top:0.25rem">Starts at 5. Each battle lowers it by 1. At 0, further battles lower Power. Fortify raises it, up to 10.</div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -388,6 +394,7 @@
           </td>
           <td class="hide-sm">${esc(s.sys_type)}</td>
           <td>${s.sys_power}</td>
+          <td class="hide-sm">${s.sys_durability != null && s.sys_durability !== "" ? s.sys_durability : 5}</td>
           <td><span class="badge ${controllerClass(s.sys_controller)}">${esc(s.sys_controller)}</span></td>
           <td class="hide-sm">${s.sys_loyal ?? 0} / ${s.sys_traitor ?? 0}</td>
           <td>${SH.canEditSystems() ? `<button type="button" data-edit="${s.sys_id}">Edit</button>` : ""}</td>
@@ -399,7 +406,7 @@
 
     // --- CSV parse / export / import ---
     const CSV_HEADERS = [
-      "sys_id","sys_name","sys_type","sys_power","sys_loyal","sys_traitor","sys_neut",
+      "sys_id","sys_name","sys_type","sys_power","sys_durability","sys_loyal","sys_traitor","sys_neut",
       "sys_controller","sys_struct","sys_links","sys_notes","sys_x","sys_y"
     ];
     let pendingImport = [];
@@ -473,6 +480,10 @@
           sys_links: get("sys_links") || null,
           sys_notes: get("sys_notes") || null
         };
+        if (idx("sys_durability") >= 0) {
+          const durRaw = get("sys_durability");
+          rec.sys_durability = durRaw === "" ? 5 : Number(durRaw);
+        }
         const x = get("sys_x"), y = get("sys_y");
         if (x !== "") rec.sys_x = Number(x);
         if (y !== "") rec.sys_y = Number(y);
@@ -587,6 +598,7 @@
       document.getElementById("f-name").value = s.sys_name;
       document.getElementById("f-type").value = s.sys_type || "Civilised";
       document.getElementById("f-power").value = s.sys_power ?? 3;
+      document.getElementById("f-dur").value = s.sys_durability != null && s.sys_durability !== "" ? s.sys_durability : 5;
       document.getElementById("f-loyal").value = s.sys_loyal ?? 0;
       document.getElementById("f-traitor").value = s.sys_traitor ?? 0;
       document.getElementById("f-controller").value = s.sys_controller || "Neutral";
@@ -619,6 +631,7 @@
         sys_name: document.getElementById("f-name").value.trim(),
         sys_type: document.getElementById("f-type").value,
         sys_power: Number(document.getElementById("f-power").value),
+        sys_durability: Number(document.getElementById("f-dur").value),
         sys_loyal: loyal,
         sys_traitor: traitor,
         sys_controller: controller,

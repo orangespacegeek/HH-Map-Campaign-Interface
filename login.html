@@ -134,7 +134,7 @@
       <div class="form-group">
         <label for="password">Password</label>
         <input id="password" type="password" autocomplete="current-password" />
-        <div class="hint">Players use the username and password from sign-up. The prototype campaign admin is <strong>admin</strong> / <strong>change-me</strong>. To force a new admin password on the host, set <strong>CAMPAIGN_ADMIN_PASSWORD</strong> and <strong>CAMPAIGN_ADMIN_FORCE_PASSWORD=1</strong>, restart, then remove the FORCE flag.</div>
+        <div class="hint">Players use the username and password they chose at sign-up. The campaign admin password is set on the server and is not shown here.</div>
       </div>
       <button type="button" class="primary" id="btn-admin">Sign in</button>
     </div>
@@ -219,8 +219,9 @@
       <div class="hint" style="margin-top:0.75rem">
         Lost the campaign admin password? On the host set
         <strong>CAMPAIGN_ADMIN_PASSWORD</strong> to the new value and
-        <strong>CAMPAIGN_ADMIN_FORCE_PASSWORD=1</strong>, restart the service,
-        sign in, then remove the FORCE flag so later UI changes are kept.
+        <strong>CAMPAIGN_ADMIN_FORCE_PASSWORD=1</strong>, then restart.
+        That stores the new password and signs every session out.
+        Remove the FORCE flag afterwards so a later change on this form is kept.
       </div>
     </div>
 

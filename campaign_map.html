@@ -304,9 +304,25 @@
     .forces .detail { color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
 
     .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .actions .action-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 0.5rem;
+    }
+    .actions select,
+    .actions input {
+      width: 100%;
+      background: #1a1a28;
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.45rem 0.55rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-family: inherit;
     }
     .actions button {
       background: #1e1e30;
@@ -319,6 +335,9 @@
       cursor: pointer;
       min-height: 44px;
     }
+    .action-note { font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+    .action-note.ok { color: #86efac; }
+    .action-note.err { color: #fca5a5; }
     .actions button:active {
       border-color: var(--accent);
       color: var(--accent);

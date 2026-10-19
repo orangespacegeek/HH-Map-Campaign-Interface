@@ -469,6 +469,26 @@
     return data;
   }
 
+  async function confirmGame(id) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/games/" + id + "/confirm", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include"
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "API " + res.status);
+      return data;
+    }
+    const listData = localRead("games");
+    const idx = listData.findIndex((g) => String(g.game_id) === String(id));
+    if (idx < 0) throw new Error("Not found");
+    listData[idx].result_state = "applied";
+    localWrite("games", listData);
+    return listData[idx];
+  }
+
   async function setPassword(body) {
     await probe();
     if (mode !== "server") throw new Error("Password change needs the live server");
@@ -666,6 +686,7 @@
     logout,
     me,
     setPassword,
+    confirmGame,
     createInvite,
     listInvites,
     issueInvite,

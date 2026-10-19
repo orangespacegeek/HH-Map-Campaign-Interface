@@ -13,8 +13,22 @@ npm start
 # open http://localhost:3847
 ```
 
-Default admin login: `admin` / `change-me`  
-(override with `CAMPAIGN_ADMIN_PASSWORD`)
+The campaign admin login defaults to `admin`. There is no published password.
+
+- Set `CAMPAIGN_ADMIN_PASSWORD` before the first boot to choose it.
+- If that variable is missing when the admin account is created, the server generates a random password and prints it once (`CAMPAIGN_ADMIN_INITIAL_PASSWORD` in the log). It is not written down anywhere else.
+- The old prototype password is rejected in production (`NODE_ENV=production` or Render).
+
+To rotate the admin password and sign everyone out, set both of these on the host and restart:
+
+```bash
+CAMPAIGN_ADMIN_PASSWORD=the-new-password
+CAMPAIGN_ADMIN_FORCE_PASSWORD=1
+```
+
+The restart re-hashes the admin account and deletes `data/sessions.json`, so existing cookies and API tokens stop working. Sign in with the new password, then remove `CAMPAIGN_ADMIN_FORCE_PASSWORD` so a later password change on the login page is not overwritten on the next deploy.
+
+`data/accounts.json`, `data/sessions.json`, and `data/invites.json` are created on first boot and are gitignored. Players, forces, systems, games, and meta stay in `data/` as the sample campaign. The static server only serves HTML pages, `js/`, `css/`, and images. `data/`, `schema/`, server source, and dotfiles are not on the web.
 
 ## Inviting testers
 
@@ -36,6 +50,8 @@ The invite table shows whether each code is active, used, revoked, or expired, a
 - Build: `npm install`
 - Start: `npm start`
 - For production persistence: attach a Render persistent disk mounted at `data/`
+- In the Render environment, set `CAMPAIGN_ADMIN_PASSWORD` to a new secret. To rotate the password that is already on the disk (and to throw away every logged-in session, including any token that was committed before accounts were gitignored), also set `CAMPAIGN_ADMIN_FORCE_PASSWORD` to `1`, redeploy, sign in, then delete the FORCE variable and redeploy again.
+- Git history still contains the old admin hash, invite code, and session tokens from before they were untracked. Treat them as public. Rotating the password and wiping sessions is required; rewriting history is a separate owner decision because this repo is public.
 
 ## Archive
 Previous TypeScript/Prisma/Vite build is on branch `archive/previous-build`.

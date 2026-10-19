@@ -45,6 +45,7 @@
   let forces = [];
   let players = [];
   let meta = {};
+  let actionStatus = null;
 
   const svg = document.getElementById("map");
   const starsG = document.getElementById("stars");
@@ -256,6 +257,7 @@
     document.getElementById("meta").innerHTML = `
       <dt>Type</dt><dd>${esc(s.sys_type)} (${esc(typeCode(s.sys_type))})</dd>
       <dt>Power</dt><dd>${esc(s.sys_power)}</dd>
+      <dt>Durability</dt><dd>${esc(s.sys_durability != null && s.sys_durability !== "" ? s.sys_durability : 5)}</dd>
       <dt>Controller</dt><dd><span class="badge ${ctrlClass}">${esc(s.sys_controller)}</span></dd>
       <dt>Loyal / Traitor</dt><dd>${esc(s.sys_loyal)} / ${esc(s.sys_traitor)}</dd>
       <dt>Infrastructure</dt><dd>${esc(s.sys_struct) || "—"}</dd>
@@ -280,14 +282,199 @@
         .join("");
     }
 
-    document.getElementById("action-buttons").innerHTML = `
-      <button type="button">Move</button>
-      <button type="button">Reinforce</button>
-      <button type="button">Fortify</button>
-      <button type="button">Generate Force</button>
-    `;
-
+    renderActions(s);
     sheet.classList.add("open");
+  }
+
+  function actionNote(text, kind) {
+    const p = document.createElement("p");
+    p.className = "action-note" + (kind ? " " + kind : "");
+    p.textContent = text;
+    return p;
+  }
+
+  function fillSelect(select, rows, valueKey, labelFn) {
+    rows.forEach((row) => {
+      const opt = document.createElement("option");
+      opt.value = row[valueKey];
+      opt.textContent = labelFn(row);
+      select.appendChild(opt);
+    });
+  }
+
+  function renderActions(sys) {
+    const box = document.getElementById("action-buttons");
+    box.replaceChildren();
+    const me = window.SH ? SH.user : null;
+    if (!me || !SH.isLoggedIn()) {
+      box.appendChild(actionNote("Log in to move, reinforce, fortify, or raise a force."));
+      return;
+    }
+
+    const phase = meta.phase || "";
+    const isAdmin = me.role === "campaign_admin";
+    const present = forcesAt(sys.sys_id).filter(
+      (f) => String(f.status || "active").toLowerCase() === "active"
+    );
+    const mine = present.filter(
+      (f) => isAdmin || Number(f.player_id) === Number(me.player_id)
+    );
+    const allegiance = isAdmin
+      ? (mine[0] && mine[0].allegiance) || (me.player && me.player.allegiance) || ""
+      : (me.player && me.player.allegiance) || (mine[0] && mine[0].allegiance) || "";
+
+    const msg = document.createElement("p");
+    msg.id = "action-msg";
+    msg.className = "action-note";
+    msg.hidden = true;
+
+    async function run(fn) {
+      msg.hidden = false;
+      msg.className = "action-note";
+      msg.textContent = "Working…";
+      try {
+        const data = await fn();
+        await refreshCampaignData();
+        if (byId(sys.sys_id)) selectSystem(sys.sys_id);
+        const note = document.getElementById("action-msg");
+        if (note) {
+          note.hidden = false;
+          note.className = "action-note ok";
+          note.textContent = (data && data.message) || "Done";
+        }
+      } catch (err) {
+        msg.hidden = false;
+        msg.className = "action-note err";
+        msg.textContent = err.message || "Action failed";
+      }
+    }
+
+    function actorExtra(force) {
+      if (!isAdmin) return {};
+      const extra = { spend: false };
+      if (force && force.player_id != null) extra.player_id = force.player_id;
+      return extra;
+    }
+
+    if (allegiance === "Blackshield") {
+      box.appendChild(actionNote("Blackshield players do not take allegiance actions on the map."));
+      return;
+    }
+
+    const controlled =
+      allegiance && String(sys.sys_controller || "") === allegiance;
+    const remaining =
+      actionStatus && actionStatus.actions_remaining != null
+        ? actionStatus.actions_remaining
+        : null;
+
+    if (phase === "Movement") {
+      if (!mine.length) {
+        box.appendChild(actionNote("You have no active force in this system to move."));
+        return;
+      }
+      const links = parseLinks(sys.sys_links);
+      if (!links.length) {
+        box.appendChild(actionNote("This system has no warp links to move along."));
+        return;
+      }
+      const forceSel = document.createElement("select");
+      forceSel.setAttribute("aria-label", "Force to move");
+      fillSelect(forceSel, mine, "force_id", (f) => f.force_name || "Force " + f.force_id);
+      const destSel = document.createElement("select");
+      destSel.setAttribute("aria-label", "Destination system");
+      links.forEach((id) => {
+        const other = byId(id);
+        const opt = document.createElement("option");
+        opt.value = id;
+        opt.textContent = other ? other.sys_name : "System " + id;
+        destSel.appendChild(opt);
+      });
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.textContent = "Move";
+      btn.addEventListener("click", () => {
+        const force = mine.find((f) => Number(f.force_id) === Number(forceSel.value)) || mine[0];
+        run(() => SH.moveForce(Number(forceSel.value), Number(destSel.value), actorExtra(force)));
+      });
+      if (remaining != null) box.appendChild(actionNote("Actions left this turn: " + remaining));
+      box.append(forceSel, destSel, btn, msg);
+      return;
+    }
+
+    if (phase === "Logistics") {
+      if (remaining != null) box.appendChild(actionNote("Actions left this turn: " + remaining));
+      const grid = document.createElement("div");
+      grid.className = "action-grid";
+
+      if (mine.length && controlled) {
+        const forceSel = document.createElement("select");
+        forceSel.setAttribute("aria-label", "Force to reinforce");
+        fillSelect(forceSel, mine, "force_id", (f) => f.force_name || "Force " + f.force_id);
+        const reinforce = document.createElement("button");
+        reinforce.type = "button";
+        reinforce.textContent = "Reinforce";
+        reinforce.addEventListener("click", () => {
+          const force = mine.find((f) => Number(f.force_id) === Number(forceSel.value)) || mine[0];
+          run(() => SH.reinforceForce(Number(forceSel.value), actorExtra(force)));
+        });
+        box.append(forceSel, reinforce);
+      } else if (!mine.length) {
+        box.appendChild(actionNote("Reinforce needs one of your active forces in this system."));
+      } else {
+        box.appendChild(actionNote("Reinforce is only available in a system your allegiance controls."));
+      }
+
+      if (mine.length && controlled) {
+        const fortify = document.createElement("button");
+        fortify.type = "button";
+        fortify.textContent = "Fortify";
+        fortify.addEventListener("click", () => {
+          run(() => SH.fortifySystem(Number(sys.sys_id), actorExtra(mine[0])));
+        });
+        grid.appendChild(fortify);
+      }
+
+      if (controlled) {
+        const generate = document.createElement("button");
+        generate.type = "button";
+        generate.textContent = "Generate Force";
+        generate.addEventListener("click", () => {
+          const fields = actorExtra(mine[0]);
+          const name = nameInput.value.trim();
+          if (name) fields.force_name = name;
+          if (isAdmin && !fields.player_id) {
+            msg.hidden = false;
+            msg.className = "action-note err";
+            msg.textContent = "Generate needs one of your forces here so the map knows which player is acting. Use the Forces page to raise one for another player.";
+            return;
+          }
+          run(() => SH.generateForce(Number(sys.sys_id), fields));
+        });
+        grid.appendChild(generate);
+      }
+
+      const nameInput = document.createElement("input");
+      nameInput.maxLength = 80;
+      nameInput.placeholder = "New force name (optional)";
+      nameInput.setAttribute("aria-label", "New force name");
+
+      if (!grid.childElementCount && !mine.length) {
+        box.appendChild(actionNote("No actions in this system until your allegiance controls it, or you have a force here."));
+      }
+      if (controlled) box.appendChild(nameInput);
+      if (grid.childElementCount) box.appendChild(grid);
+      box.appendChild(msg);
+      return;
+    }
+
+    box.appendChild(
+      actionNote(
+        "No map actions in the " +
+          (phase || "current") +
+          " phase. Logistics covers reinforce, fortify, and generate. Movement covers move."
+      )
+    );
   }
 
   document.getElementById("close-sheet").addEventListener("click", () => {
@@ -437,21 +624,34 @@
     { passive: false }
   );
 
+  async function refreshCampaignData() {
+    const [sysRows, forceRows, metaRow, status] = await Promise.all([
+      SH.list("systems"),
+      SH.list("forces"),
+      SH.getMeta(),
+      SH.actionsStatus().catch(() => null)
+    ]);
+    systems = Array.isArray(sysRows) ? sysRows : [];
+    forces = Array.isArray(forceRows) ? forceRows : [];
+    meta = metaRow && typeof metaRow === "object" ? metaRow : {};
+    actionStatus = status;
+    drawLinks();
+    drawNodes();
+    updateStatusBar();
+    updateHeader();
+  }
+
   async function loadCampaign() {
     await SH.probe();
-    const [sysRows, forceRows, playerRows, metaRow] = await Promise.all([
+    const [sysRows, forceRows, playerRows, metaRow, status] = await Promise.all([
       SH.list("systems"),
       SH.list("forces"),
       SH.list("players"),
-      SH.getMeta()
+      SH.getMeta(),
+      SH.actionsStatus().catch(() => null)
     ]);
+    actionStatus = status;
     systems = Array.isArray(sysRows) ? sysRows : [];
-    if (!systems.length) {
-      try {
-        const res = await fetch("data/systems.json", { cache: "no-store" });
-        if (res.ok) systems = await res.json();
-      } catch (_) {}
-    }
     forces = Array.isArray(forceRows) ? forceRows : [];
     players = Array.isArray(playerRows) ? playerRows : [];
     meta = metaRow && typeof metaRow === "object" ? metaRow : {};
