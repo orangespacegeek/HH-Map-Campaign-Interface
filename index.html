@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Port Maw" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Port Maw" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Campaign Tracker</title>
   <style>
     :root {
@@ -118,6 +132,33 @@
       color: var(--muted);
       line-height: 1.45;
     }
+    .join-banner {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.65rem;
+      align-items: center;
+      justify-content: space-between;
+      margin: -0.4rem 0 1.1rem;
+      padding: 0.85rem 1rem;
+      background: var(--panel);
+      border: 1px solid var(--accent);
+      border-radius: 12px;
+    }
+    .join-banner p { color: var(--text); font-size: 0.9rem; line-height: 1.4; flex: 1; min-width: 12rem; }
+    .join-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+    .join-actions a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 44px;
+      padding: 0 0.9rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    .join-primary { background: var(--accent); color: #0a0a12; }
+    .join-secondary { border: 1px solid var(--border); color: var(--text); }
     .hero-meta {
       display: flex;
       flex-direction: column;
@@ -363,33 +404,47 @@
       border-top: 1px solid var(--border);
     }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
   <header class="site-header">
-    <div class="site-header-inner">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
-        <h1>Sunset Heresy</h1>
-        <div class="sub">Port Maw Sub-Sector · Campaign Tracker</div>
-      </div>
-    </div>
-    <nav class="site-nav">
-      <a href="index.html" class="active">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Dashboard</h1>
+        <span class="sub" id="header-sub">Port Maw Sub-Sector</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
       <span id="nav-auth"></span>
-    </nav>
-  </header>
+    </div>
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html" class="active">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
 
   <main>
     <section class="hero">
       <div class="hero-text">
         <h2>Port Maw burns</h2>
-        <p>Track forces, systems, and battles across the sub-sector. This prototype uses local sample data — open any section to manage campaign state.</p>
+        <p>The Sunset Heresy campaign map, forces, and battle log. Visitors can look around. Players sign in to move forces and record results.</p>
       </div>
       <div class="hero-meta" id="hero-meta">
         <span><span class="k">Campaign turn</span><span class="v" id="meta-turn">—</span></span>
@@ -397,6 +452,14 @@
         <span><span class="k">Systems</span><span class="v" id="meta-systems">—</span></span>
       </div>
     </section>
+
+    <div class="join-banner" id="join-banner">
+      <p>Open the map from here, or sign in if you have a username. New commanders need an invite code from the campaign admin.</p>
+      <div class="join-actions">
+        <a class="join-primary" href="login.html">Sign in</a>
+        <a class="join-secondary" href="login.html?tab=signup">Sign up with an invite</a>
+      </div>
+    </div>
 
     <div class="turn-panel" id="turn-panel">
       <h3>Campaign turn control</h3>
@@ -641,6 +704,8 @@
         await SH.probe();
         await SH.applyNavPermissions();
         const isAdmin = SH.role === "campaign_admin";
+        const join = document.getElementById("join-banner");
+        if (join) join.hidden = SH.isLoggedIn();
         document.getElementById("turn-panel").classList.toggle("open", isAdmin);
         // Hide players card for non-admins
         document.querySelectorAll('a.card[href="player_admin.html"]').forEach((el) => {

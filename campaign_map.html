@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Campaign Map" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Campaign Map" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Port Maw Sub-Sector</title>
   <style>
     :root {
@@ -310,8 +324,11 @@
     }
     .actions .action-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 1fr;
       gap: 0.5rem;
+    }
+    @media (min-width: 420px) {
+      .actions .action-grid { grid-template-columns: 1fr 1fr; }
     }
     .actions select,
     .actions input {
@@ -346,14 +363,18 @@
 
     .close-btn {
       position: absolute;
-      top: 0.9rem;
-      right: 1rem;
+      top: 0.45rem;
+      right: 0.45rem;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       background: none;
       border: none;
       color: var(--muted);
-      font-size: 1.4rem;
+      font-size: 1.5rem;
       line-height: 1;
-      padding: 0.2rem;
       cursor: pointer;
     }
 
@@ -410,28 +431,41 @@
       .key-bar { display: none; }
     }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
-  <header>
-    <div class="header-row">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
-        <h1>Sunset Heresy</h1>
-        <div class="sub" id="header-sub">Port Maw</div>
-      </div>
-      <div id="mode-slot" class="mode-slot"></div>
-    </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html" class="active">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
+  <header class="site-header">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Map</h1>
+        <span class="sub" id="header-sub">Port Maw</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
       <span id="nav-auth"></span>
-    </nav>
-  </header>
+    </div>
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html" class="active">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
 
   <div class="status-bar" id="status-bar">
     <div class="status-labels" id="status-labels"></div>
@@ -440,6 +474,7 @@
 
   <div class="desktop-row" style="flex:1;display:flex;min-height:0;">
     <div class="map-wrap" id="map-wrap">
+      <div class="map-alert" id="map-alert" hidden></div>
       <svg id="map" viewBox="0 0 800 560" xmlns="http://www.w3.org/2000/svg">
         <g class="stars" id="stars"></g>
         <g id="links"></g>

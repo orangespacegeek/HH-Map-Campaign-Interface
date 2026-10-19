@@ -15,6 +15,10 @@ npm start
 
 The campaign admin login defaults to `admin`. There is no published password.
 
+The site is laid out for a phone first. People usually open a Discord link on a handset. The header (logo, Actions, sign-in) and the page menu are shared from `css/site-nav.css` on every page. Discord unfurls use the Open Graph tags and the Sunset Heresy logo (`Sunset Heresy-ff-02.png`, about 65KB). That logo is the only image; the map is drawn as SVG from the systems list, so the first load is the HTML, one stylesheet, the scripts, and that logo.
+
+On Render, a service that has gone to sleep can take half a minute or so to answer the first request. A Discord unfurl or a player opening the link during that wake-up may time out once and succeed on the next try. This app does not keep the service awake.
+
 - Set `CAMPAIGN_ADMIN_PASSWORD` before the first boot to choose it.
 - If that variable is missing when the admin account is created, the server generates a random password and prints it once (`CAMPAIGN_ADMIN_INITIAL_PASSWORD` in the log). It is not written down anywhere else.
 - The old prototype password is rejected in production (`NODE_ENV=production` or Render).
