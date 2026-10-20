@@ -135,10 +135,6 @@
   color: var(--text, #e8e0c8);
 }
 
-.header-end a.nav-account.active {
-  color: var(--accent, #f0c040);
-}
-
 .header-end a:hover,
 #nav-waiting:hover {
   background: rgba(240, 192, 64, 0.12);
@@ -147,6 +143,15 @@
 .header-end a.nav-login:hover {
   background: var(--accent, #f0c040);
   filter: brightness(1.06);
+}
+
+.header-end a.nav-account.active {
+  color: var(--accent, #f0c040);
+  background: rgba(240, 192, 64, 0.12);
+}
+
+.header-end a.nav-login.active {
+  box-shadow: inset 0 0 0 2px #0a0a12;
 }
 
 .nav-badge {
@@ -304,7 +309,14 @@
 
   body { overflow-x: hidden; }
 
-  input, select, textarea {
+  input,
+  select,
+  textarea,
+  .search,
+  .form-group input,
+  .form-group select,
+  .form-group textarea,
+  .actions textarea {
     font-size: 16px;
     min-height: 44px;
   }

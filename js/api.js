@@ -723,24 +723,16 @@
     return '<span class="mode-badge server">Live</span>';
   }
 
-  function navHere(file) {
-    const path = (typeof location !== "undefined" && location.pathname) || "";
-    return path === "/" + file || path.endsWith("/" + file) ? " active" : "";
-  }
-
   function navAuthHtml() {
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
-      const active = navHere("account.html").trim();
-      return (
-        '<a class="nav-account' +
-        (active ? " " + active : "") +
-        '" href="account.html">' +
-        escapeHtml(name) +
-        "</a>"
-      );
+      const onAccount = /(?:^|\/)account\.html$/.test(location.pathname);
+      const active = onAccount ? " active" : "";
+      return '<a class="nav-account' + active + '" href="account.html">' + escapeHtml(name) + "</a>";
     }
-    return '<a class="nav-login" href="login.html">Log in</a>';
+    const onLogin = /(?:^|\/)login\.html$/.test(location.pathname);
+    const active = onLogin ? " active" : "";
+    return '<a class="nav-login' + active + '" href="login.html">Log in</a>';
   }
 
   function syncFeedbackLink() {
@@ -825,11 +817,11 @@
 
   function escapeHtml(s) {
     return String(s ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
+      .replace(/\u0026/g, "\u0026amp;")
+      .replace(/\u003c/g, "\u0026lt;")
+      .replace(/\u003e/g, "\u0026gt;")
+      .replace(/\u0022/g, "\u0026quot;")
+      .replace(/\u0027/g, "\u0026#39;");
   }
 
   async function applyNavPermissions() {
