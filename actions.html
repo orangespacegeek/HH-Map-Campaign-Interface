@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Actions" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Actions" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
+  <title>Sunset Heresy – Actions</title>
+  <style>
+    :root {
+      --bg: #0a0a12; --panel: #12121e; --panel-2: #1a1a28; --border: #3a3a55;
+      --text: #e8e0c8; --muted: #9a9080; --accent: #f0c040;
+      --loyal: #3b82f6; --traitor: #ef4444; --success: #22c55e; --warn: #eab308;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+
+    .site-header { flex-shrink: 0; background: #0e0e18; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; }
+    .site-header-inner { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.85rem; max-width: 1100px; margin: 0 auto; }
+    .site-header img { height: 36px; width: auto; }
+    .site-header .titles { flex: 1; min-width: 0; }
+    .site-header h1 { font-size: 1.05rem; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; line-height: 1.2; }
+    .site-header .sub { font-size: 0.7rem; color: var(--muted); }
+    .site-nav { display: flex; gap: 0.15rem; overflow-x: auto; padding: 0 0.5rem 0.45rem; max-width: 1100px; margin: 0 auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .site-nav::-webkit-scrollbar { display: none; }
+    .site-nav a { flex-shrink: 0; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; white-space: nowrap; }
+    .site-nav a:hover { color: var(--text); background: var(--panel-2); }
+    .site-nav a.active { color: var(--accent); background: rgba(240, 192, 64, 0.12); }
+
+    main { flex: 1; padding: 1rem; max-width: 1100px; width: 100%; margin: 0 auto; padding-bottom: calc(1.5rem + var(--safe-bottom)); }
+    h2.section {
+      font-size: 0.78rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em;
+      margin: 1.15rem 0 0.55rem;
+    }
+    h2.section:first-child { margin-top: 0; }
+    .lead { color: var(--muted); font-size: 0.88rem; line-height: 1.45; margin-bottom: 0.4rem; }
+    .stack { display: flex; flex-direction: column; gap: 0.7rem; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 0.9rem 1rem;
+    }
+    .card.needs { border-color: #7f1d1d; }
+    .card.disputed { border-color: #854d0e; }
+    .card .top { display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: center; margin-bottom: 0.4rem; }
+    .card .title { font-weight: 600; font-size: 1rem; }
+    .card .meta { font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
+    .card .meta strong { color: var(--text); font-weight: 600; }
+    .note { margin-top: 0.45rem; font-size: 0.82rem; font-style: italic; }
+    .badge { display: inline-block; padding: 0.18rem 0.5rem; border-radius: 4px; font-size: 0.68rem; font-weight: 600; }
+    .badge.pending { background: #422006; color: var(--warn); }
+    .badge.applied, .badge.done { background: #14532d; color: var(--success); }
+    .badge.disputed { background: #7f1d1d; color: #fecaca; }
+    .badge.result { background: #1a1a28; color: var(--text); border: 1px solid var(--border); }
+    .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: stretch; }
+    .actions textarea {
+      flex: 1 1 100%;
+      min-height: 2.6rem;
+      background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 0.55rem 0.7rem; border-radius: 8px; font: inherit; font-size: 0.88rem; resize: vertical;
+    }
+    .actions textarea:focus { outline: none; border-color: var(--accent); }
+    button {
+      appearance: none; border: 1px solid var(--border); background: var(--panel-2); color: var(--text);
+      padding: 0.55rem 0.9rem; border-radius: 8px; font-size: 0.88rem; font-weight: 600; cursor: pointer;
+      min-height: 44px;
+    }
+    button:hover { border-color: var(--accent); }
+    button.primary { background: var(--accent); color: #0a0a12; border-color: var(--accent); }
+    button.danger { border-color: #ef4444; color: #fecaca; background: #3f1515; }
+    button:disabled { opacity: 0.55; cursor: default; }
+    .msg {
+      padding: 0.7rem 0.85rem; border-radius: 10px; background: var(--panel); border: 1px solid var(--border);
+      font-size: 0.88rem; line-height: 1.4;
+    }
+    .msg .when { display: block; margin-top: 0.2rem; font-size: 0.72rem; color: var(--muted); }
+    .msg.unread { border-color: rgba(240, 192, 64, 0.45); }
+    .empty { color: var(--muted); font-size: 0.88rem; padding: 0.4rem 0 0.2rem; }
+    .toast {
+      position: fixed; bottom: calc(1.2rem + var(--safe-bottom)); left: 50%;
+      transform: translateX(-50%) translateY(120%);
+      background: var(--panel-2); border: 1px solid var(--accent); color: var(--text);
+      padding: 0.65rem 1.1rem; border-radius: 8px; font-size: 0.85rem; z-index: 60; transition: transform 0.25s;
+      max-width: calc(100% - 2rem); text-align: center;
+    }
+    .toast.show { transform: translateX(-50%) translateY(0); }
+    .gate { padding: 1.2rem; text-align: center; color: var(--muted); }
+    .gate a { color: var(--accent); }
+    @media (max-width: 640px) {
+      .actions button { flex: 1 1 100%; }
+    }
+  </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
+</head>
+<body>
+  <header class="site-header">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Actions</h1>
+        <span class="sub" id="header-sub">Waiting on you</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
+    </div>
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
+
+  <main id="main">
+    <p class="lead" id="intro">Results a player submits stay pending until the other commander confirms them. A dispute leaves the result unapplied and flags it for the campaign admin.</p>
+    <div id="content"></div>
+  </main>
+  <div class="toast" id="toast" role="status"></div>
+  <script src="js/api.js"></script>
+  <script>
+    const content = document.getElementById("content");
+    const toast = document.getElementById("toast");
+
+    function esc(s) {
+      return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    }
+    function showToast(msg) {
+      toast.textContent = msg;
+      toast.classList.add("show");
+      clearTimeout(showToast._t);
+      showToast._t = setTimeout(() => toast.classList.remove("show"), 2400);
+    }
+    function when(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+    function resultLabel(r) {
+      return ({
+        attacker_win: "Attacker win",
+        defender_win: "Defender win",
+        draw: "Draw",
+        conceded: "Conceded",
+        in_progress: "In progress"
+      })[r] || r || "Result";
+    }
+    function stateLabel(state) {
+      if (state === "pending") return "Pending confirmation";
+      if (state === "disputed") return "Disputed";
+      if (state === "applied") return "Confirmed";
+      return state || "";
+    }
+    function stateClass(state) {
+      if (state === "applied") return "applied";
+      if (state === "disputed") return "disputed";
+      return "pending";
+    }
+
+    function cardMarkup(item) {
+      const score = (item.attacker_vp ?? "—") + " – " + (item.defender_vp ?? "—");
+      const submitted = item.proposed_by_name
+        ? esc(item.proposed_by_name) + (item.proposed_at ? " · " + esc(when(item.proposed_at)) : "")
+        : "—";
+      const dispute = item.result_state === "disputed"
+        ? `<div class="note">Disputed by <strong>${esc(item.disputed_by_name || "a commander")}</strong>${item.disputed_at ? " · " + esc(when(item.disputed_at)) : ""}${item.dispute_note ? " — " + esc(item.dispute_note) : ""}</div>`
+        : "";
+      return `
+        <div class="top">
+          <span class="title">${esc(item.mission || "Battle")} · ${esc(item.system_name)}</span>
+          <span class="badge result">${esc(resultLabel(item.result))}</span>
+          <span class="badge ${stateClass(item.result_state)}">${esc(stateLabel(item.result_state))}</span>
+        </div>
+        <div class="meta">
+          Turn ${esc(item.turn ?? "—")} · ${esc(score)} VP<br>
+          Attacker <strong>${esc(item.attacker_name || "—")}</strong> · ${esc(item.attacker_force || "no force")}<br>
+          Defender <strong>${esc(item.defender_name || "—")}</strong> · ${esc(item.defender_force || "no force")}<br>
+          Submitted by ${submitted}
+        </div>
+        ${item.notes ? `<div class="note">${esc(item.notes)}</div>` : ""}
+        ${dispute}
+      `;
+    }
+
+    function actionButtons(item) {
+      if (item.duty === "confirm") {
+        return `
+          <div class="actions">
+            <textarea maxlength="300" placeholder="Optional note if you dispute this result" data-note="${item.game_id}"></textarea>
+            <button type="button" class="primary" data-act="confirm" data-id="${item.game_id}">Confirm</button>
+            <button type="button" class="danger" data-act="dispute" data-id="${item.game_id}">Dispute</button>
+          </div>`;
+      }
+      if (item.duty === "admin") {
+        return `
+          <div class="actions">
+            <button type="button" class="primary" data-act="apply" data-id="${item.game_id}">Apply result</button>
+            <button type="button" class="danger" data-act="void" data-id="${item.game_id}">Void result</button>
+          </div>`;
+      }
+      return "";
+    }
+
+    function section(title, inner) {
+      return `<h2 class="section">${esc(title)}</h2>${inner}`;
+    }
+
+    function render(data) {
+      const needs = (data.actions || []).filter((a) => a.duty === "confirm");
+      const admin = (data.actions || []).filter((a) => a.duty === "admin");
+      const mine = data.mine || [];
+      const notes = data.notifications || [];
+      let html = "";
+
+      html += section(
+        "Needs your confirmation",
+        needs.length
+          ? `<div class="stack">${needs.map((item) => `<article class="card needs" data-game="${item.game_id}">${cardMarkup(item)}${actionButtons(item)}</article>`).join("")}</div>`
+          : `<p class="empty">Nothing is waiting on you.</p>`
+      );
+
+      if (SH.role === "campaign_admin") {
+        html += section(
+          "Admin queue",
+          admin.length
+            ? `<div class="stack">${admin.map((item) => `<article class="card ${item.result_state === "disputed" ? "disputed" : "needs"}" data-game="${item.game_id}">${cardMarkup(item)}${actionButtons(item)}</article>`).join("")}</div>`
+            : `<p class="empty">No pending or disputed results.</p>`
+        );
+      }
+
+      html += section(
+        "Results you submitted",
+        mine.length
+          ? `<div class="stack">${mine.map((item) => `<article class="card">${cardMarkup(item)}</article>`).join("")}</div>`
+          : `<p class="empty">You have not submitted a result yet.</p>`
+      );
+
+      html += section(
+        "Messages",
+        notes.length
+          ? `<div class="stack">${notes.map((n) => `<div class="msg${n.read ? "" : " unread"}">${esc(n.text)}<span class="when">${esc(when(n.created_at))}</span></div>`).join("")}</div>`
+          : `<p class="empty">No messages yet.</p>`
+      );
+
+      content.innerHTML = html;
+    }
+
+    async function reload() {
+      const data = await SH.inbox();
+      render(data);
+      await SH.refreshWaitingBadge();
+      return data;
+    }
+
+    content.addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-act]");
+      if (!btn || btn.disabled) return;
+      const id = btn.dataset.id;
+      const act = btn.dataset.act;
+      const card = btn.closest("article");
+      if (act === "void" && !confirm("Void this result? Campaign changes from it will be undone.")) return;
+      const buttons = card ? card.querySelectorAll("button") : [btn];
+      buttons.forEach((b) => { b.disabled = true; });
+      try {
+        if (act === "confirm" || act === "apply") {
+          await SH.confirmGame(id);
+          showToast(act === "apply" ? "Result applied" : "Result confirmed");
+        } else if (act === "dispute") {
+          const noteEl = card && card.querySelector("[data-note]");
+          await SH.disputeGame(id, noteEl ? noteEl.value : "");
+          showToast("Result disputed");
+        } else if (act === "void") {
+          await SH.voidGame(id);
+          showToast("Result voided");
+        }
+        await reload();
+      } catch (err) {
+        showToast(err.message || "That did not go through");
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    });
+
+    (async () => {
+      try {
+        await SH.probe();
+        await SH.applyNavPermissions();
+        if (!SH.isLoggedIn()) {
+          content.innerHTML = `<p class="gate">Sign in to see results waiting on you. <a href="login.html">Log in</a></p>`;
+          return;
+        }
+        await SH.markInboxRead();
+        await reload();
+      } catch (err) {
+        content.innerHTML = `<p class="gate">${esc(err.message || "Could not load actions")}</p>`;
+      }
+    })();
+  </script>
+</body>
+</html>

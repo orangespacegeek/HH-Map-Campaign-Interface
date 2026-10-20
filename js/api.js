@@ -6,10 +6,11 @@
  *
  * Auth:
  *   await SH.login({ login, password })
- *   await SH.login({ invite_code, password })
+ *   await SH.signup({ invite_code, login, password, player_name, display_name, ... })
  *   await SH.logout()
  *   await SH.me()
  *   await SH.setPassword({ password, current_password })
+ *   await SH.listInvites() / issueInvite() / revokeInvite()   (campaign admin)
  *   SH.role
  *
  * Data:
@@ -396,6 +397,65 @@
     return meCache;
   }
 
+  async function signup(body) {
+    await probe();
+    if (mode !== "server") throw new Error("Sign up needs the live server");
+    const res = await fetch(apiBase() + "/api/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Sign up failed");
+    if (data.token) {
+      token = data.token;
+      try {
+        localStorage.setItem("sh_session_token", token);
+      } catch (_) {}
+    }
+    meCache = data;
+    return data;
+  }
+
+  async function listInvites() {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/invites", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load invites");
+    return data;
+  }
+
+  async function issueInvite(body) {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/invites", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not create invite");
+    return data;
+  }
+
+  async function revokeInvite(inviteId) {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/invites/revoke", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify({ invite_id: inviteId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not revoke invite");
+    return data;
+  }
+
   async function createInvite(playerId) {
     await probe();
     const res = await fetch(apiBase() + "/api/auth/create-invite", {
@@ -406,6 +466,59 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Invite failed");
+    return data;
+  }
+
+  async function confirmGame(id) {
+    return postGameAction(id, "confirm");
+  }
+
+  async function disputeGame(id, note) {
+    return postGameAction(id, "dispute", { note: note || "" });
+  }
+
+  async function voidGame(id) {
+    return postGameAction(id, "void");
+  }
+
+  async function postGameAction(id, action, body) {
+    await probe();
+    if (mode !== "server") throw new Error("This needs the live server");
+    const res = await fetch(apiBase() + "/api/games/" + id + "/" + action, {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "API " + res.status);
+    return data;
+  }
+
+  async function inbox() {
+    await probe();
+    if (mode !== "server") return { actions: [], mine: [], notifications: [], action_count: 0, unread_count: 0 };
+    const res = await fetch(apiBase() + "/api/inbox", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load actions");
+    return data;
+  }
+
+  async function markInboxRead() {
+    await probe();
+    if (mode !== "server") return { ok: true };
+    const res = await fetch(apiBase() + "/api/inbox/read", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: "{}"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not update messages");
     return data;
   }
 
@@ -557,12 +670,72 @@
 
   function navAuthHtml() {
     const onLogin = /(?:^|\/)login\.html$/.test(location.pathname);
-    const active = onLogin ? ' class="active"' : "";
+    const active = onLogin ? " active" : "";
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
-      return '<a href="login.html"' + active + ">" + escapeHtml(name) + '</a><a href="#" id="nav-logout">Log out</a>';
+      return '<a class="nav-account' + active + '" href="login.html">' + escapeHtml(name) + "</a>";
     }
-    return '<a href="login.html"' + active + ">Log in</a>";
+    return '<a class="nav-login' + active + '" href="login.html">Log in</a>';
+  }
+
+  function wireSiteMenu() {
+    const header = document.querySelector(".site-header");
+    const btn = document.querySelector(".nav-toggle");
+    const menu = document.getElementById("site-menu");
+    if (!header || !btn || !menu || btn.dataset.wired) return;
+    btn.dataset.wired = "1";
+    function setOpen(open) {
+      header.classList.toggle("menu-open", open);
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+    }
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      setOpen(!header.classList.contains("menu-open"));
+    });
+    menu.addEventListener("click", (e) => {
+      if (e.target.closest("a, button")) setOpen(false);
+    });
+    document.addEventListener("click", (e) => {
+      if (!header.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") setOpen(false);
+    });
+    const path = (location.pathname || "").split("/").pop() || "index.html";
+    menu.querySelectorAll("a[href]").forEach((a) => {
+      const href = a.getAttribute("href");
+      if (href === path || (path === "" && href === "index.html")) a.classList.add("active");
+    });
+  }
+
+  function labelResponsiveTables() {
+    document.querySelectorAll(".table-wrap table").forEach((table) => {
+      const headers = [...table.querySelectorAll("thead th")].map((th) => (th.textContent || "").trim());
+      table.querySelectorAll("tbody tr").forEach((tr) => {
+        [...tr.children].forEach((cell, i) => {
+          if (cell.tagName !== "TD") return;
+          const label = headers[i] || "";
+          if (cell.getAttribute("data-label") !== label) cell.setAttribute("data-label", label);
+        });
+      });
+    });
+  }
+
+  function bootChrome() {
+    wireSiteMenu();
+    labelResponsiveTables();
+    if (bootChrome.watching || !document.body) return;
+    bootChrome.watching = true;
+    let pending = false;
+    new MutationObserver(() => {
+      if (pending) return;
+      pending = true;
+      requestAnimationFrame(() => {
+        pending = false;
+        labelResponsiveTables();
+      });
+    }).observe(document.body, { childList: true, subtree: true });
   }
 
   function escapeHtml(s) {
@@ -585,14 +758,54 @@
     if (slot) slot.innerHTML = navAuthHtml();
     const logoutBtn = document.getElementById("nav-logout");
     if (logoutBtn) {
-      logoutBtn.addEventListener("click", async (e) => {
-        e.preventDefault();
-        await global.SH.logout();
-        location.href = "index.html";
-      });
+      logoutBtn.hidden = !isLoggedIn();
+      if (!logoutBtn.dataset.wired) {
+        logoutBtn.dataset.wired = "1";
+        logoutBtn.addEventListener("click", async (e) => {
+          e.preventDefault();
+          await global.SH.logout();
+          location.href = "index.html";
+        });
+      }
     }
     const badge = document.getElementById("mode-badge");
     if (badge) badge.innerHTML = statusBadgeHtml();
+    refreshWaitingBadge();
+  }
+
+  async function refreshWaitingBadge() {
+    const link = document.getElementById("nav-waiting");
+    if (!link) return;
+    if (!isLoggedIn() || mode !== "server") {
+      link.hidden = true;
+      return;
+    }
+    let data = null;
+    try {
+      data = await inbox();
+    } catch (_) {
+      link.hidden = true;
+      return;
+    }
+    link.hidden = false;
+    const here = /(?:^|\/)actions\.html$/.test(location.pathname || "");
+    link.classList.toggle("active", here);
+    link.replaceChildren();
+    link.append(document.createTextNode("Actions"));
+    const count = Number(data.action_count) || 0;
+    const unread = Number(data.unread_count) || 0;
+    if (count > 0) {
+      const pill = document.createElement("span");
+      pill.className = "nav-badge";
+      pill.textContent = count > 9 ? "9+" : String(count);
+      link.appendChild(pill);
+    } else if (unread > 0) {
+      const dot = document.createElement("span");
+      dot.className = "nav-dot";
+      dot.title = "New messages";
+      link.appendChild(dot);
+    }
+    link.setAttribute("aria-label", count > 0 ? "Actions waiting, " + count : "Actions");
   }
 
   global.SH = {
@@ -604,10 +817,20 @@
     getMeta,
     saveMeta,
     login,
+    signup,
     logout,
     me,
     setPassword,
+    confirmGame,
+    disputeGame,
+    voidGame,
+    inbox,
+    markInboxRead,
+    refreshWaitingBadge,
     createInvite,
+    listInvites,
+    issueInvite,
+    revokeInvite,
     campaignStatus,
     advancePhase,
     setPhase,
@@ -638,4 +861,7 @@
       return meCache;
     }
   };
+
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootChrome);
+  else bootChrome();
 })(typeof window !== "undefined" ? window : globalThis);

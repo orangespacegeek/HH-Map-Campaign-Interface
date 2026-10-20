@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Players" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Players" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Player Admin</title>
   <style>
     :root {
@@ -268,6 +282,62 @@
     .badge.player { background: #1e293b; color: #94a3b8; }
     .badge.marshal { background: #312e81; color: #a5b4fc; }
     .badge.admin { background: #3b1d0b; color: var(--accent); }
+    .badge.used { background: #3f3f46; color: #a1a1aa; }
+    .badge.revoked { background: #3f1515; color: #fca5a5; }
+    .badge.expired { background: #422006; color: var(--warn); }
+
+    .invite-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1.1rem;
+    }
+    .invite-panel h2 {
+      font-size: 1rem;
+      color: var(--accent);
+      margin-bottom: 0.25rem;
+    }
+    .invite-form {
+      display: grid;
+      grid-template-columns: 1.5fr 0.7fr 0.55fr auto;
+      gap: 0.7rem;
+      align-items: end;
+      margin: 0.85rem 0;
+    }
+    .invite-form .form-group { margin-bottom: 0; }
+    .invite-fresh {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
+      background: var(--panel-2);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 0.75rem 0.9rem;
+      margin-bottom: 0.85rem;
+    }
+    .invite-fresh .label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .invite-fresh .code,
+    .invite-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.04em;
+    }
+    .invite-fresh .code {
+      font-size: 1.15rem;
+      color: var(--accent);
+      margin-top: 0.15rem;
+    }
+    .invite-note {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 0.15rem;
+    }
 
     .row-actions {
       display: flex;
@@ -434,44 +504,105 @@
     }
     .toast.show { transform: translateX(-50%) translateY(0); }
 
+    @media (max-width: 800px) {
+      .invite-form { grid-template-columns: 1fr 1fr; }
+      .invite-form button { grid-column: 1 / -1; }
+    }
     @media (max-width: 640px) {
       th.hide-sm, td.hide-sm { display: none; }
       .form-row { grid-template-columns: 1fr; }
+      .invite-form { grid-template-columns: 1fr; }
       main { padding: 0.75rem; }
     }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
-  <header>
-    <div class="header-row">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div>
-        <h1>Player Admin</h1>
-        <div class="sub">Sunset Heresy campaign</div>
-      </div>
-      <div class="header-actions">
-        <button type="button" class="ghost" id="btn-export" title="Download players as CSV">Export</button>
-        <button type="button" class="primary" id="btn-add">+ Player</button>
-      </div>
+  <header class="site-header">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Players</h1>
+        <span class="sub" id="header-sub">Campaign admin</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
     </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" class="active" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
-      <span id="nav-auth"><a href="login.html">Log in</a></span>
-    </nav>
-  </header>
-
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" class="active" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
   <main>
     <div id="access-denied" class="empty" hidden style="padding:2rem;text-align:center">
       <p style="margin-bottom:0.75rem">Campaign admin login required to manage players.</p>
       <p><a href="login.html" style="color:var(--accent)">Log in</a></p>
     </div>
     <div id="admin-body">
+    <div class="page-tools">
+      <button type="button" class="ghost" id="btn-export" title="Download players as CSV">Export</button>
+      <button type="button" class="primary" id="btn-add">+ Player</button>
+    </div>
+    <section class="invite-panel" id="invite-panel">
+      <h2>Tester invites</h2>
+      <p class="form-hint">Generate a code and send it to the tester. They sign up at <strong>Log in → Sign up</strong> and enter their own username, password, and player details. You do not create their account first.</p>
+      <div class="invite-form">
+        <div class="form-group">
+          <label for="inv-note">Note</label>
+          <input id="inv-note" maxlength="120" placeholder="Weekend test group" />
+        </div>
+        <div class="form-group">
+          <label for="inv-days">Expires in days</label>
+          <input id="inv-days" type="number" min="1" max="365" placeholder="Never" />
+        </div>
+        <div class="form-group">
+          <label for="inv-uses">Use limit</label>
+          <input id="inv-uses" type="number" min="1" max="25" value="1" />
+        </div>
+        <button type="button" class="primary" id="btn-issue">Generate code</button>
+      </div>
+      <div id="invite-fresh" class="invite-fresh" hidden>
+        <div>
+          <div class="label">New code — share this with the tester</div>
+          <div class="code" id="invite-fresh-code"></div>
+        </div>
+        <button type="button" id="invite-fresh-copy">Copy</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Status</th>
+              <th class="hide-sm">Uses</th>
+              <th class="hide-sm">Expires</th>
+              <th>Used by</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="invite-tbody"></tbody>
+        </table>
+        <div class="empty" id="invite-empty" hidden>No invite codes yet.</div>
+      </div>
+    </section>
+
     <div class="stats" id="stats"></div>
 
     <div class="toolbar">
@@ -608,6 +739,7 @@
 
     let players = [];
     let forces = [];
+    let invites = [];
     let filter = "all";
     let searchQ = "";
     let editingId = null;
@@ -615,6 +747,14 @@
     async function reload() {
       players = await SH.list("players");
       forces = await SH.list("forces");
+      try {
+        const data = await SH.listInvites();
+        invites = data.invites || [];
+      } catch (err) {
+        invites = [];
+        showToast(err.message || "Could not load invites");
+      }
+      renderInvites();
       renderTable();
       const badgeHost = document.querySelector(".header-actions");
       if (badgeHost && !document.getElementById("mode-badge")) {
@@ -668,6 +808,53 @@
       toast.classList.add("show");
       clearTimeout(showToast._t);
       showToast._t = setTimeout(() => toast.classList.remove("show"), 2200);
+    }
+
+    function formatWhen(iso) {
+      if (!iso) return "Never";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    }
+
+    function renderInvites() {
+      const tbody = document.getElementById("invite-tbody");
+      const empty = document.getElementById("invite-empty");
+      tbody.innerHTML = "";
+      empty.hidden = invites.length > 0;
+      invites.forEach((inv) => {
+        const used = (inv.used_by || []).map((u) => {
+          const who = u.display_name || u.player_name || "player";
+          return escapeHtml(u.login || who) + " (" + escapeHtml(who) + ")";
+        }).join(", ");
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>
+            <span class="invite-code">${escapeHtml(inv.code_display || inv.code)}</span>
+            ${inv.note ? `<div class="invite-note">${escapeHtml(inv.note)}</div>` : ""}
+          </td>
+          <td><span class="badge ${escapeHtml(inv.status)}">${escapeHtml(inv.status)}</span></td>
+          <td class="hide-sm">${Number(inv.uses) || 0} / ${Number(inv.max_uses) || 1}</td>
+          <td class="hide-sm">${escapeHtml(formatWhen(inv.expires_at))}</td>
+          <td>${used || "—"}</td>
+          <td>
+            <div class="row-actions">
+              <button type="button" data-copy-invite="${escapeHtml(inv.code_display || inv.code)}">Copy</button>
+              ${inv.status === "active" ? `<button type="button" class="danger" data-revoke="${inv.invite_id}">Revoke</button>` : ""}
+            </div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function copyInvite(code) {
+      try {
+        await navigator.clipboard.writeText(code);
+        showToast("Invite code copied");
+      } catch (_) {
+        showToast(code);
+      }
     }
 
     function renderStats() {
@@ -725,7 +912,6 @@
           <td>
             <div class="row-actions">
               <button type="button" data-edit="${p.player_id}">Edit</button>
-              <button type="button" data-invite="${p.player_id}">Invite</button>
             </div>
           </td>
         `;
@@ -860,17 +1046,58 @@
     document.getElementById("btn-delete").addEventListener("click", deletePlayer);
     document.getElementById("btn-export").addEventListener("click", exportCsv);
 
-    tbody.addEventListener("click", async (e) => {
-      const inviteBtn = e.target.closest("[data-invite]");
-      if (inviteBtn) {
-        try {
-          const result = await SH.createInvite(Number(inviteBtn.dataset.invite));
-          alert(`Invite code for player #${result.player_id}:\n\n${result.invite_code}\n\nShare this once. They set a password on first login.`);
-        } catch (err) {
-          showToast(err.message || "Invite failed");
-        }
+    document.getElementById("btn-issue").addEventListener("click", async () => {
+      const btn = document.getElementById("btn-issue");
+      const daysRaw = document.getElementById("inv-days").value.trim();
+      const body = {
+        note: document.getElementById("inv-note").value.trim(),
+        max_uses: Number(document.getElementById("inv-uses").value || 1)
+      };
+      if (daysRaw) body.expires_in_days = Number(daysRaw);
+      btn.disabled = true;
+      try {
+        const result = await SH.issueInvite(body);
+        const invite = result.invite || {};
+        const fresh = document.getElementById("invite-fresh");
+        fresh.hidden = false;
+        document.getElementById("invite-fresh-code").textContent = invite.code_display || invite.code || "";
+        fresh.dataset.code = invite.code_display || invite.code || "";
+        showToast("Invite code created");
+        await reload();
+      } catch (err) {
+        showToast(err.message || "Could not create invite");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("invite-fresh-copy").addEventListener("click", () => {
+      const code = document.getElementById("invite-fresh").dataset.code || "";
+      if (code) copyInvite(code);
+    });
+
+    document.getElementById("invite-tbody").addEventListener("click", async (e) => {
+      const copyBtn = e.target.closest("[data-copy-invite]");
+      if (copyBtn) {
+        copyInvite(copyBtn.dataset.copyInvite);
         return;
       }
+      const revokeBtn = e.target.closest("[data-revoke]");
+      if (!revokeBtn) return;
+      const id = Number(revokeBtn.dataset.revoke);
+      const inv = invites.find((row) => Number(row.invite_id) === id);
+      const label = inv ? (inv.code_display || inv.code) : ("#" + id);
+      if (!confirm("Revoke invite " + label + "? It will stop working immediately.")) return;
+      try {
+        await SH.revokeInvite(id);
+        showToast("Invite revoked");
+        await reload();
+      } catch (err) {
+        showToast(err.message || "Could not revoke invite");
+      }
+    });
+
+    tbody.addEventListener("click", async (e) => {
       const btn = e.target.closest("[data-edit]");
       if (!btn) return;
       const id = Number(btn.dataset.edit);

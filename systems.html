@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Systems" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Systems" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Systems</title>
   <style>
     :root {
@@ -147,34 +161,47 @@
     .empty { text-align: center; padding: 2rem; color: var(--muted); }
     @media (max-width: 640px) { th.hide-sm, td.hide-sm { display: none; } .form-row { grid-template-columns: 1fr; } }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
   <header class="site-header">
-    <div class="site-header-inner">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
         <h1>Systems</h1>
-        <div class="sub">Sunset Heresy · Port Maw sub-sector</div>
-      </div>
-      <div class="header-actions" id="csv-actions" hidden>
-        <button type="button" class="ghost" id="btn-template" title="Download blank template">Template</button>
-        <button type="button" class="ghost" id="btn-export-csv">Export</button>
-        <button type="button" class="primary" id="btn-import-toggle">Import CSV</button>
-      </div>
+        <span class="sub" id="header-sub">Port Maw sub-sector</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
     </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html" class="active">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
-      <span id="nav-auth"><a href="login.html">Log in</a></span>
-    </nav>
-  </header>
-
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html" class="active">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
   <main>
+    <div class="page-tools" id="csv-actions" hidden>
+      <button type="button" class="ghost" id="btn-template" title="Download blank template">Template</button>
+      <button type="button" class="ghost" id="btn-export-csv">Export</button>
+      <button type="button" class="primary" id="btn-import-toggle">Import CSV</button>
+    </div>
     <div class="stats" id="stats"></div>
 
     <div class="import-panel" id="import-panel">
@@ -227,6 +254,7 @@
             <th>System</th>
             <th class="hide-sm">Type</th>
             <th>Power</th>
+            <th class="hide-sm">Dur</th>
             <th>Controller</th>
             <th class="hide-sm">Loyal / Traitor</th>
             <th></th>
@@ -264,8 +292,13 @@
           </div>
           <div class="form-group">
             <label for="f-power">Power Level</label>
-            <input type="number" id="f-power" min="1" max="5" value="3" />
+            <input type="number" id="f-power" min="0" max="5" value="3" />
           </div>
+        </div>
+        <div class="form-group">
+          <label for="f-dur">Durability</label>
+          <input type="number" id="f-dur" min="0" max="10" value="5" />
+          <div style="font-size:0.72rem;color:var(--muted);margin-top:0.25rem">Starts at 5. Each battle lowers it by 1. At 0, further battles lower Power. Fortify raises it, up to 10.</div>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -388,6 +421,7 @@
           </td>
           <td class="hide-sm">${esc(s.sys_type)}</td>
           <td>${s.sys_power}</td>
+          <td class="hide-sm">${s.sys_durability != null && s.sys_durability !== "" ? s.sys_durability : 5}</td>
           <td><span class="badge ${controllerClass(s.sys_controller)}">${esc(s.sys_controller)}</span></td>
           <td class="hide-sm">${s.sys_loyal ?? 0} / ${s.sys_traitor ?? 0}</td>
           <td>${SH.canEditSystems() ? `<button type="button" data-edit="${s.sys_id}">Edit</button>` : ""}</td>
@@ -399,7 +433,7 @@
 
     // --- CSV parse / export / import ---
     const CSV_HEADERS = [
-      "sys_id","sys_name","sys_type","sys_power","sys_loyal","sys_traitor","sys_neut",
+      "sys_id","sys_name","sys_type","sys_power","sys_durability","sys_loyal","sys_traitor","sys_neut",
       "sys_controller","sys_struct","sys_links","sys_notes","sys_x","sys_y"
     ];
     let pendingImport = [];
@@ -473,6 +507,10 @@
           sys_links: get("sys_links") || null,
           sys_notes: get("sys_notes") || null
         };
+        if (idx("sys_durability") >= 0) {
+          const durRaw = get("sys_durability");
+          rec.sys_durability = durRaw === "" ? 5 : Number(durRaw);
+        }
         const x = get("sys_x"), y = get("sys_y");
         if (x !== "") rec.sys_x = Number(x);
         if (y !== "") rec.sys_y = Number(y);
@@ -587,6 +625,7 @@
       document.getElementById("f-name").value = s.sys_name;
       document.getElementById("f-type").value = s.sys_type || "Civilised";
       document.getElementById("f-power").value = s.sys_power ?? 3;
+      document.getElementById("f-dur").value = s.sys_durability != null && s.sys_durability !== "" ? s.sys_durability : 5;
       document.getElementById("f-loyal").value = s.sys_loyal ?? 0;
       document.getElementById("f-traitor").value = s.sys_traitor ?? 0;
       document.getElementById("f-controller").value = s.sys_controller || "Neutral";
@@ -619,6 +658,7 @@
         sys_name: document.getElementById("f-name").value.trim(),
         sys_type: document.getElementById("f-type").value,
         sys_power: Number(document.getElementById("f-power").value),
+        sys_durability: Number(document.getElementById("f-dur").value),
         sys_loyal: loyal,
         sys_traitor: traitor,
         sys_controller: controller,

@@ -2,3 +2,10 @@ node_modules/
 dist/
 .env
 *.log
+
+# Live credentials. The server creates these on first boot.
+# Sample campaign data (players, forces, systems, games, meta) stays tracked.
+data/accounts.json
+data/sessions.json
+data/invites.json
+data/notifications.json

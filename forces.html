@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Forces" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Forces" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Forces</title>
   <style>
     :root {
@@ -119,29 +133,41 @@
     .empty { text-align: center; padding: 2rem; color: var(--muted); }
     @media (max-width: 640px) { th.hide-sm, td.hide-sm { display: none; } .form-row { grid-template-columns: 1fr; } }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
   <header class="site-header">
-    <div class="site-header-inner">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
         <h1>Forces</h1>
-        <div class="sub">Sunset Heresy · Army tokens</div>
-      </div>
-      <button type="button" class="primary" id="btn-add" data-role="campaign_admin player" hidden>+ Force</button>
+        <span class="sub" id="header-sub">Army tokens</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
     </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html" class="active">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
-      <span id="nav-auth"><a href="login.html">Log in</a></span>
-    </nav>
-  </header>
-
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html" class="active">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
   <main>
     <div class="stats" id="stats"></div>
     <section class="action-panel" id="action-panel" hidden>
@@ -179,6 +205,9 @@
         </div>
       </div>
     </section>
+    <div class="page-tools">
+      <button type="button" class="primary" id="btn-add" data-role="campaign_admin player" hidden>+ Force</button>
+    </div>
     <div class="toolbar">
       <input type="search" class="search" id="search" placeholder="Search force, warlord, legion…" />
       <div class="filters" id="filters">

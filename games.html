@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Battles" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Battles" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Battle Log</title>
   <style>
     :root {
@@ -65,6 +79,9 @@
     .badge.defender_win { background: #1e3a5f; color: var(--loyal); }
     .badge.draw { background: #422006; color: var(--warn); }
     .badge.in_progress { background: #3f3f46; color: #a1a1aa; }
+    .badge.pending { background: #422006; color: var(--warn); }
+    .badge.applied { background: #14532d; color: var(--success); }
+    .badge.disputed { background: #7f1d1d; color: #fecaca; }
 
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 40; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
     .overlay.open { opacity: 1; pointer-events: auto; }
@@ -85,30 +102,45 @@
     .empty { text-align: center; padding: 2.5rem; color: var(--muted); }
     @media (max-width: 640px) { .form-row { grid-template-columns: 1fr; } }
   </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
 </head>
 <body>
   <header class="site-header">
-    <div class="site-header-inner">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
-        <h1>Battle Log</h1>
-        <div class="sub">Sunset Heresy · Recorded games</div>
-      </div>
-      <button type="button" class="primary" id="btn-add">+ Battle</button>
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Battles</h1>
+        <span class="sub" id="header-sub">Recorded games</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
     </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html" class="active">Battles</a>
-      <a href="rules.html">Rules</a>
-      <span id="nav-auth"><a href="login.html">Log in</a></span>
-    </nav>
-  </header>
-
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html" class="active">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
   <main>
+    <div class="page-tools">
+      <button type="button" class="primary" id="btn-add" hidden>+ Battle</button>
+    </div>
     <div class="stats" id="stats"></div>
     <div class="toolbar">
       <input type="search" class="search" id="search" placeholder="Search mission, system, notes…" />
@@ -215,6 +247,7 @@
           <label for="f-notes">Notes</label>
           <textarea id="f-notes" rows="3"></textarea>
         </div>
+        <p class="hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4">A player can only log a battle they are in, with their own force on their side. The result is applied when the opponent confirms it. The campaign admin's save applies immediately. A loss (and both sides of a draw) drops Strength by 1. A win adds 1 to that system's loyal or traitor score. Each battle also lowers durability, then power once durability is 0.</p>
       </form>
     </div>
     <div class="drawer-footer">
@@ -275,6 +308,28 @@
     function resultLabel(r) {
       return ({ attacker_win: "Attacker win", defender_win: "Defender win", draw: "Draw", conceded: "Conceded", in_progress: "In progress" })[r] || r;
     }
+    function myPlayerId() {
+      return SH.user && SH.user.player_id != null ? Number(SH.user.player_id) : null;
+    }
+    function canEditGame(g) {
+      if (SH.role === "campaign_admin") return true;
+      if (SH.role !== "player") return false;
+      const pid = myPlayerId();
+      return pid != null && (Number(g.attacker_id) === pid || Number(g.defender_id) === pid);
+    }
+    function canConfirmGame(g) {
+      if (!g || g.result_state !== "pending" || !isDecisiveClient(g.result)) return false;
+      if (SH.role === "campaign_admin") return true;
+      const pid = myPlayerId();
+      return canEditGame(g) && Number(g.proposed_by) !== pid;
+    }
+    function canDeleteGame(g) {
+      if (SH.role === "campaign_admin") return true;
+      return canEditGame(g) && g.result_state !== "applied";
+    }
+    function isDecisiveClient(result) {
+      return result === "attacker_win" || result === "defender_win" || result === "draw" || result === "conceded";
+    }
 
     function renderStats() {
       const done = games.filter(g => g.result !== "in_progress").length;
@@ -312,6 +367,9 @@
           <div class="top">
             <span class="title">${esc(g.mission || "Battle")} · ${esc(systemName(g.sys_id))}</span>
             <span class="badge ${g.result}">${resultLabel(g.result)}</span>
+            ${g.result_state === "pending" ? `<span class="badge pending">Awaiting confirm</span>` : ""}
+            ${g.result_state === "disputed" ? `<span class="badge disputed">Disputed</span>` : ""}
+            ${g.result_state === "applied" ? `<span class="badge applied">Applied</span>` : ""}
             <span class="score">${g.attacker_vp ?? "—"} – ${g.defender_vp ?? "—"}</span>
           </div>
           <div class="meta">
@@ -320,7 +378,10 @@
             ${g.attacker_list || g.defender_list ? "<br>" + esc(g.attacker_list || "—") + " vs " + esc(g.defender_list || "—") : ""}
           </div>
           ${g.notes ? `<div class="notes">${esc(g.notes)}</div>` : ""}
-          <div style="margin-top:0.55rem"><button type="button" data-edit="${g.game_id}">Edit</button></div>
+          <div style="margin-top:0.55rem;display:flex;gap:0.4rem;flex-wrap:wrap">
+            ${canEditGame(g) ? `<button type="button" data-edit="${g.game_id}">Edit</button>` : ""}
+            ${canConfirmGame(g) ? `<button type="button" class="primary" data-confirm="${g.game_id}">Confirm result</button>` : ""}
+          </div>
         `;
         cards.appendChild(div);
       });
@@ -347,7 +408,7 @@
       document.getElementById("f-att-list").value = g ? (g.attacker_list || "") : "";
       document.getElementById("f-def-list").value = g ? (g.defender_list || "") : "";
       document.getElementById("f-notes").value = g ? (g.notes || "") : "";
-      document.getElementById("btn-delete").hidden = !g;
+      document.getElementById("btn-delete").hidden = !g || !canDeleteGame(g);
       overlay.classList.add("open");
       drawer.classList.add("open");
     }
@@ -367,6 +428,12 @@
       let winner = null;
       if (result === "attacker_win") winner = attId;
       else if (result === "defender_win") winner = defId;
+      else if (result === "conceded") {
+        const av = Number(document.getElementById("f-att-vp").value);
+        const dv = Number(document.getElementById("f-def-vp").value);
+        if (av > dv) winner = attId;
+        else if (dv > av) winner = defId;
+      }
 
       const payload = {
         game_id: idVal ? Number(idVal) : undefined,
@@ -389,10 +456,12 @@
         notes: document.getElementById("f-notes").value.trim() || null
       };
       try {
-        await SH.save("games", payload);
+        const saved = await SH.save("games", payload);
         await reload();
         closeDrawer();
-        showToast(idVal ? "Battle updated" : "Battle logged");
+        if (saved && saved.result_state === "pending") showToast("Saved. Waiting for the opponent to confirm.");
+        else if (saved && saved.result_state === "applied") showToast("Battle applied");
+        else showToast(idVal ? "Battle updated" : "Battle logged");
       } catch (err) {
         showToast("Save failed: " + err.message);
       }
@@ -415,7 +484,19 @@
     overlay.addEventListener("click", closeDrawer);
     document.getElementById("btn-save").addEventListener("click", save);
     document.getElementById("btn-delete").addEventListener("click", del);
-    cards.addEventListener("click", e => {
+    cards.addEventListener("click", async (e) => {
+      const confirmBtn = e.target.closest("[data-confirm]");
+      if (confirmBtn) {
+        try {
+          await SH.confirmGame(confirmBtn.dataset.confirm);
+          await reload();
+          SH.refreshWaitingBadge();
+          showToast("Result confirmed");
+        } catch (err) {
+          showToast(err.message || "Confirm failed");
+        }
+        return;
+      }
       const btn = e.target.closest("[data-edit]");
       if (!btn) return;
       const g = games.find(x => x.game_id === Number(btn.dataset.edit));
@@ -428,7 +509,13 @@
         await SH.probe();
         await SH.applyNavPermissions();
         const addBtn = document.getElementById("btn-add");
-        if (addBtn) addBtn.hidden = !SH.isLoggedIn();
+        if (addBtn) {
+          if (SH.role === "campaign_admin") addBtn.hidden = false;
+          else if (SH.role === "player") {
+            const meta = await SH.getMeta();
+            addBtn.hidden = !meta || meta.phase !== "Battles";
+          } else addBtn.hidden = true;
+        }
         await reload();
       } catch (err) {
         console.error(err);

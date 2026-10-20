@@ -8,11 +8,17 @@
  *   campaign_admin  – full campaign management
  *
  * Auth (local for now; OAuth providers can plug in later):
- *   POST /api/auth/login          { login, password }  or  { invite_code, password }
+ *   POST /api/auth/login          { login, password }
+ *                                 legacy: { invite_code, password } claims a pre-made player
  *   POST /api/auth/logout
  *   GET  /api/auth/me
- *   POST /api/auth/set-password   (logged in) { password }
- *   POST /api/auth/create-invite  (campaign_admin) { player_id } → invite_code
+ *   POST /api/auth/set-password   (logged in) { password, current_password }
+ *   POST /api/auth/create-invite  (campaign_admin) legacy: { player_id } → invite_code
+ *   GET  /api/auth/invites        (campaign_admin) list tester invite codes
+ *   POST /api/auth/invites        (campaign_admin) { note?, expires_in_days?, max_uses? }
+ *   POST /api/auth/invites/revoke (campaign_admin) { invite_id }
+ *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
+ *   Login and signup are rate-limited per IP (see AUTH_MAX_ATTEMPTS).
  *
  * Public reads:
  *   GET /api/public/players|forces|systems|games|meta
@@ -20,10 +26,15 @@
  * Protected writes use session cookie or Authorization: Bearer <token>
  *
  * Env:
- *   PORT, HOST
+ *   PORT, HOST, DATA_DIR (default ./data)
  *   CAMPAIGN_ADMIN_LOGIN (default admin)
- *   CAMPAIGN_ADMIN_PASSWORD (default change-me — set this in production)
- *   CAMPAIGN_ADMIN_FORCE_PASSWORD=1  (with PASSWORD set: re-hash admin on boot)
+ *   CAMPAIGN_ADMIN_PASSWORD (required for a chosen admin password; if unset on
+ *     first boot a random password is generated and printed once)
+ *   CAMPAIGN_ADMIN_FORCE_PASSWORD=1  (with PASSWORD set: re-hash admin on boot
+ *     and invalidate every session)
+ *
+ * Static files are an allow-list (HTML pages, js/, css/, images). data/, schema/,
+ * server source, and dotfiles are not served.
  */
 
 const http = require("http");
@@ -35,8 +46,11 @@ const { URL } = require("url");
 const PORT = Number(process.env.PORT) || 3847;
 const HOST = process.env.HOST || "0.0.0.0";
 const ROOT = __dirname;
-const DATA = path.join(ROOT, "data");
+const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, "data");
 const SESSION_DAYS = 14;
+// The old prototype password was published in the repo and on the login page.
+// It is never used as a fallback. In production it is rejected outright.
+const PUBLISHED_ADMIN_PASSWORD = "change-me";
 
 const COLLECTIONS = {
   players: { file: "players.json", idKey: "player_id" },
@@ -45,21 +59,34 @@ const COLLECTIONS = {
   games: { file: "games.json", idKey: "game_id" },
   meta: { file: "meta.json", idKey: null },
   accounts: { file: "accounts.json", idKey: "account_id" },
-  sessions: { file: "sessions.json", idKey: "token" }
+  sessions: { file: "sessions.json", idKey: "token" },
+  invites: { file: "invites.json", idKey: "invite_id" },
+  notifications: { file: "notifications.json", idKey: "notification_id" }
 };
 
-const MIME = {
+const PUBLIC_PAGES = new Set([
+  "index.html",
+  "login.html",
+  "campaign_map.html",
+  "player_admin.html",
+  "forces.html",
+  "systems.html",
+  "games.html",
+  "rules.html",
+  "actions.html"
+]);
+
+const PUBLIC_TYPES = {
   ".html": "text/html; charset=utf-8",
   ".js": "application/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
-  ".json": "application/json; charset=utf-8",
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
-  ".md": "text/markdown; charset=utf-8",
-  ".csv": "text/csv; charset=utf-8"
+  ".webp": "image/webp",
+  ".gif": "image/gif"
 };
 
 // Pages that require login (client still loads; API enforces). Listed for docs.
@@ -113,14 +140,198 @@ function randomToken() {
   return crypto.randomBytes(24).toString("hex");
 }
 
+// Unambiguous alphabet: no 0/O, 1/I/L, or 8/B, which are easy to misread when a code is shared.
+const INVITE_ALPHABET = "ACDEFGHJKLMNPQRSTUVWXYZ2345679";
+
 function randomInvite() {
-  return crypto.randomBytes(4).toString("hex").toUpperCase();
+  // 16 characters from a 29-letter alphabet (~78 bits). Rejection sampling avoids modulo bias.
+  const span = INVITE_ALPHABET.length * Math.floor(256 / INVITE_ALPHABET.length);
+  let out = "";
+  while (out.length < 16) {
+    const buf = crypto.randomBytes(32);
+    for (let i = 0; i < buf.length && out.length < 16; i++) {
+      if (buf[i] < span) out += INVITE_ALPHABET[buf[i] % INVITE_ALPHABET.length];
+    }
+  }
+  return out;
 }
 
-/** Ensure campaign admin account exists with env/default password.
- *  Create when missing. Optional ops reset: set CAMPAIGN_ADMIN_PASSWORD and
- *  CAMPAIGN_ADMIN_FORCE_PASSWORD=1, then restart — that re-hashes the admin
- *  account without wiping other data. Remove FORCE after the reset so a later
+const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/;
+const ALLEGIANCES = ["Loyalist", "Traitor", "Blackshield"];
+const INVITE_MAX_USES_CAP = 25;
+
+function normalizeInviteCode(code) {
+  return String(code || "")
+    .replace(/[\s-]/g, "")
+    .trim()
+    .toUpperCase();
+}
+
+function formatInviteCode(code) {
+  const c = normalizeInviteCode(code);
+  return c.replace(/(.{4})(?=.)/g, "$1-");
+}
+
+function inviteStatus(invite, now = Date.now()) {
+  if (!invite) return "invalid";
+  if (invite.revoked) return "revoked";
+  if (invite.expires_at && new Date(invite.expires_at).getTime() <= now) return "expired";
+  const max = Number(invite.max_uses) || 1;
+  const uses = Number(invite.uses) || 0;
+  if (uses >= max) return "used";
+  return "active";
+}
+
+function inviteError(invite) {
+  const status = inviteStatus(invite);
+  if (status === "invalid") return "Invalid invite code";
+  if (status === "revoked") return "This invite code has been revoked";
+  if (status === "expired") return "This invite code has expired";
+  if (status === "used") return "This invite code has already been used";
+  return null;
+}
+
+function publicInvite(invite) {
+  return {
+    invite_id: invite.invite_id,
+    code: normalizeInviteCode(invite.code),
+    code_display: formatInviteCode(invite.code),
+    note: invite.note || "",
+    max_uses: Number(invite.max_uses) || 1,
+    uses: Number(invite.uses) || 0,
+    expires_at: invite.expires_at || null,
+    revoked: !!invite.revoked,
+    revoked_at: invite.revoked_at || null,
+    created_at: invite.created_at,
+    created_by: invite.created_by || null,
+    status: inviteStatus(invite),
+    used_by: Array.isArray(invite.used_by) ? invite.used_by : []
+  };
+}
+
+function findInvite(invites, code) {
+  const want = normalizeInviteCode(code);
+  if (!want) return null;
+  return invites.find((i) => normalizeInviteCode(i.code) === want) || null;
+}
+
+function uniqueInviteCode(invites, accounts) {
+  const taken = new Set();
+  invites.forEach((i) => {
+    if (i.code) taken.add(normalizeInviteCode(i.code));
+  });
+  accounts.forEach((a) => {
+    if (a.invite_code) taken.add(normalizeInviteCode(a.invite_code));
+  });
+  for (let n = 0; n < 8; n++) {
+    const code = randomInvite();
+    if (!taken.has(code)) return code;
+  }
+  return crypto.randomBytes(12).toString("hex").toUpperCase();
+}
+
+function findAccountByLogin(accounts, login) {
+  const want = String(login || "").trim().toLowerCase();
+  if (!want) return null;
+  return accounts.find((a) => a.login && String(a.login).toLowerCase() === want) || null;
+}
+
+function clipText(value, max) {
+  return String(value == null ? "" : value).trim().slice(0, max);
+}
+
+function sessionCookie(req, token, maxAgeSeconds) {
+  const secure =
+    (req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ||
+    (req.connection && req.connection.encrypted);
+  return (
+    `sh_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}` +
+    (secure ? "; Secure" : "")
+  );
+}
+
+// Per-IP brake on password guessing and invite-code spraying. In-memory only;
+// a process restart clears it, which is enough for a small tester group.
+const AUTH_WINDOW_MS = 15 * 60 * 1000;
+const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15 };
+const authBuckets = new Map();
+
+function clientIp(req) {
+  const fwd = req.headers["x-forwarded-for"];
+  if (typeof fwd === "string" && fwd.trim()) {
+    const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
+    if (parts.length) return parts[parts.length - 1];
+  }
+  const sock = req.socket || req.connection;
+  return (sock && sock.remoteAddress) || "unknown";
+}
+
+function rateLimitAuth(req, action) {
+  const limit = AUTH_MAX_ATTEMPTS[action];
+  if (!limit) return null;
+  const now = Date.now();
+  const key = action + "|" + clientIp(req);
+  let bucket = authBuckets.get(key);
+  if (!bucket || bucket.resetAt <= now) {
+    bucket = { count: 0, resetAt: now + AUTH_WINDOW_MS };
+    authBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (authBuckets.size > 4000) {
+    for (const [k, v] of authBuckets) {
+      if (v.resetAt <= now) authBuckets.delete(k);
+    }
+  }
+  if (bucket.count > limit) {
+    return { retryAfter: Math.max(1, Math.ceil((bucket.resetAt - now) / 1000)) };
+  }
+  return null;
+}
+
+function sendRateLimited(res, limited) {
+  return send(
+    res,
+    429,
+    { error: "Too many attempts. Try again in " + limited.retryAfter + " seconds." },
+    { "Retry-After": String(limited.retryAfter) }
+  );
+}
+
+function isProduction() {
+  const nodeEnv = String(process.env.NODE_ENV || "").toLowerCase();
+  const render = String(process.env.RENDER || "").toLowerCase();
+  return nodeEnv === "production" || render === "true" || render === "1";
+}
+
+function clearAllSessions() {
+  writeCollection("sessions", []);
+}
+
+function logGeneratedAdminPassword(login, password) {
+  console.log("============================================================");
+  console.log("CAMPAIGN_ADMIN_INITIAL_PASSWORD (printed once; not stored in plaintext)");
+  console.log("login=" + login);
+  console.log("password=" + password);
+  console.log("Set CAMPAIGN_ADMIN_PASSWORD on the host so the next machine does not generate a different one.");
+  console.log("To rotate later: set CAMPAIGN_ADMIN_PASSWORD to the new value and CAMPAIGN_ADMIN_FORCE_PASSWORD=1, restart, then remove the FORCE flag.");
+  console.log("A FORCE reset also deletes every session.");
+  console.log("============================================================");
+}
+
+function takeAdminPassword(login) {
+  if (process.env.CAMPAIGN_ADMIN_PASSWORD) return process.env.CAMPAIGN_ADMIN_PASSWORD;
+  const password = crypto.randomBytes(18).toString("base64url");
+  logGeneratedAdminPassword(login, password);
+  return password;
+}
+
+/** Ensure a campaign admin exists.
+ *  Password comes from CAMPAIGN_ADMIN_PASSWORD. If that is unset when the
+ *  admin is created (or has no hash yet), a random password is generated and
+ *  printed once. There is no published default.
+ *  Ops reset: set CAMPAIGN_ADMIN_PASSWORD and CAMPAIGN_ADMIN_FORCE_PASSWORD=1,
+ *  then restart. That re-hashes the admin and deletes every session so old
+ *  cookies and bearer tokens stop working. Remove FORCE afterwards so a later
  *  password change in the UI is not overwritten on the next deploy.
  */
 function bootstrapAdmin() {
@@ -128,13 +339,13 @@ function bootstrapAdmin() {
   let admin = accounts.find((a) => a.role === "campaign_admin");
   const login = process.env.CAMPAIGN_ADMIN_LOGIN || "admin";
   const envPassword = process.env.CAMPAIGN_ADMIN_PASSWORD;
-  const password = envPassword || "change-me";
   const forceFlag = String(process.env.CAMPAIGN_ADMIN_FORCE_PASSWORD || "").toLowerCase();
   const forceFromEnv =
     !!envPassword &&
     (forceFlag === "1" || forceFlag === "true" || forceFlag === "yes");
 
   if (!admin) {
+    const password = takeAdminPassword(login);
     const { salt, hash } = hashPassword(password);
     admin = {
       account_id: nextId(accounts, "account_id"),
@@ -150,23 +361,51 @@ function bootstrapAdmin() {
     };
     accounts.push(admin);
     writeCollection("accounts", accounts);
-    console.log(`Created campaign admin login="${login}" (set CAMPAIGN_ADMIN_PASSWORD in production)`);
+    if (envPassword) console.log(`Created campaign admin login="${login}" from CAMPAIGN_ADMIN_PASSWORD`);
+    else console.log(`Created campaign admin login="${login}" with a generated password (see above)`);
     return;
   }
 
+  const previousLogin = admin.login;
   admin.login = admin.login || login;
   if (process.env.CAMPAIGN_ADMIN_LOGIN) admin.login = login;
 
-  if (!admin.pass_hash || forceFromEnv) {
+  if (forceFromEnv) {
+    const { salt, hash } = hashPassword(envPassword);
+    admin.pass_hash = hash;
+    admin.pass_salt = salt;
+    writeCollection("accounts", accounts);
+    clearAllSessions();
+    console.log(
+      `Applied CAMPAIGN_ADMIN_PASSWORD for login="${admin.login}" (FORCE env reset) and invalidated all sessions`
+    );
+    return;
+  }
+
+  if (!admin.pass_hash) {
+    const password = takeAdminPassword(admin.login || login);
     const { salt, hash } = hashPassword(password);
     admin.pass_hash = hash;
     admin.pass_salt = salt;
     writeCollection("accounts", accounts);
-    if (forceFromEnv) {
-      console.log(`Applied CAMPAIGN_ADMIN_PASSWORD for login="${admin.login}" (FORCE env reset)`);
-    } else {
-      console.log(`Set campaign admin password for login="${admin.login}"`);
-    }
+    console.log(`Set campaign admin password for login="${admin.login}"`);
+    return;
+  }
+
+  if (admin.login !== previousLogin) writeCollection("accounts", accounts);
+
+  if (
+    isProduction() &&
+    admin.pass_hash &&
+    verifyPassword(PUBLISHED_ADMIN_PASSWORD, admin.pass_salt, admin.pass_hash)
+  ) {
+    console.warn(
+      "Campaign admin still has the old published password. Login with it is disabled in production. Set CAMPAIGN_ADMIN_PASSWORD and CAMPAIGN_ADMIN_FORCE_PASSWORD=1, then restart, to rotate it and sign everyone out."
+    );
+  } else if (isProduction() && !envPassword) {
+    console.warn(
+      "CAMPAIGN_ADMIN_PASSWORD is not set. Set it on the host so the admin password is one you chose and can rotate."
+    );
   }
 }
 
@@ -311,23 +550,68 @@ function readBody(req) {
   });
 }
 
+function isPublicAsset(parts) {
+  if (parts.some((p) => !p || p === "." || p === ".." || p.startsWith("."))) return false;
+  if (parts.length === 1) {
+    const name = parts[0];
+    if (PUBLIC_PAGES.has(name)) return true;
+    const ext = path.extname(name).toLowerCase();
+    return ext !== ".html" && ext !== ".js" && ext !== ".css" && !!PUBLIC_TYPES[ext];
+  }
+  if (parts.length === 2 && parts[0] === "js" && path.extname(parts[1]).toLowerCase() === ".js") return true;
+  if (parts.length === 2 && parts[0] === "css" && path.extname(parts[1]).toLowerCase() === ".css") return true;
+  return false;
+}
+
 function serveStatic(req, res, pathname) {
-  let rel = pathname === "/" ? "/index.html" : pathname;
-  rel = path.normalize(rel).replace(/^(\.\.[/\\])+/, "");
-  const fp = path.join(ROOT, rel);
-  if (!fp.startsWith(ROOT)) {
-    res.writeHead(403);
-    res.end("Forbidden");
+  let rel = pathname === "/" ? "/index.html" : String(pathname || "/");
+  rel = path.posix.normalize(rel);
+  if (!rel.startsWith("/") || rel.includes("\0")) {
+    res.writeHead(404);
+    res.end("Not found");
     return;
   }
-  if (!fs.existsSync(fp) || fs.statSync(fp).isDirectory()) {
+  const parts = rel.split("/").filter(Boolean);
+  if (!isPublicAsset(parts)) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+  const rootResolved = path.resolve(ROOT);
+  const fp = path.resolve(rootResolved, ...parts);
+  if (fp !== rootResolved && !fp.startsWith(rootResolved + path.sep)) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+  if (!fs.existsSync(fp) || !fs.statSync(fp).isFile()) {
     res.writeHead(404);
     res.end("Not found");
     return;
   }
   const ext = path.extname(fp).toLowerCase();
-  const type = MIME[ext] || "application/octet-stream";
-  res.writeHead(200, { "Content-Type": type, "Cache-Control": ext === ".html" ? "no-store" : "public, max-age=3600" });
+  const type = PUBLIC_TYPES[ext] || "application/octet-stream";
+  if (ext === ".html") {
+    const forwarded = req.headers["x-forwarded-proto"];
+    const proto = (forwarded ? String(forwarded).split(",")[0] : "http").trim() || "http";
+    const host = String(req.headers["x-forwarded-host"] || req.headers.host || "localhost").split(",")[0].trim();
+    const origin = proto + "://" + host;
+    const pathOnly = String(req.url || "/").split("?")[0];
+    let html = fs.readFileSync(fp, "utf8");
+    html = html.replaceAll("__OG_IMAGE__", origin + "/Sunset%20Heresy-ff-02.png").replaceAll("__OG_URL__", origin + pathOnly);
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff"
+    });
+    res.end(html);
+    return;
+  }
+  res.writeHead(200, {
+    "Content-Type": type,
+    "Cache-Control": "public, max-age=3600",
+    "X-Content-Type-Options": "nosniff"
+  });
   fs.createReadStream(fp).pipe(res);
 }
 
@@ -357,30 +641,54 @@ async function handleAuth(req, res, parts, method) {
   }
 
   if (action === "login" && method === "POST") {
+    const limited = rateLimitAuth(req, "login");
+    if (limited) return sendRateLimited(res, limited);
     const body = (await readBody(req)) || {};
+    if (isProduction() && String(body.password || "") === PUBLISHED_ADMIN_PASSWORD) {
+      return send(res, 401, {
+        error: "That password is no longer accepted. Set CAMPAIGN_ADMIN_PASSWORD and CAMPAIGN_ADMIN_FORCE_PASSWORD=1 on the host, then restart."
+      });
+    }
     const accounts = readCollection("accounts");
     let account = null;
 
     if (body.invite_code) {
+      const code = normalizeInviteCode(body.invite_code);
       account = accounts.find(
-        (a) => a.invite_code && a.invite_code.toUpperCase() === String(body.invite_code).toUpperCase()
+        (a) => a.invite_code && normalizeInviteCode(a.invite_code) === code
       );
       if (!account) return send(res, 401, { error: "Invalid invite code" });
-      // First login with invite: require password to set, or accept existing
+      const password = String(body.password || "");
       if (!account.pass_hash) {
-        if (!body.password || String(body.password).length < 6) {
+        if (password.length < 6 || password.length > 128) {
           return send(res, 400, { error: "Choose a password (at least 6 characters) to claim this account" });
         }
-        const { salt, hash } = hashPassword(body.password);
-        account.pass_hash = hash;
-        account.pass_salt = salt;
-        account.invite_code = null; // one-time
-        writeCollection("accounts", accounts);
-      } else if (!verifyPassword(body.password, account.pass_salt, account.pass_hash)) {
+      } else if (!verifyPassword(password, account.pass_salt, account.pass_hash)) {
         return send(res, 401, { error: "Wrong password" });
       }
+      // A legacy pre-made player has no username until they claim the code.
+      // Store one so they can sign in again after the code is consumed.
+      if (!account.login) {
+        const login = String(body.login == null ? "" : body.login).trim();
+        if (!LOGIN_RE.test(login)) {
+          return send(res, 400, {
+            error: "Choose a username (3–32 letters, numbers, dots, underscores, or hyphens) to claim this account"
+          });
+        }
+        if (findAccountByLogin(accounts, login)) {
+          return send(res, 409, { error: "That username is already taken" });
+        }
+        account.login = login;
+      }
+      if (!account.pass_hash) {
+        const { salt, hash } = hashPassword(password);
+        account.pass_hash = hash;
+        account.pass_salt = salt;
+      }
+      account.invite_code = null;
+      writeCollection("accounts", accounts);
     } else if (body.login) {
-      account = accounts.find((a) => a.login && a.login === body.login);
+      account = findAccountByLogin(accounts, body.login);
       if (!account || !verifyPassword(body.password, account.pass_salt, account.pass_hash)) {
         return send(res, 401, { error: "Invalid login or password" });
       }
@@ -389,14 +697,8 @@ async function handleAuth(req, res, parts, method) {
     }
 
     const { token, expires } = createSession(account.account_id);
-    const secure =
-      (req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ||
-      (req.connection && req.connection.encrypted);
-    const cookie =
-      `sh_session=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${SESSION_DAYS * 86400}` +
-      (secure ? "; Secure" : "");
     return send(res, 200, { ok: true, token, expires_at: expires.toISOString(), ...mePayload(account) }, {
-      "Set-Cookie": cookie
+      "Set-Cookie": sessionCookie(req, token, SESSION_DAYS * 86400)
     });
   }
 
@@ -407,6 +709,9 @@ async function handleAuth(req, res, parts, method) {
     const body = (await readBody(req)) || {};
     if (!body.password || String(body.password).length < 6) {
       return send(res, 400, { error: "Password must be at least 6 characters" });
+    }
+    if (isProduction() && String(body.password) === PUBLISHED_ADMIN_PASSWORD) {
+      return send(res, 400, { error: "Choose a different password" });
     }
     const accounts = readCollection("accounts");
     const idx = accounts.findIndex((a) => a.account_id === auth.account.account_id);
@@ -428,6 +733,8 @@ async function handleAuth(req, res, parts, method) {
     return send(res, 200, { ok: true });
   }
 
+  // Legacy: attach a one-time code to a player the admin already created.
+  // Tester onboarding uses POST /api/auth/invites + POST /api/auth/signup instead.
   if (action === "create-invite" && method === "POST") {
     const auth = getSession(req);
     const gate = requireRole(auth, ["campaign_admin"]);
@@ -457,12 +764,189 @@ async function handleAuth(req, res, parts, method) {
       };
       accounts.push(account);
     } else {
+      // A replacement code must not erase a password the player already set.
       account.invite_code = code;
-      account.pass_hash = null;
-      account.pass_salt = null;
     }
     writeCollection("accounts", accounts);
     return send(res, 200, { invite_code: code, player_id: playerId, label: account.label });
+  }
+
+  if (action === "invites" && method === "GET") {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const invites = readCollection("invites");
+    const list = invites
+      .map(publicInvite)
+      .sort((a, b) => Number(b.invite_id) - Number(a.invite_id));
+    return send(res, 200, { invites: list });
+  }
+
+  if (action === "invites" && method === "POST" && !parts[2]) {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    const note = clipText(body.note, 120);
+    let maxUses = 1;
+    if (body.max_uses != null && body.max_uses !== "") {
+      maxUses = Number(body.max_uses);
+      if (!Number.isInteger(maxUses) || maxUses < 1 || maxUses > INVITE_MAX_USES_CAP) {
+        return send(res, 400, { error: "Use limit must be a whole number from 1 to 25" });
+      }
+    }
+    let expiresAt = null;
+    if (body.expires_in_days != null && body.expires_in_days !== "") {
+      const days = Number(body.expires_in_days);
+      if (!Number.isInteger(days) || days < 1 || days > 365) {
+        return send(res, 400, { error: "Expiry must be a whole number of days from 1 to 365, or left blank" });
+      }
+      expiresAt = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString();
+    }
+
+    const invites = readCollection("invites");
+    const accounts = readCollection("accounts");
+    const row = {
+      invite_id: nextId(invites, "invite_id"),
+      code: uniqueInviteCode(invites, accounts),
+      note,
+      max_uses: maxUses,
+      uses: 0,
+      expires_at: expiresAt,
+      revoked: false,
+      revoked_at: null,
+      created_at: new Date().toISOString(),
+      created_by: auth.account.account_id,
+      used_by: []
+    };
+    invites.push(row);
+    writeCollection("invites", invites);
+    return send(res, 201, { ok: true, invite: publicInvite(row) });
+  }
+
+  if (action === "invites" && method === "POST" && parts[2] === "revoke") {
+    const auth = getSession(req);
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    const inviteId = Number(body.invite_id);
+    if (!inviteId) return send(res, 400, { error: "invite_id required" });
+    const invites = readCollection("invites");
+    const row = invites.find((i) => Number(i.invite_id) === inviteId);
+    if (!row) return send(res, 404, { error: "Invite not found" });
+    if (!row.revoked) {
+      row.revoked = true;
+      row.revoked_at = new Date().toISOString();
+      writeCollection("invites", invites);
+    }
+    return send(res, 200, { ok: true, invite: publicInvite(row) });
+  }
+
+  if (action === "signup" && method === "POST") {
+    const limited = rateLimitAuth(req, "signup");
+    if (limited) return sendRateLimited(res, limited);
+    const body = (await readBody(req)) || {};
+    const code = normalizeInviteCode(body.invite_code);
+    if (!code) return send(res, 400, { error: "Invite code is required" });
+
+    const login = String(body.login == null ? "" : body.login).trim();
+    if (!LOGIN_RE.test(login)) {
+      return send(res, 400, {
+        error: "Username must be 3–32 characters and use only letters, numbers, dots, underscores, or hyphens"
+      });
+    }
+    const password = String(body.password || "");
+    if (password.length < 6) {
+      return send(res, 400, { error: "Password must be at least 6 characters" });
+    }
+    if (password.length > 128) {
+      return send(res, 400, { error: "Password must be at most 128 characters" });
+    }
+    if (isProduction() && password === PUBLISHED_ADMIN_PASSWORD) {
+      return send(res, 400, { error: "Choose a different password" });
+    }
+    const playerName = String(body.player_name == null ? "" : body.player_name).trim();
+    if (!playerName) return send(res, 400, { error: "Player name is required" });
+    if (playerName.length > 80) return send(res, 400, { error: "Player name must be at most 80 characters" });
+    const displayName = String(body.display_name == null ? "" : body.display_name).trim();
+    if (!displayName) return send(res, 400, { error: "Display name is required" });
+    if (displayName.length > 80) return send(res, 400, { error: "Display name must be at most 80 characters" });
+    const allegiance = String(body.allegiance == null ? "" : body.allegiance).trim();
+    if (!ALLEGIANCES.includes(allegiance)) {
+      return send(res, 400, { error: "Allegiance must be Loyalist, Traitor, or Blackshield" });
+    }
+    const contactRaw = String(body.contact == null ? "" : body.contact).trim();
+    if (contactRaw.length > 120) return send(res, 400, { error: "Contact must be at most 120 characters" });
+    const notesRaw = String(body.notes == null ? "" : body.notes).trim();
+    if (notesRaw.length > 500) return send(res, 400, { error: "Notes must be at most 500 characters" });
+    const contact = contactRaw || null;
+    const notes = notesRaw || null;
+    let startSysId = null;
+    if (body.start_sys_id != null && body.start_sys_id !== "") {
+      startSysId = Number(body.start_sys_id);
+      if (!startSysId) return send(res, 400, { error: "Starting system is not valid" });
+      const systems = readCollection("systems");
+      if (!systems.some((s) => Number(s.sys_id) === startSysId)) {
+        return send(res, 400, { error: "Starting system is not valid" });
+      }
+    }
+
+    const invites = readCollection("invites");
+    const invite = findInvite(invites, code);
+    const rejection = inviteError(invite);
+    if (rejection) return send(res, 400, { error: rejection });
+
+    const accounts = readCollection("accounts");
+    if (findAccountByLogin(accounts, login)) {
+      return send(res, 409, { error: "That username is already taken" });
+    }
+
+    const players = readCollection("players");
+    const player = {
+      player_id: nextId(players, "player_id"),
+      player_name: playerName,
+      display_name: displayName,
+      contact,
+      status: "active",
+      role: "player",
+      allegiance,
+      start_sys_id: startSysId,
+      notes,
+      joined_at: new Date().toISOString().slice(0, 10)
+    };
+    const { salt, hash } = hashPassword(password);
+    const account = {
+      account_id: nextId(accounts, "account_id"),
+      role: "player",
+      label: displayName,
+      player_id: player.player_id,
+      login,
+      pass_hash: hash,
+      pass_salt: salt,
+      invite_code: null,
+      provider: "invite",
+      created_at: new Date().toISOString().slice(0, 10)
+    };
+    players.push(player);
+    accounts.push(account);
+    invite.uses = (Number(invite.uses) || 0) + 1;
+    if (!Array.isArray(invite.used_by)) invite.used_by = [];
+    invite.used_by.push({
+      account_id: account.account_id,
+      player_id: player.player_id,
+      login: account.login,
+      player_name: player.player_name,
+      display_name: player.display_name,
+      used_at: new Date().toISOString()
+    });
+    writeCollection("players", players);
+    writeCollection("accounts", accounts);
+    writeCollection("invites", invites);
+
+    const { token, expires } = createSession(account.account_id);
+    return send(res, 201, { ok: true, token, expires_at: expires.toISOString(), ...mePayload(account) }, {
+      "Set-Cookie": sessionCookie(req, token, SESSION_DAYS * 86400)
+    });
   }
 
   return send(res, 404, { error: "Unknown auth action" });
@@ -546,20 +1030,878 @@ function applyPendingMoves(forces) {
   });
 }
 
-function markForcesFought(game) {
-  if (!game || !game.result || game.result === "in_progress") return;
-  const ids = [game.attacker_force_id, game.defender_force_id].filter((id) => id != null);
-  if (!ids.length) return;
+const DECISIVE_RESULTS = ["attacker_win", "defender_win", "draw", "conceded"];
+
+function isDecisive(result) {
+  return DECISIVE_RESULTS.includes(result);
+}
+
+function cloneData(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function battleState() {
+  return {
+    forces: readCollection("forces"),
+    systems: readCollection("systems"),
+    players: readCollection("players")
+  };
+}
+
+function saveBattleState(state) {
+  writeCollection("forces", state.forces);
+  writeCollection("systems", state.systems);
+}
+
+function isParticipant(game, playerId) {
+  const pid = Number(playerId);
+  return Number(game.attacker_id) === pid || Number(game.defender_id) === pid;
+}
+
+function sanitizeGameBody(body) {
+  if (!body || typeof body !== "object") return;
+  delete body.resolution;
+  delete body.result_state;
+  delete body.proposed_by;
+  delete body.proposed_at;
+  delete body.disputed_by;
+  delete body.disputed_at;
+  delete body.dispute_note;
+  delete body.applied_at;
+  delete body.assigned;
+}
+
+function normalizeGameResult(body) {
+  if (!body.result) body.result = "in_progress";
+  if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
+  else if (body.result === "defender_win") body.winner_id = Number(body.defender_id);
+  else if (body.result === "draw" || body.result === "in_progress") body.winner_id = null;
+  else if (body.result === "conceded" && body.winner_id != null && body.winner_id !== "") {
+    body.winner_id = Number(body.winner_id);
+  }
+  ["attacker_id", "defender_id", "attacker_force_id", "defender_force_id", "sys_id", "turn"].forEach((key) => {
+    if (body[key] != null && body[key] !== "") body[key] = Number(body[key]);
+  });
+}
+
+function validateGameWrite(body, auth, existing) {
+  const isAdmin = auth.account.role === "campaign_admin";
+  if (!isAdmin) {
+    const playerId = Number(auth.account.player_id);
+    if (existing && !isParticipant(existing, playerId)) {
+      return { status: 403, error: "You can only edit a battle you are taking part in" };
+    }
+  }
+  const attackerId = Number(body.attacker_id);
+  const defenderId = Number(body.defender_id);
+  if (!attackerId || !defenderId) return { status: 400, error: "attacker_id and defender_id are required" };
+  if (attackerId === defenderId) return { status: 400, error: "Attacker and defender must be different players" };
+  if (!Number(body.sys_id)) return { status: 400, error: "sys_id is required" };
+  if (!["attacker_win", "defender_win", "draw", "conceded", "in_progress"].includes(body.result)) {
+    return { status: 400, error: "result is not valid" };
+  }
+  if (body.result === "conceded") {
+    const winner = Number(body.winner_id);
+    if (winner !== attackerId && winner !== defenderId) {
+      return { status: 400, error: "A conceded battle needs winner_id set to the attacker or the defender" };
+    }
+  }
+
+  const systems = readCollection("systems");
+  if (!systems.some((s) => Number(s.sys_id) === Number(body.sys_id))) {
+    return { status: 404, error: "System not found" };
+  }
   const forces = readCollection("forces");
-  let changed = false;
-  ids.forEach((id) => {
-    const f = forces.find((x) => x.force_id === Number(id));
-    if (f && !f.fought_this_turn) {
-      f.fought_this_turn = true;
-      changed = true;
+  function forceById(id) {
+    if (id == null || id === "") return null;
+    return forces.find((f) => Number(f.force_id) === Number(id)) || null;
+  }
+  const attF = forceById(body.attacker_force_id);
+  const defF = forceById(body.defender_force_id);
+  if (body.attacker_force_id && !attF) return { status: 404, error: "Attacker force not found" };
+  if (body.defender_force_id && !defF) return { status: 404, error: "Defender force not found" };
+
+  if (isAdmin) return null;
+
+  const playerId = Number(auth.account.player_id);
+  if (!isParticipant(body, playerId)) {
+    return { status: 403, error: "You can only record a battle you are taking part in" };
+  }
+  const meta = readCollection("meta");
+  if ((meta.phase || "Logistics") !== "Battles") {
+    return { status: 409, error: "Battles can only be recorded during the Battles phase" };
+  }
+  if (!attF || !defF) return { status: 400, error: "Both forces are required" };
+  if (Number(attF.force_id) === Number(defF.force_id)) return { status: 400, error: "A force cannot fight itself" };
+  if (Number(attF.player_id) !== attackerId) {
+    return { status: 403, error: "The attacker force must belong to the attacker" };
+  }
+  if (Number(defF.player_id) !== defenderId) {
+    return { status: 403, error: "The defender force must belong to the defender" };
+  }
+  const ownForce = attackerId === playerId ? attF : defF;
+  if (Number(ownForce.player_id) !== playerId) {
+    return { status: 403, error: "You can only put your own force on your side" };
+  }
+  if (!existing) {
+    if (attF.status === "destroyed" || defF.status === "destroyed") {
+      return { status: 400, error: "Destroyed forces cannot be assigned to a new battle" };
+    }
+    if (Number(attF.sys_id) !== Number(body.sys_id) || Number(defF.sys_id) !== Number(body.sys_id)) {
+      return { status: 400, error: "Both forces must be in the battle's system" };
+    }
+  }
+  if (attF.allegiance && defF.allegiance && attF.allegiance === defF.allegiance) {
+    return { status: 400, error: "The two forces must be on opposing sides" };
+  }
+  return null;
+}
+
+function sameProposal(previous, game) {
+  if (!previous) return false;
+  return (
+    previous.result === game.result &&
+    String(previous.winner_id ?? "") === String(game.winner_id ?? "") &&
+    Number(previous.attacker_force_id) === Number(game.attacker_force_id) &&
+    Number(previous.defender_force_id) === Number(game.defender_force_id) &&
+    Number(previous.sys_id) === Number(game.sys_id)
+  );
+}
+
+function otherAppliedFought(games, forceId, exceptGameId) {
+  return games.some((g) => {
+    if (Number(g.game_id) === Number(exceptGameId)) return false;
+    if (!g.resolution || !Array.isArray(g.resolution.forces)) return false;
+    return g.resolution.forces.some((e) => Number(e.force_id) === Number(forceId) && e.fought);
+  });
+}
+
+function reverseResolution(game, state, games) {
+  const resolution = game && game.resolution;
+  if (!resolution) return;
+  const effect = resolution.system;
+  if (effect && effect.sys_id != null) {
+    const sys = state.systems.find((s) => Number(s.sys_id) === Number(effect.sys_id));
+    if (sys) {
+      sys.sys_durability = Math.max(0, (Number(sys.sys_durability) || 0) - Number(effect.durability_delta || 0));
+      sys.sys_power = Math.max(0, (Number(sys.sys_power) || 0) - Number(effect.power_delta || 0));
+      sys.sys_loyal = Math.max(0, (Number(sys.sys_loyal) || 0) - Number(effect.loyal_delta || 0));
+      sys.sys_traitor = Math.max(0, (Number(sys.sys_traitor) || 0) - Number(effect.traitor_delta || 0));
+      if (effect.prev_controller) sys.sys_controller = effect.prev_controller;
+    }
+  }
+  (resolution.forces || []).forEach((entry) => {
+    const force = state.forces.find((f) => Number(f.force_id) === Number(entry.force_id));
+    if (!force) return;
+    force.strength = Math.max(0, (Number(force.strength) || 0) - Number(entry.strength_delta || 0));
+    if (entry.set_destroyed) force.status = entry.prev_status || "active";
+    if (entry.fought && !otherAppliedFought(games, force.force_id, game.game_id)) {
+      force.fought_this_turn = false;
     }
   });
-  if (changed) writeCollection("forces", forces);
+  game.resolution = null;
+  state.systems = recomputeControllers(state.systems);
+}
+
+function winnerAllegiance(game, state) {
+  if (!game || game.result === "draw" || game.result === "in_progress") return null;
+  let winnerPlayerId = null;
+  let winnerForceId = null;
+  if (game.result === "attacker_win") {
+    winnerPlayerId = game.attacker_id;
+    winnerForceId = game.attacker_force_id;
+  } else if (game.result === "defender_win") {
+    winnerPlayerId = game.defender_id;
+    winnerForceId = game.defender_force_id;
+  } else if (game.result === "conceded") {
+    winnerPlayerId = game.winner_id;
+    if (Number(winnerPlayerId) === Number(game.attacker_id)) winnerForceId = game.attacker_force_id;
+    else if (Number(winnerPlayerId) === Number(game.defender_id)) winnerForceId = game.defender_force_id;
+  } else return null;
+
+  const force = state.forces.find((f) => Number(f.force_id) === Number(winnerForceId));
+  if (force && force.allegiance) return force.allegiance;
+  const player = state.players.find((p) => Number(p.player_id) === Number(winnerPlayerId));
+  return player ? player.allegiance : null;
+}
+
+function loserForceIds(game) {
+  if (game.result === "draw") {
+    return [game.attacker_force_id, game.defender_force_id].filter((id) => id != null && id !== "");
+  }
+  if (game.result === "attacker_win") return [game.defender_force_id].filter((id) => id != null && id !== "");
+  if (game.result === "defender_win") return [game.attacker_force_id].filter((id) => id != null && id !== "");
+  if (game.result === "conceded") {
+    if (Number(game.winner_id) === Number(game.attacker_id)) {
+      return [game.defender_force_id].filter((id) => id != null && id !== "");
+    }
+    if (Number(game.winner_id) === Number(game.defender_id)) {
+      return [game.attacker_force_id].filter((id) => id != null && id !== "");
+    }
+  }
+  return [];
+}
+
+/**
+ * Apply one confirmed battle to current forces and the system.
+ * Durability drops by 1 while it is above 0. The battle that reaches 0 does
+ * not also drop power; the next battle does. Power does not go below 0.
+ * A draw reduces both strengths and does not change sys_loyal / sys_traitor.
+ * Blackshield winners do not change either system score (there is no track).
+ */
+function applyResolution(game, state, games) {
+  if (!game || !isDecisive(game.result) || game.result_state !== "applied") {
+    game.resolution = null;
+    return;
+  }
+  const sys = state.systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
+  const systemEffect = {
+    sys_id: Number(game.sys_id),
+    durability_delta: 0,
+    power_delta: 0,
+    loyal_delta: 0,
+    traitor_delta: 0,
+    prev_controller: sys ? sys.sys_controller || null : null
+  };
+  if (sys) {
+    const dur = systemDurability(sys);
+    if (dur > 0) {
+      systemEffect.durability_delta = -1;
+      sys.sys_durability = dur - 1;
+    } else {
+      sys.sys_durability = 0;
+      const power = Number(sys.sys_power) || 0;
+      if (power > 0) {
+        systemEffect.power_delta = -1;
+        sys.sys_power = power - 1;
+      }
+    }
+    const alleg = winnerAllegiance(game, state);
+    if (alleg === "Loyalist") {
+      systemEffect.loyal_delta = 1;
+      sys.sys_loyal = (Number(sys.sys_loyal) || 0) + 1;
+    } else if (alleg === "Traitor") {
+      systemEffect.traitor_delta = 1;
+      sys.sys_traitor = (Number(sys.sys_traitor) || 0) + 1;
+    }
+  }
+
+  const foughtIds = [game.attacker_force_id, game.defender_force_id].filter((id) => id != null && id !== "");
+  const loseIds = new Set(loserForceIds(game).map((id) => Number(id)));
+  const forceEffects = [];
+  foughtIds.forEach((id) => {
+    const force = state.forces.find((f) => Number(f.force_id) === Number(id));
+    if (!force) return;
+    const effect = {
+      force_id: force.force_id,
+      strength_delta: 0,
+      set_destroyed: false,
+      prev_status: force.status || "active",
+      fought: true
+    };
+    if (loseIds.has(Number(id))) {
+      const before = Number(force.strength) || 0;
+      const next = Math.max(0, before - 1);
+      effect.strength_delta = next - before;
+      force.strength = next;
+      if (next <= 0 && force.status !== "destroyed") {
+        effect.set_destroyed = true;
+        force.status = "destroyed";
+      }
+    }
+    force.fought_this_turn = true;
+    forceEffects.push(effect);
+  });
+
+  game.resolution = {
+    system: systemEffect,
+    forces: forceEffects,
+    result: game.result,
+    at: new Date().toISOString()
+  };
+  state.systems = recomputeControllers(state.systems);
+}
+
+function settleGame(game, previous, state, games, actor) {
+  // Same outcome saved again (a note tweak, a repeated submit) must not
+  // apply the strength and system deltas a second time.
+  if (
+    previous &&
+    previous.result_state === "applied" &&
+    previous.resolution &&
+    sameProposal(previous, game)
+  ) {
+    game.result_state = "applied";
+    game.proposed_by = previous.proposed_by || null;
+    game.resolution = previous.resolution;
+    return;
+  }
+  if (previous && previous.resolution) reverseResolution(previous, state, games);
+  if (!isDecisive(game.result)) {
+    game.result_state = "open";
+    game.proposed_by = null;
+    game.resolution = null;
+    return;
+  }
+  const isAdmin = actor.role === "campaign_admin";
+  let apply = false;
+  if (isAdmin && !actor.confirming) {
+    apply = true;
+    if (previous && previous.proposed_by) game.proposed_by = previous.proposed_by;
+    else game.proposed_by = null;
+  } else if (actor.confirming && previous) {
+    apply = true;
+    game.proposed_by = previous.proposed_by;
+  } else if (
+    previous &&
+    previous.result_state === "pending" &&
+    Number(previous.proposed_by) !== Number(actor.player_id) &&
+    sameProposal(previous, game)
+  ) {
+    apply = true;
+    game.proposed_by = previous.proposed_by;
+  } else {
+    const freshProposal =
+      !previous ||
+      previous.result_state !== "pending" ||
+      !sameProposal(previous, game) ||
+      Number(previous.proposed_by) !== Number(actor.player_id);
+    game.proposed_by = Number(actor.player_id);
+    game.proposed_at = freshProposal
+      ? new Date().toISOString()
+      : previous.proposed_at || new Date().toISOString();
+    if (freshProposal) {
+      game.disputed_by = null;
+      game.disputed_at = null;
+      game.dispute_note = null;
+    }
+  }
+  if (apply) {
+    game.result_state = "applied";
+    applyResolution(game, state, games);
+  } else {
+    game.result_state = "pending";
+    game.resolution = null;
+  }
+}
+
+function activeSideForces(forces, sysId, allegiance) {
+  return forces
+    .filter(
+      (f) =>
+        f.status === "active" &&
+        Number(f.sys_id) === Number(sysId) &&
+        f.allegiance === allegiance
+    )
+    .sort((a, b) => Number(a.force_id) - Number(b.force_id));
+}
+
+/**
+ * Pair opposing forces in a system.
+ * The smaller side is reused so every force on the larger side fights once.
+ * Counts are split as evenly as possible: 2 vs 5 means one force fights three
+ * times and the other twice (sorted by force_id, extras go to the lower ids).
+ * Loyalist is the attacker and Traitor the defender so the pairing is stable.
+ * Only Loyalist vs Traitor is auto-paired. Blackshield forces are left out.
+ */
+function buildPairings(loyal, traitor) {
+  if (!loyal.length || !traitor.length) return [];
+  const loyalIsSmallerOrEqual = loyal.length <= traitor.length;
+  const minority = loyalIsSmallerOrEqual ? loyal : traitor;
+  const majority = loyalIsSmallerOrEqual ? traitor : loyal;
+  const base = Math.floor(majority.length / minority.length);
+  const extra = majority.length % minority.length;
+  const pairs = [];
+  let majorityIndex = 0;
+  minority.forEach((minForce, i) => {
+    const fights = base + (i < extra ? 1 : 0);
+    for (let k = 0; k < fights; k++) {
+      const majForce = majority[majorityIndex++];
+      const attacker = minForce.allegiance === "Loyalist" ? minForce : majForce;
+      const defender = attacker === minForce ? majForce : minForce;
+      pairs.push({ attacker, defender });
+    }
+  });
+  return pairs;
+}
+
+function pairingKey(a, b) {
+  const x = Number(a);
+  const y = Number(b);
+  return x < y ? x + ":" + y : y + ":" + x;
+}
+
+function assignBattles(turn) {
+  const forces = readCollection("forces");
+  const systems = readCollection("systems");
+  const games = readCollection("games");
+  const sysIds = new Set();
+  forces.forEach((f) => {
+    if (f.status === "active" && f.sys_id != null) sysIds.add(Number(f.sys_id));
+  });
+  let created = 0;
+  sysIds.forEach((sysId) => {
+    if (!systems.some((s) => Number(s.sys_id) === sysId)) return;
+    const desired = buildPairings(
+      activeSideForces(forces, sysId, "Loyalist"),
+      activeSideForces(forces, sysId, "Traitor")
+    );
+    const have = new Map();
+    games.forEach((g) => {
+      if (Number(g.turn) !== Number(turn)) return;
+      if (Number(g.sys_id) !== Number(sysId)) return;
+      if (g.attacker_force_id == null || g.defender_force_id == null) return;
+      const key = pairingKey(g.attacker_force_id, g.defender_force_id);
+      have.set(key, (have.get(key) || 0) + 1);
+    });
+    desired.forEach((pair) => {
+      const key = pairingKey(pair.attacker.force_id, pair.defender.force_id);
+      const left = have.get(key) || 0;
+      if (left > 0) {
+        have.set(key, left - 1);
+        return;
+      }
+      games.push({
+        game_id: nextId(games, "game_id"),
+        turn: Number(turn),
+        played_on: null,
+        sys_id: sysId,
+        game_system: pair.attacker.game_system || pair.defender.game_system || "HH",
+        mission: null,
+        points: pair.attacker.points || pair.defender.points || null,
+        attacker_id: Number(pair.attacker.player_id),
+        defender_id: Number(pair.defender.player_id),
+        attacker_force_id: Number(pair.attacker.force_id),
+        defender_force_id: Number(pair.defender.force_id),
+        attacker_vp: null,
+        defender_vp: null,
+        result: "in_progress",
+        winner_id: null,
+        attacker_list: null,
+        defender_list: null,
+        notes: "Assigned when the Battles phase began",
+        result_state: "open",
+        proposed_by: null,
+        resolution: null,
+        assigned: true
+      });
+      created += 1;
+    });
+  });
+  if (created) writeCollection("games", games);
+  return created;
+}
+
+async function createBattle(res, auth, body) {
+  sanitizeGameBody(body);
+  normalizeGameResult(body);
+  const problem = validateGameWrite(body, auth, null);
+  if (problem) return send(res, problem.status, { error: problem.error });
+  const list = readCollection("games");
+  if (body.game_id == null || body.game_id === "") body.game_id = nextId(list, "game_id");
+  else body.game_id = Number(body.game_id);
+  if (list.some((r) => Number(r.game_id) === Number(body.game_id))) {
+    return send(res, 409, { error: "ID already exists" });
+  }
+  body.resolution = null;
+  body.result_state = "open";
+  body.proposed_by = null;
+  const state = battleState();
+  settleGame(body, null, state, list, auth.account);
+  list.push(body);
+  writeCollection("games", list);
+  saveBattleState(state);
+  announceBattleChange(null, body, auth.account);
+  return send(res, 201, body);
+}
+
+async function updateBattle(res, auth, existing, list, idx, body) {
+  sanitizeGameBody(body);
+  const merged = { ...existing, ...body, game_id: existing.game_id };
+  normalizeGameResult(merged);
+  const problem = validateGameWrite(merged, auth, existing);
+  if (problem) return send(res, problem.status, { error: problem.error });
+  const previous = cloneData(existing);
+  merged.resolution = null;
+  const state = battleState();
+  settleGame(merged, previous, state, list, auth.account);
+  list[idx] = merged;
+  writeCollection("games", list);
+  saveBattleState(state);
+  announceBattleChange(previous, merged, auth.account);
+  return send(res, 200, merged);
+}
+
+function replaceBattles(res, body) {
+  const state = battleState();
+  const old = readCollection("games");
+  old.forEach((g) => {
+    if (g.resolution) reverseResolution(g, state, old);
+  });
+  const next = [];
+  for (const raw of body) {
+    if (!raw || typeof raw !== "object") return send(res, 400, { error: "Expected game objects" });
+    const game = { ...raw };
+    sanitizeGameBody(game);
+    normalizeGameResult(game);
+    if (game.game_id == null || game.game_id === "") game.game_id = nextId(next, "game_id");
+    else game.game_id = Number(game.game_id);
+    game.resolution = null;
+    if (isDecisive(game.result)) {
+      game.result_state = "applied";
+      game.proposed_by = null;
+      applyResolution(game, state, next);
+    } else {
+      game.result_state = "open";
+      game.proposed_by = null;
+      game.resolution = null;
+    }
+    next.push(game);
+  }
+  writeCollection("games", next);
+  saveBattleState(state);
+  return send(res, 200, next);
+}
+
+async function confirmBattle(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["player", "campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  const isAdmin = auth.account.role === "campaign_admin";
+  const playerId = Number(auth.account.player_id);
+  if (!isAdmin && !isParticipant(existing, playerId)) {
+    return send(res, 403, { error: "You can only confirm a battle you are taking part in" });
+  }
+  if (existing.result_state === "applied" && existing.resolution) return send(res, 200, existing);
+  const canApply =
+    existing.result_state === "pending" || (isAdmin && existing.result_state === "disputed");
+  if (!isDecisive(existing.result) || !canApply) {
+    return send(res, 409, { error: "This battle has no result waiting to be applied" });
+  }
+  if (!isAdmin && Number(existing.proposed_by) === playerId) {
+    return send(res, 403, { error: "Waiting for your opponent to confirm this result" });
+  }
+  const previous = cloneData(existing);
+  const game = cloneData(existing);
+  const state = battleState();
+  settleGame(game, previous, state, list, { ...auth.account, confirming: true });
+  list[idx] = game;
+  writeCollection("games", list);
+  saveBattleState(state);
+  announceBattleChange(previous, game, auth.account);
+  return send(res, 200, game);
+}
+
+function playerLabel(playerId) {
+  const players = readCollection("players");
+  const player = players.find((p) => Number(p.player_id) === Number(playerId));
+  if (!player) return "Player " + playerId;
+  return player.display_name || "Player " + playerId;
+}
+
+function battlePlace(game) {
+  const systems = readCollection("systems");
+  const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
+  const where = sys && sys.sys_name ? sys.sys_name : "system " + game.sys_id;
+  return "battle #" + game.game_id + " at " + where;
+}
+
+function resultPhrase(result) {
+  return (
+    {
+      attacker_win: "an attacker win",
+      defender_win: "a defender win",
+      draw: "a draw",
+      conceded: "a concession"
+    }[result] || "a result"
+  );
+}
+
+function otherParticipant(game, playerId) {
+  if (Number(game.attacker_id) === Number(playerId)) return Number(game.defender_id);
+  if (Number(game.defender_id) === Number(playerId)) return Number(game.attacker_id);
+  return null;
+}
+
+function writeNotices(entries) {
+  if (!entries || !entries.length) return;
+  const list = readCollection("notifications");
+  entries.forEach((entry) => {
+    list.push({
+      notification_id: nextId(list, "notification_id"),
+      player_id: entry.player_id == null ? null : Number(entry.player_id),
+      audience: entry.audience || "player",
+      kind: entry.kind,
+      text: entry.text,
+      ref: entry.ref || null,
+      read: false,
+      created_at: new Date().toISOString()
+    });
+  });
+  writeCollection("notifications", list.length > 500 ? list.slice(list.length - 500) : list);
+}
+
+function announceBattleChange(previous, game, actor) {
+  if (!game) return;
+  const notices = [];
+  const ref = { type: "game", game_id: game.game_id };
+  const title = battlePlace(game);
+  const prevState = previous ? previous.result_state : null;
+  const proposalChanged =
+    !previous ||
+    !sameProposal(previous, game) ||
+    Number(previous.proposed_by) !== Number(game.proposed_by) ||
+    prevState !== "pending";
+
+  if (game.result_state === "pending" && proposalChanged && actor.role !== "campaign_admin") {
+    const opponent = otherParticipant(game, game.proposed_by);
+    if (opponent) {
+      notices.push({
+        player_id: opponent,
+        audience: "player",
+        kind: "battle_result_submitted",
+        text: playerLabel(game.proposed_by) + " submitted " + resultPhrase(game.result) + " for " + title,
+        ref
+      });
+    }
+  }
+
+  if (game.result_state === "applied" && prevState !== "applied") {
+    const adminDidIt = actor.role === "campaign_admin";
+    const who = adminDidIt ? "The campaign admin" : playerLabel(actor.player_id);
+    const targets = new Set();
+    if (adminDidIt) {
+      if (game.attacker_id) targets.add(Number(game.attacker_id));
+      if (game.defender_id) targets.add(Number(game.defender_id));
+    } else if (game.proposed_by) {
+      targets.add(Number(game.proposed_by));
+    }
+    targets.forEach((pid) => {
+      if (!pid || (!adminDidIt && Number(pid) === Number(actor.player_id))) return;
+      notices.push({
+        player_id: pid,
+        audience: "player",
+        kind: adminDidIt ? "battle_result_applied" : "battle_result_confirmed",
+        text: adminDidIt
+          ? who + " applied the result for " + title
+          : who + " confirmed your result for " + title,
+        ref
+      });
+    });
+  }
+
+  writeNotices(notices);
+}
+
+async function disputeBattle(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["player", "campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const body = (await readBody(req)) || {};
+  const note = clipText(body.note, 300);
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  const isAdmin = auth.account.role === "campaign_admin";
+  const playerId = Number(auth.account.player_id);
+  if (!isAdmin && !isParticipant(existing, playerId)) {
+    return send(res, 403, { error: "You can only dispute a battle you are taking part in" });
+  }
+  if (!isAdmin && Number(existing.proposed_by) === playerId) {
+    return send(res, 403, { error: "You can't dispute your own result" });
+  }
+  if (existing.result_state !== "pending") {
+    return send(res, 409, { error: "Only a result waiting for confirmation can be disputed" });
+  }
+  const game = cloneData(existing);
+  if (game.resolution) {
+    const state = battleState();
+    reverseResolution(game, state, list);
+    saveBattleState(state);
+  }
+  game.result_state = "disputed";
+  game.resolution = null;
+  game.disputed_by = playerId || null;
+  game.disputed_at = new Date().toISOString();
+  game.dispute_note = note || null;
+  list[idx] = game;
+  writeCollection("games", list);
+  const title = battlePlace(game);
+  const who = isAdmin ? "The campaign admin" : playerLabel(playerId);
+  const ref = { type: "game", game_id: game.game_id };
+  const notices = [
+    {
+      player_id: null,
+      audience: "campaign_admin",
+      kind: "battle_result_disputed",
+      text: who + " disputed " + resultPhrase(game.result) + " for " + title,
+      ref
+    }
+  ];
+  if (game.proposed_by && Number(game.proposed_by) !== playerId) {
+    notices.push({
+      player_id: Number(game.proposed_by),
+      audience: "player",
+      kind: "battle_result_disputed",
+      text: who + " disputed your result for " + title,
+      ref
+    });
+  }
+  writeNotices(notices);
+  return send(res, 200, game);
+}
+
+async function voidBattle(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  if (!["pending", "disputed", "applied"].includes(existing.result_state)) {
+    return send(res, 409, { error: "This battle has no result to void" });
+  }
+  const game = cloneData(existing);
+  if (game.resolution) {
+    const state = battleState();
+    reverseResolution(game, state, list);
+    saveBattleState(state);
+  }
+  game.result = "in_progress";
+  game.winner_id = null;
+  game.result_state = "open";
+  game.proposed_by = null;
+  game.proposed_at = null;
+  game.disputed_by = null;
+  game.disputed_at = null;
+  game.dispute_note = null;
+  game.resolution = null;
+  list[idx] = game;
+  writeCollection("games", list);
+  const title = battlePlace(game);
+  const ref = { type: "game", game_id: game.game_id };
+  const notices = [];
+  [existing.attacker_id, existing.defender_id].forEach((pid) => {
+    if (!pid) return;
+    notices.push({
+      player_id: Number(pid),
+      audience: "player",
+      kind: "battle_result_voided",
+      text: "The campaign admin voided the result for " + title,
+      ref
+    });
+  });
+  writeNotices(notices);
+  return send(res, 200, game);
+}
+
+function describeWaitingGame(game) {
+  const players = readCollection("players");
+  const forces = readCollection("forces");
+  const systems = readCollection("systems");
+  function pname(id) {
+    if (id == null || id === "") return null;
+    const player = players.find((p) => Number(p.player_id) === Number(id));
+    return player ? player.display_name || "Player " + id : "Player " + id;
+  }
+  function fname(id) {
+    if (id == null || id === "") return null;
+    const force = forces.find((f) => Number(f.force_id) === Number(id));
+    return force ? force.force_name : "Force " + id;
+  }
+  const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
+  return {
+    type: "battle_result",
+    game_id: game.game_id,
+    result_state: game.result_state || "open",
+    result: game.result,
+    turn: game.turn || null,
+    sys_id: game.sys_id,
+    system_name: sys && sys.sys_name ? sys.sys_name : "System " + game.sys_id,
+    mission: game.mission || null,
+    attacker_id: game.attacker_id,
+    defender_id: game.defender_id,
+    attacker_name: pname(game.attacker_id),
+    defender_name: pname(game.defender_id),
+    attacker_force: fname(game.attacker_force_id),
+    defender_force: fname(game.defender_force_id),
+    attacker_vp: game.attacker_vp ?? null,
+    defender_vp: game.defender_vp ?? null,
+    proposed_by: game.proposed_by == null ? null : Number(game.proposed_by),
+    proposed_by_name: pname(game.proposed_by),
+    proposed_at: game.proposed_at || null,
+    disputed_by: game.disputed_by == null ? null : Number(game.disputed_by),
+    disputed_by_name: pname(game.disputed_by),
+    disputed_at: game.disputed_at || null,
+    dispute_note: game.dispute_note || null,
+    notes: game.notes || null
+  };
+}
+
+function inboxFor(account) {
+  const games = readCollection("games");
+  const notes = readCollection("notifications");
+  const isAdmin = account.role === "campaign_admin";
+  const pid = account.player_id == null ? null : Number(account.player_id);
+  const actions = [];
+  const mine = [];
+  games
+    .slice()
+    .sort((a, b) => Number(b.game_id) - Number(a.game_id))
+    .forEach((game) => {
+      const state = game.result_state;
+      const card = describeWaitingGame(game);
+      const proposedBy = game.proposed_by == null ? null : Number(game.proposed_by);
+      const involved = pid != null && isParticipant(game, pid);
+      if (state === "pending" && involved && proposedBy !== pid) {
+        actions.push({ ...card, duty: "confirm" });
+      } else if (isAdmin && (state === "pending" || state === "disputed")) {
+        actions.push({ ...card, duty: "admin" });
+      }
+      if (pid != null && proposedBy === pid && (state === "pending" || state === "disputed" || state === "applied")) {
+        mine.push({ ...card, duty: state === "applied" ? "done" : "waiting" });
+      }
+    });
+  const visibleNotes = notes
+    .filter((n) => {
+      if (n.audience === "campaign_admin") return isAdmin;
+      return pid != null && Number(n.player_id) === pid;
+    })
+    .slice()
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))
+    .slice(0, 40);
+  return {
+    actions,
+    mine: mine.slice(0, 20),
+    notifications: visibleNotes,
+    action_count: actions.length,
+    unread_count: visibleNotes.filter((n) => !n.read).length
+  };
+}
+
+async function handleInbox(req, res, parts, method) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["player", "campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  if (method === "GET" && !parts[1]) return send(res, 200, inboxFor(auth.account));
+  if (method === "POST" && parts[1] === "read") {
+    const isAdmin = auth.account.role === "campaign_admin";
+    const pid = auth.account.player_id == null ? null : Number(auth.account.player_id);
+    const list = readCollection("notifications");
+    list.forEach((n) => {
+      if (n.audience === "campaign_admin" && isAdmin) n.read = true;
+      else if ((!n.audience || n.audience === "player") && pid != null && Number(n.player_id) === pid) n.read = true;
+    });
+    writeCollection("notifications", list);
+    return send(res, 200, { ok: true });
+  }
+  return send(res, 404, { error: "Unknown inbox action" });
 }
 
 function checkVictory(meta, systems, forces) {
@@ -697,8 +2039,11 @@ function advanceCampaign(meta, options = {}) {
       log.push("Advanced to Movement phase");
     } else if (phase === "Movement") {
       forces = applyPendingMoves(forces);
+      writeCollection("forces", forces);
+      const assigned = assignBattles(turn);
       phase = "Battles";
       log.push("Applied pending moves; advanced to Battles phase");
+      if (assigned) log.push(`Assigned ${assigned} battle${assigned === 1 ? "" : "s"} between opposing forces`);
     } else {
       // End of Battles → score, recover, new turn
       const gained = scoreFromSystems(systems);
@@ -1169,13 +2514,24 @@ async function handleApi(req, res, pathname) {
   // Player campaign actions (move / reinforce / fortify / generate)
   if (parts[0] === "actions") return handleActions(req, res, parts, method);
 
+  if (parts[0] === "games" && method === "POST" && parts[2] === "confirm") {
+    return confirmBattle(req, res, parts[1]);
+  }
+  if (parts[0] === "games" && method === "POST" && parts[2] === "dispute") {
+    return disputeBattle(req, res, parts[1]);
+  }
+  if (parts[0] === "games" && method === "POST" && parts[2] === "void") {
+    return voidBattle(req, res, parts[1]);
+  }
+  if (parts[0] === "inbox") return handleInbox(req, res, parts, method);
+
   // Public sanitized routes
   if (parts[0] === "public") return handlePublic(req, res, parts, method);
 
   const collection = parts[0];
   const idPart = parts[1];
 
-  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions") {
+  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites" || collection === "notifications") {
     return send(res, 404, { error: "Unknown collection" });
   }
 
@@ -1244,6 +2600,7 @@ async function handleApi(req, res, pathname) {
     if (!isAdmin) return send(res, 403, { error: "Campaign admin only (bulk replace)" });
     const body = await readBody(req);
     if (!Array.isArray(body)) return send(res, 400, { error: "Expected JSON array" });
+    if (collection === "games") return replaceBattles(res, body);
     writeCollection(collection, body);
     return send(res, 200, body);
   }
@@ -1259,6 +2616,7 @@ async function handleApi(req, res, pathname) {
       if (!isAdmin) return send(res, 403, { error: "Use Generate Force action to raise new forces" });
     } else if (collection === "games") {
       if (!isAdmin && !isPlayer) return send(res, 403, { error: "Login required" });
+      return createBattle(res, auth, body);
     } else {
       return send(res, 403, { error: "Forbidden" });
     }
@@ -1270,7 +2628,6 @@ async function handleApi(req, res, pathname) {
     }
     list.push(body);
     writeCollection(collection, list);
-    if (collection === "games") markForcesFought(body);
     return send(res, 201, body);
   }
 
@@ -1318,10 +2675,11 @@ async function handleApi(req, res, pathname) {
       } else {
         return send(res, 403, { error: "Cannot edit this force" });
       }
-    } else if (collection === "systems" || collection === "games") {
-      if (!isAdmin && !(collection === "games" && isPlayer)) {
-        return send(res, 403, { error: "Forbidden" });
-      }
+    } else if (collection === "systems") {
+      if (!isAdmin) return send(res, 403, { error: "Forbidden" });
+    } else if (collection === "games") {
+      if (!isAdmin && !isPlayer) return send(res, 403, { error: "Forbidden" });
+      return updateBattle(res, auth, existing, list, idx, body);
     } else {
       return send(res, 403, { error: "Forbidden" });
     }
@@ -1329,15 +2687,28 @@ async function handleApi(req, res, pathname) {
     body[spec.idKey] = existing[spec.idKey];
     list[idx] = { ...existing, ...body };
     writeCollection(collection, list);
-    if (collection === "games") markForcesFought(list[idx]);
     return send(res, 200, list[idx]);
   }
 
   if (method === "DELETE" && idPart != null && collection !== "meta") {
-    if (!isAdmin) return send(res, 403, { error: "Campaign admin only" });
     const list = readCollection(collection);
+    const existing = list.find((r) => String(r[spec.idKey]) === String(idPart));
+    if (!existing) return send(res, 404, { error: "Not found" });
+    if (!isAdmin) {
+      if (collection !== "games" || !isPlayer) return send(res, 403, { error: "Campaign admin only" });
+      if (!isParticipant(existing, auth.account.player_id)) {
+        return send(res, 403, { error: "You can only delete a battle you are taking part in" });
+      }
+      if (existing.result_state === "applied") {
+        return send(res, 403, { error: "A confirmed battle can only be deleted by the campaign admin" });
+      }
+    }
+    if (collection === "games" && existing.resolution) {
+      const state = battleState();
+      reverseResolution(existing, state, list);
+      saveBattleState(state);
+    }
     const next = list.filter((r) => String(r[spec.idKey]) !== String(idPart));
-    if (next.length === list.length) return send(res, 404, { error: "Not found" });
     writeCollection(collection, next);
     return send(res, 200, { ok: true, deleted: idPart });
   }
@@ -1371,6 +2742,6 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, HOST, () => {
   console.log(`Sunset Heresy server http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
   console.log(`Roles: visitor (public) · player · campaign_admin`);
-  console.log(`Login: POST /api/auth/login  ·  Me: GET /api/auth/me`);
+  console.log(`Login: POST /api/auth/login  ·  Signup: POST /api/auth/signup  ·  Me: GET /api/auth/me`);
   console.log(`Public data: /api/public/{players|forces|systems|games|meta}`);
 });

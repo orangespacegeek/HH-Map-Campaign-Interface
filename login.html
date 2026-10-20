@@ -2,7 +2,21 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Sign in" />
+  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Sign in" />
+  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Log in</title>
   <style>
     :root {
@@ -22,7 +36,7 @@
 
     main {
       flex: 1; padding: 1.5rem 1rem calc(2rem + var(--safe-bottom));
-      max-width: 420px; width: 100%; margin: 0 auto;
+      max-width: 520px; width: 100%; margin: 0 auto;
     }
     h2 { color: var(--accent); font-size: 1.2rem; margin-bottom: 0.35rem; }
     .lead { color: var(--muted); font-size: 0.88rem; margin-bottom: 1.2rem; line-height: 1.45; }
@@ -46,12 +60,20 @@
       display: block; font-size: 0.72rem; color: var(--muted);
       text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem;
     }
-    .form-group input {
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
       width: 100%; background: var(--panel-2); border: 1px solid var(--border);
       color: var(--text); padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.95rem;
+      font-family: inherit;
     }
-    .form-group input:focus { outline: none; border-color: var(--accent); }
+    .form-group textarea { min-height: 68px; resize: vertical; }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus { outline: none; border-color: var(--accent); }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
     .hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; line-height: 1.35; }
+    @media (max-width: 560px) { .form-row { grid-template-columns: 1fr; } }
 
     button.primary {
       width: 100%; margin-top: 0.4rem; appearance: none; border: none;
@@ -85,36 +107,50 @@
 </head>
 <body>
   <header class="site-header">
-    <div class="site-header-inner">
-      <img src="Sunset Heresy-ff-02.png" alt="Sunset Heresy" />
-      <div class="titles">
-        <h1>Sunset Heresy</h1>
-        <div class="sub">Port Maw Sub-Sector · Campaign Tracker</div>
-      </div>
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Sign in</h1>
+        <span class="sub" id="header-sub">Invite code or username</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login active" href="login.html">Log in</a></span>
     </div>
-    <nav class="site-nav">
-      <a href="index.html">Dashboard</a>
-      <a href="campaign_map.html">Map</a>
-      <a href="player_admin.html" data-role="campaign_admin">Players</a>
-      <a href="forces.html">Forces</a>
-      <a href="systems.html">Systems</a>
-      <a href="games.html">Battles</a>
-      <a href="rules.html">Rules</a>
-      <span id="nav-auth"><a href="login.html" class="active">Log in</a></span>
-    </nav>
-  </header>
-
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
   <main>
     <div id="already" class="who" hidden></div>
 
     <h2>Commander access</h2>
-    <p class="lead">Visitors can view the map and forces without an account. Players and campaign admins sign in here.</p>
+    <p class="lead">Visitors can view the map and forces without an account. Players sign in with the username they chose. New testers need an invite code from the campaign admin.</p>
 
     <div class="tabs" id="tabs">
-      <button type="button" class="tab active" data-tab="admin">Campaign admin</button>
-      <button type="button" class="tab" data-tab="invite">Player invite</button>
+      <button type="button" class="tab active" data-tab="admin">Sign in</button>
+      <button type="button" class="tab" data-tab="signup">Sign up</button>
       <button type="button" class="tab" data-tab="reset" id="tab-reset" hidden>Change password</button>
     </div>
+
+    <div class="msg" id="msg"></div>
 
     <div class="card" id="panel-admin">
       <div class="form-group">
@@ -124,24 +160,72 @@
       <div class="form-group">
         <label for="password">Password</label>
         <input id="password" type="password" autocomplete="current-password" />
-        <div class="hint">Default prototype login is <strong>admin</strong> / <strong>change-me</strong>. To force a new admin password on the host, set <strong>CAMPAIGN_ADMIN_PASSWORD</strong> and <strong>CAMPAIGN_ADMIN_FORCE_PASSWORD=1</strong>, restart, then remove the FORCE flag.</div>
+        <div class="hint">Players use the username and password they chose at sign-up. The campaign admin password is set on the server and is not shown here.</div>
       </div>
       <button type="button" class="primary" id="btn-admin">Sign in</button>
     </div>
 
-    <div class="card" id="panel-invite" hidden>
+    <form class="card" id="panel-signup" hidden autocomplete="off">
       <div class="form-group">
-        <label for="invite">Invite code</label>
-        <input id="invite" placeholder="A1B2C3D4" style="text-transform:uppercase" />
-        <div class="hint">Campaign admin creates an invite for your player record, then you set a password on first login.</div>
+        <label for="su-code">Invite code</label>
+        <input id="su-code" placeholder="AB12-CD34-EF56-7890" style="text-transform:uppercase" autocomplete="off" required />
+        <div class="hint">One code from the campaign admin. It is checked on the server and stops working once it is used up, revoked, or expired.</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-login">Username</label>
+          <input id="su-login" autocomplete="username" maxlength="32" placeholder="vox_commander" required />
+          <div class="hint">3–32 letters, numbers, . _ or -. This is your login.</div>
+        </div>
+        <div class="form-group">
+          <label for="su-pass">Password</label>
+          <input id="su-pass" type="password" autocomplete="new-password" required />
+          <div class="hint">At least 6 characters.</div>
+        </div>
       </div>
       <div class="form-group">
-        <label for="invite-pass">Password</label>
-        <input id="invite-pass" type="password" autocomplete="new-password" />
-        <div class="hint">At least 6 characters. Used for later logins.</div>
+        <label for="su-pass2">Confirm password</label>
+        <input id="su-pass2" type="password" autocomplete="new-password" required />
       </div>
-      <button type="button" class="primary" id="btn-invite">Claim account</button>
-    </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-name">Player name</label>
+          <input id="su-name" maxlength="80" placeholder="Alex Chen" required />
+          <div class="hint">Your name, visible to the campaign admin.</div>
+        </div>
+        <div class="form-group">
+          <label for="su-display">Display name</label>
+          <input id="su-display" maxlength="80" placeholder="The Warsmith" required />
+          <div class="hint">Public handle on the map and force lists.</div>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="su-contact">Contact</label>
+        <input id="su-contact" maxlength="120" placeholder="discord:vox#1234" />
+        <div class="hint">Optional. Not shown on the public map.</div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-allegiance">Allegiance</label>
+          <select id="su-allegiance" required>
+            <option value="Loyalist">Loyalist</option>
+            <option value="Traitor">Traitor</option>
+            <option value="Blackshield">Blackshield</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="su-sys">Starting system</label>
+          <select id="su-sys">
+            <option value="">— None yet —</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="su-notes">Notes</label>
+        <textarea id="su-notes" maxlength="500" placeholder="When you can play, list preferences…"></textarea>
+      </div>
+      <button type="submit" class="primary" id="btn-signup">Create account</button>
+    </form>
 
     <div class="card" id="panel-reset" hidden>
       <div class="form-group">
@@ -161,12 +245,11 @@
       <div class="hint" style="margin-top:0.75rem">
         Lost the campaign admin password? On the host set
         <strong>CAMPAIGN_ADMIN_PASSWORD</strong> to the new value and
-        <strong>CAMPAIGN_ADMIN_FORCE_PASSWORD=1</strong>, restart the service,
-        sign in, then remove the FORCE flag so later UI changes are kept.
+        <strong>CAMPAIGN_ADMIN_FORCE_PASSWORD=1</strong>, then restart.
+        That stores the new password and signs every session out.
+        Remove the FORCE flag afterwards so a later change on this form is kept.
       </div>
     </div>
-
-    <div class="msg" id="msg"></div>
 
     <button type="button" class="ghost" id="btn-logout" hidden>Log out</button>
 
@@ -184,6 +267,7 @@
     function showMsg(text, ok) {
       msg.textContent = text;
       msg.className = "msg " + (ok ? "ok" : "error");
+      msg.scrollIntoView({ block: "center" });
     }
 
     function showTab(which) {
@@ -191,7 +275,7 @@
         t.classList.toggle("active", t.dataset.tab === which);
       });
       document.getElementById("panel-admin").hidden = which !== "admin";
-      document.getElementById("panel-invite").hidden = which !== "invite";
+      document.getElementById("panel-signup").hidden = which !== "signup";
       document.getElementById("panel-reset").hidden = which !== "reset";
       msg.className = "msg";
     }
@@ -202,27 +286,50 @@
 
     document.getElementById("btn-admin").addEventListener("click", async () => {
       try {
-        await SH.login({
+        const me = await SH.login({
           login: document.getElementById("login").value.trim(),
           password: document.getElementById("password").value
         });
-        showMsg("Signed in as campaign admin.", true);
-        setTimeout(() => { location.href = "player_admin.html"; }, 600);
+        showMsg("Signed in as " + (me.label || me.role) + ".", true);
+        const dest = me.role === "campaign_admin" ? "player_admin.html" : "index.html";
+        setTimeout(() => { location.href = dest; }, 600);
       } catch (err) {
         showMsg(err.message || "Login failed", false);
       }
     });
 
-    document.getElementById("btn-invite").addEventListener("click", async () => {
+    document.getElementById("panel-signup").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const password = document.getElementById("su-pass").value;
+      const confirm = document.getElementById("su-pass2").value;
+      if (password.length < 6) {
+        showMsg("Password must be at least 6 characters.", false);
+        return;
+      }
+      if (password !== confirm) {
+        showMsg("Password and confirmation do not match.", false);
+        return;
+      }
+      const btn = document.getElementById("btn-signup");
+      btn.disabled = true;
       try {
-        await SH.login({
-          invite_code: document.getElementById("invite").value.trim(),
-          password: document.getElementById("invite-pass").value
+        const sys = document.getElementById("su-sys").value;
+        const me = await SH.signup({
+          invite_code: document.getElementById("su-code").value.trim(),
+          login: document.getElementById("su-login").value.trim(),
+          password,
+          player_name: document.getElementById("su-name").value.trim(),
+          display_name: document.getElementById("su-display").value.trim(),
+          contact: document.getElementById("su-contact").value.trim(),
+          allegiance: document.getElementById("su-allegiance").value,
+          start_sys_id: sys ? Number(sys) : null,
+          notes: document.getElementById("su-notes").value.trim()
         });
-        showMsg("Account claimed. Welcome, commander.", true);
+        showMsg("Account created. Signed in as " + (me.label || me.login) + ".", true);
         setTimeout(() => { location.href = "index.html"; }, 600);
       } catch (err) {
-        showMsg(err.message || "Claim failed", false);
+        showMsg(err.message || "Sign up failed", false);
+        btn.disabled = false;
       }
     });
 
@@ -256,14 +363,28 @@
 
     (async () => {
       await SH.applyNavPermissions();
+      try {
+        const systems = await SH.list("systems");
+        const sel = document.getElementById("su-sys");
+        (systems || []).forEach((s) => {
+          const opt = document.createElement("option");
+          opt.value = s.sys_id;
+          opt.textContent = s.sys_name || ("System " + s.sys_id);
+          sel.appendChild(opt);
+        });
+      } catch (_) {}
       const me = await SH.me();
+      const requested = new URLSearchParams(location.search).get("tab");
       if (me.authenticated && me.role !== "visitor") {
         document.getElementById("already").hidden = false;
         document.getElementById("already").textContent =
           `Signed in as ${me.label || me.role}` + (me.player_id ? ` (player #${me.player_id})` : "");
         document.getElementById("btn-logout").hidden = false;
         document.getElementById("tab-reset").hidden = false;
-        showTab("reset");
+        if (requested === "signup" || requested === "admin") showTab(requested === "admin" ? "admin" : "signup");
+        else showTab("reset");
+      } else if (requested === "signup" || requested === "invite") {
+        showTab("signup");
       }
     })();
   </script>
