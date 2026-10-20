@@ -669,11 +669,13 @@
   }
 
   function navAuthHtml() {
+    const onLogin = /(?:^|\/)login\.html$/.test(location.pathname);
+    const active = onLogin ? " active" : "";
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
-      return '<a class="nav-account" href="login.html">' + escapeHtml(name) + "</a>";
+      return '<a class="nav-account' + active + '" href="login.html">' + escapeHtml(name) + "</a>";
     }
-    return '<a class="nav-login" href="login.html">Log in</a>';
+    return '<a class="nav-login' + active + '" href="login.html">Log in</a>';
   }
 
   function wireSiteMenu() {
@@ -738,10 +740,10 @@
 
   function escapeHtml(s) {
     return String(s ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;");
+      .replace(/\u0026/g, "\u0026amp;")
+      .replace(/\u003c/g, "\u0026lt;")
+      .replace(/\u003e/g, "\u0026gt;")
+      .replace(/\u0022/g, "\u0026quot;");
   }
 
   async function applyNavPermissions() {

@@ -145,6 +145,15 @@
   filter: brightness(1.06);
 }
 
+.header-end a.nav-account.active {
+  color: var(--accent, #f0c040);
+  background: rgba(240, 192, 64, 0.12);
+}
+
+.header-end a.nav-login.active {
+  box-shadow: inset 0 0 0 2px #0a0a12;
+}
+
 .nav-badge {
   display: inline-flex;
   align-items: center;
@@ -300,7 +309,14 @@
 
   body { overflow-x: hidden; }
 
-  input, select, textarea {
+  input,
+  select,
+  textarea,
+  .search,
+  .form-group input,
+  .form-group select,
+  .form-group textarea,
+  .actions textarea {
     font-size: 16px;
     min-height: 44px;
   }
