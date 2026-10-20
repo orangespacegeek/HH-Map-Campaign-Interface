@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" content="Send the Sunset Heresy campaign admin a note about what broke or what would help." />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Feedback" />
+  <meta property="og:description" content="Send the Sunset Heresy campaign admin a note about what broke or what would help." />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Feedback" />
+  <meta name="twitter:description" content="Send the Sunset Heresy campaign admin a note about what broke or what would help." />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
+  <title>Sunset Heresy – Feedback</title>
+  <style>
+    :root {
+      --bg: #0a0a12; --panel: #12121e; --panel-2: #1a1a28; --border: #3a3a55;
+      --text: #e8e0c8; --muted: #9a9080; --accent: #f0c040; --danger: #ef4444;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+    main { flex: 1; width: 100%; max-width: 640px; margin: 0 auto; padding: 1.1rem 1rem calc(2rem + var(--safe-bottom)); }
+    h2 { color: var(--accent); font-size: 1.2rem; margin-bottom: 0.35rem; }
+    .lead { color: var(--muted); font-size: 0.88rem; line-height: 1.45; margin-bottom: 1rem; }
+    .card { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; margin-bottom: 1rem; }
+    .form-group { margin-bottom: 0.8rem; }
+    label { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
+    input, textarea, select {
+      width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+      padding: 0.65rem 0.75rem; border-radius: 8px; font-size: 16px; font-family: inherit;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    input:focus, textarea:focus, select:focus { outline: none; border-color: var(--accent); }
+    button {
+      width: 100%; appearance: none; border: none; background: var(--accent); color: #0a0a12;
+      font-weight: 600; padding: 0.7rem; border-radius: 8px; font-size: 0.95rem; cursor: pointer;
+    }
+    .msg { margin-top: 0.7rem; padding: 0.55rem 0.7rem; border-radius: 8px; font-size: 0.85rem; display: none; }
+    .msg.error { display: block; background: #3f1515; color: #fca5a5; border: 1px solid var(--danger); }
+    .msg.ok { display: block; background: #14532d; color: #86efac; border: 1px solid #22c55e; }
+    .item { padding: 0.75rem 0; border-bottom: 1px solid #1f1f30; }
+    .item:last-child { border-bottom: none; }
+    .item strong { display: block; font-size: 0.92rem; }
+    .item .meta { color: var(--muted); font-size: 0.75rem; margin-top: 0.2rem; }
+    .item p { margin-top: 0.35rem; font-size: 0.88rem; line-height: 1.4; white-space: pre-wrap; }
+    a { color: var(--accent); }
+  </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
+</head>
+<body>
+  <header class="site-header">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Feedback</h1>
+        <span class="sub" id="header-sub">Bugs and notes</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
+    </div>
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
+  <main>
+    <h2>Report a problem</h2>
+    <p class="lead" id="lead">Tell the campaign admin what broke or what would help. Sign in so they know who sent it.</p>
+    <div id="signed-out" class="card" hidden>
+      <p>Feedback is tied to your account. <a href="login.html">Log in</a> first.</p>
+    </div>
+    <div id="form-card" class="card" hidden>
+      <form id="form">
+        <div class="form-group">
+          <label for="page">Where did this happen?</label>
+          <select id="page">
+            <option value="">Not sure</option>
+            <option>Dashboard</option>
+            <option>Map</option>
+            <option>Forces</option>
+            <option>Systems</option>
+            <option>Battles</option>
+            <option>Actions</option>
+            <option>Players</option>
+            <option>Log in</option>
+            <option>My account</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="message">What should we know?</label>
+          <textarea id="message" maxlength="2000" required placeholder="What you tried, what you expected, and what happened instead."></textarea>
+        </div>
+        <button type="submit">Send feedback</button>
+        <div class="msg" id="form-msg"></div>
+      </form>
+    </div>
+    <div id="inbox" class="card" hidden>
+      <h2 style="font-size:1rem;margin-bottom:0.4rem">Tester feedback</h2>
+      <div id="inbox-list"></div>
+    </div>
+  </main>
+  <script src="js/api.js"></script>
+  <script>
+    function showMsg(kind, text) {
+      const el = document.getElementById("form-msg");
+      el.className = "msg " + kind;
+      el.textContent = text;
+    }
+
+    async function loadInbox() {
+      if (SH.role !== "campaign_admin") return;
+      const box = document.getElementById("inbox");
+      const list = document.getElementById("inbox-list");
+      box.hidden = false;
+      let data;
+      try {
+        data = await SH.listFeedback();
+      } catch (err) {
+        list.textContent = err.message || "Could not load feedback";
+        return;
+      }
+      const rows = data.feedback || [];
+      list.replaceChildren();
+      if (!rows.length) {
+        const p = document.createElement("p");
+        p.className = "meta";
+        p.textContent = "No feedback yet.";
+        list.appendChild(p);
+        return;
+      }
+      rows.forEach((row) => {
+        const item = document.createElement("article");
+        item.className = "item";
+        const title = document.createElement("strong");
+        title.textContent = row.label || row.login || "Account " + row.account_id;
+        const meta = document.createElement("div");
+        meta.className = "meta";
+        const when = row.created_at ? new Date(row.created_at).toLocaleString() : "";
+        meta.textContent = [when, row.page || "No page", row.webhook_delivered ? "Sent to Discord" : ""].filter(Boolean).join(" · ");
+        const body = document.createElement("p");
+        body.textContent = row.message || "";
+        item.append(title, meta, body);
+        list.appendChild(item);
+      });
+    }
+
+    document.getElementById("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      try {
+        await SH.submitFeedback({
+          message: document.getElementById("message").value.trim(),
+          page: document.getElementById("page").value
+        });
+        document.getElementById("message").value = "";
+        showMsg("ok", "Sent. The campaign admin can read it on this page.");
+        await loadInbox();
+      } catch (err) {
+        showMsg("error", err.message || "Could not send");
+      }
+    });
+
+    (async () => {
+      await SH.probe();
+      await SH.applyNavPermissions();
+      if (!SH.isLoggedIn()) {
+        document.getElementById("signed-out").hidden = false;
+        return;
+      }
+      document.getElementById("form-card").hidden = false;
+      document.getElementById("lead").textContent = "This is stored with the campaign. Only the campaign admin can read the list.";
+      await loadInbox();
+    })();
+  </script>
+</body>
+</html>

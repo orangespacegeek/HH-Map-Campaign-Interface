@@ -132,6 +132,7 @@
       color: var(--muted);
       line-height: 1.45;
     }
+    .join-banner[hidden] { display: none !important; }
     .join-banner {
       display: flex;
       flex-wrap: wrap;
@@ -178,14 +179,105 @@
     .hero-meta .v { font-weight: 600; color: var(--text); }
 
     .turn-panel {
-      display: none;
+      display: block;
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 1rem 1.05rem;
       margin-bottom: 1.2rem;
     }
-    .turn-panel.open { display: block; }
+    .admin-hint {
+      margin-top: 0.7rem;
+      font-size: 0.78rem;
+      color: var(--muted);
+      line-height: 1.4;
+    }
+    .keep-sys {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      color: var(--text);
+      margin-bottom: 0.25rem;
+    }
+    .keep-sys input { accent-color: var(--accent); margin-top: 0.15rem; }
+    .keep-sys.is-disabled { color: var(--muted); }
+    .reset-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.62);
+      z-index: 80;
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      padding: 0.75rem;
+      padding-bottom: calc(0.75rem + var(--safe-bottom));
+    }
+    .reset-overlay[hidden] { display: none; }
+    .reset-dialog {
+      width: min(440px, 100%);
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem 1rem 0.9rem;
+      max-height: min(92vh, 680px);
+      overflow: auto;
+    }
+    .reset-dialog h3 {
+      color: var(--accent);
+      font-size: 1.05rem;
+      text-transform: none;
+      letter-spacing: 0;
+      margin-bottom: 0.4rem;
+    }
+    .reset-dialog p,
+    .reset-dialog .field-hint {
+      font-size: 0.8rem;
+      color: var(--muted);
+      line-height: 1.4;
+      margin-bottom: 0.75rem;
+    }
+    .reset-dialog .field-hint { margin: 0 0 0.8rem 1.45rem; }
+    .reset-dialog label.confirm-label {
+      display: block;
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.3rem;
+    }
+    .reset-dialog input[type="text"] {
+      width: 100%;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 0.6rem 0.7rem;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: inherit;
+    }
+    .reset-dialog input[type="text"]:focus { outline: none; border-color: var(--accent); }
+    .reset-actions { display: flex; gap: 0.5rem; margin-top: 0.85rem; }
+    .reset-actions button {
+      flex: 1;
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      padding: 0.6rem 0.8rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .reset-actions button.primary {
+      background: var(--accent);
+      color: #0a0a12;
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+    @media (min-width: 700px) {
+      .reset-overlay { align-items: center; }
+    }
     .turn-panel h3 {
       font-size: 0.78rem;
       color: var(--muted);
@@ -249,7 +341,13 @@
       color: var(--text);
       padding: 0.45rem 0.6rem;
       border-radius: 8px;
-      font-size: 0.85rem;
+      font-size: 16px;
+      min-height: 44px;
+    }
+    @media (max-width: 719px) {
+      .turn-actions { flex-direction: column; align-items: stretch; }
+      .turn-actions button,
+      .turn-actions select { width: 100%; }
     }
     .turn-log {
       margin-top: 0.75rem;
@@ -442,8 +540,8 @@
   <main>
     <section class="hero">
       <div class="hero-text">
-        <h2>Port Maw burns</h2>
-        <p>The Sunset Heresy campaign map, forces, and battle log. Visitors can look around. Players sign in to move forces and record results.</p>
+        <h2 id="hero-title">Sunset Heresy</h2>
+        <p id="hero-lead">The Sunset Heresy campaign map, forces, and battle log. Visitors can look around. Players sign in to move forces and record results.</p>
       </div>
       <div class="hero-meta" id="hero-meta">
         <span><span class="k">Campaign turn</span><span class="v" id="meta-turn">—</span></span>
@@ -461,13 +559,13 @@
     </div>
 
     <div class="turn-panel" id="turn-panel">
-      <h3>Campaign turn control</h3>
+      <h3>Campaign turn</h3>
       <div class="phase-track" id="phase-track">
         <div class="phase-step" data-phase="Logistics">Logistics</div>
         <div class="phase-step" data-phase="Movement">Movement</div>
         <div class="phase-step" data-phase="Battles">Battles</div>
       </div>
-      <div class="turn-actions">
+      <div class="turn-actions" data-role="campaign_admin">
         <button type="button" class="primary" id="btn-advance">Advance phase</button>
         <select id="set-phase" aria-label="Set phase">
           <option value="Logistics">Logistics</option>
@@ -475,7 +573,10 @@
           <option value="Battles">Battles</option>
         </select>
         <button type="button" id="btn-set-phase">Set phase</button>
+        <button type="button" id="btn-backup">Download backup</button>
+        <button type="button" id="btn-reset">Reset campaign</button>
       </div>
+      <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts.</p>
       <div class="turn-log" id="turn-log"></div>
     </div>
 
@@ -526,32 +627,52 @@
     </div>
 
     <div class="panel">
-      <h3>Campaign score (prototype)</h3>
+      <h3>Campaign score</h3>
       <div class="score-row">
         <span class="score-label loyal">Loyalist</span>
-        <div class="score-bar"><div style="width:35%;background:var(--loyal)"></div></div>
-        <span class="score-val">14</span>
+        <div class="score-bar"><div id="score-loyal-bar" style="width:0%;background:var(--loyal)"></div></div>
+        <span class="score-val" id="score-loyal">—</span>
       </div>
       <div class="score-row">
         <span class="score-label traitor">Traitor</span>
-        <div class="score-bar"><div style="width:65%;background:var(--traitor)"></div></div>
-        <span class="score-val">26</span>
+        <div class="score-bar"><div id="score-traitor-bar" style="width:0%;background:var(--traitor)"></div></div>
+        <span class="score-val" id="score-traitor">—</span>
       </div>
     </div>
 
     <div class="panel">
-      <h3>Recent battle</h3>
-      <ul class="recent-list">
-        <li>
-          <strong>Onslaught</strong> at Mezoa · Turn 3
-          <span class="badge win" style="margin-left:0.4rem">Attacker win</span>
-          <div class="meta">14th Grand Battalion (The Warsmith) 7 – 5 Stone Gauntlet · HH 3000 pts</div>
-        </li>
+      <h3>Recent battles</h3>
+      <ul class="recent-list" id="recent-battles">
+        <li>Loading…</li>
+      </ul>
+    </div>
+
+    <div class="panel">
+      <h3>Phase log</h3>
+      <ul class="recent-list" id="phase-log">
+        <li>Loading…</li>
       </ul>
     </div>
   </main>
 
-  <footer id="footer-note">Sunset Heresy prototype · open via the Node server for shared data</footer>
+  <footer id="footer-note">Loading campaign…</footer>
+
+  <div class="reset-overlay" id="reset-overlay" hidden>
+    <div class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title">
+      <h3 id="reset-title">Reset campaign</h3>
+      <p>Clears battles, sets turn 1 / Logistics, zeroes the campaign score, and gives every player two strength-3 forces. Accounts stay.</p>
+      <label class="keep-sys" for="keep-map"><input type="checkbox" id="keep-map" /> Keep current map</label>
+      <p class="field-hint" id="keep-map-hint">Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.</p>
+      <label class="keep-sys is-disabled" id="keep-control-label" for="keep-control"><input type="checkbox" id="keep-control" disabled /> Keep current system control</label>
+      <p class="field-hint">Available only when the current map is kept. That leaves each system's loyal and traitor scores as they are. Otherwise those scores return to their starting values on this map.</p>
+      <label class="confirm-label" for="reset-confirm">Type RESET to confirm</label>
+      <input type="text" id="reset-confirm" autocomplete="off" autocapitalize="characters" />
+      <div class="reset-actions">
+        <button type="button" id="reset-cancel">Cancel</button>
+        <button type="button" class="primary" id="reset-go">Reset campaign</button>
+      </div>
+    </div>
+  </div>
   <script src="js/api.js"></script>
   <script>
     function updatePhaseTrack(phase) {
@@ -568,22 +689,53 @@
       if (sel && phase) sel.value = phase;
     }
 
+    function escDash(s) {
+      return String(s ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function resultLabel(r) {
+      return ({
+        attacker_win: "Attacker win",
+        defender_win: "Defender win",
+        draw: "Draw",
+        conceded: "Conceded",
+        in_progress: "In progress"
+      })[r] || r || "Result";
+    }
+
     function updateScores(meta) {
       const loyal = Number(meta.loyal_score) || 0;
       const traitor = Number(meta.traitor_score) || 0;
       const total = Math.max(loyal + traitor, 1);
-      const rows = document.querySelectorAll(".score-row");
-      if (rows[0]) {
-        rows[0].querySelector(".score-bar > div").style.width = Math.round((loyal / total) * 100) + "%";
-        rows[0].querySelector(".score-val").textContent = loyal;
-      }
-      if (rows[1]) {
-        rows[1].querySelector(".score-bar > div").style.width = Math.round((traitor / total) * 100) + "%";
-        rows[1].querySelector(".score-val").textContent = traitor;
-      }
+      const loyalBar = document.getElementById("score-loyal-bar");
+      const traitorBar = document.getElementById("score-traitor-bar");
+      if (loyalBar) loyalBar.style.width = Math.round((loyal / total) * 100) + "%";
+      if (traitorBar) traitorBar.style.width = Math.round((traitor / total) * 100) + "%";
+      const loyalVal = document.getElementById("score-loyal");
+      const traitorVal = document.getElementById("score-traitor");
+      if (loyalVal) loyalVal.textContent = loyal;
+      if (traitorVal) traitorVal.textContent = traitor;
     }
 
     function updateHero(meta, systemCount) {
+      const title = document.getElementById("hero-title");
+      const lead = document.getElementById("hero-lead");
+      if (title) title.textContent = meta.campaign_name || "Sunset Heresy";
+      const place = meta.subsector ? meta.subsector + " · " : "";
+      if (lead) {
+        lead.textContent =
+          place +
+          "Turn " +
+          (meta.turn ?? "—") +
+          ", " +
+          (meta.phase || "—") +
+          " phase. Scores, recent battles, and the phase log are the live campaign.";
+      }
       document.getElementById("meta-turn").textContent = meta.turn ?? "—";
       document.getElementById("meta-phase").textContent = meta.phase ?? "—";
       document.getElementById("meta-systems").textContent = systemCount ?? "—";
@@ -591,8 +743,61 @@
       updateScores(meta);
       const log = document.getElementById("turn-log");
       if (meta.victor) {
-        log.innerHTML = `<span class="victory">Victor: ${meta.victor}</span> — ${meta.victory_reason || ""}`;
+        log.innerHTML = `<span class="victory">Victor: ${escDash(meta.victor)}</span> — ${escDash(meta.victory_reason || "")}`;
       }
+    }
+
+    function renderRecent(games, players, forces, systems) {
+      const ul = document.getElementById("recent-battles");
+      if (!ul) return;
+      const recent = games.slice().sort((a, b) => (b.game_id || 0) - (a.game_id || 0)).slice(0, 5);
+      if (!recent.length) {
+        ul.innerHTML = `<li>No battles logged yet.</li>`;
+        return;
+      }
+      const pname = (id) => {
+        const p = players.find((row) => Number(row.player_id) === Number(id));
+        return p ? (p.display_name || "Unknown commander") : "Unknown commander";
+      };
+      const fname = (id) => {
+        const f = forces.find((row) => Number(row.force_id) === Number(id));
+        return f ? f.force_name : "";
+      };
+      const sname = (id) => {
+        const s = systems.find((row) => Number(row.sys_id) === Number(id));
+        return s ? s.sys_name : "an unknown system";
+      };
+      ul.innerHTML = recent.map((g) => {
+        const attF = fname(g.attacker_force_id);
+        const defF = fname(g.defender_force_id);
+        const bits = [
+          escDash(pname(g.attacker_id)) + (attF ? " (" + escDash(attF) + ")" : ""),
+          (g.attacker_vp ?? "—") + " – " + (g.defender_vp ?? "—"),
+          escDash(pname(g.defender_id)) + (defF ? " (" + escDash(defF) + ")" : "")
+        ];
+        return `<li><strong>${escDash(g.mission || "Battle")}</strong> at ${escDash(sname(g.sys_id))} · Turn ${escDash(g.turn)} <span class="badge win">${escDash(resultLabel(g.result))}</span><div class="meta">${bits.join(" · ")}</div></li>`;
+      }).join("");
+    }
+
+    function renderPhaseLog(meta) {
+      const ul = document.getElementById("phase-log");
+      if (!ul) return;
+      const entries = Array.isArray(meta.phase_log) ? meta.phase_log.slice().reverse() : [];
+      if (!entries.length) {
+        ul.innerHTML = `<li>No phase changes recorded yet.</li>`;
+        return;
+      }
+      ul.innerHTML = entries.slice(0, 8).map((entry) => {
+        const from = entry.from ? "Turn " + (entry.from.turn ?? "—") + " " + (entry.from.phase || "") : "Start";
+        const to = entry.to ? "Turn " + (entry.to.turn ?? "—") + " " + (entry.to.phase || "") : "";
+        const notes = Array.isArray(entry.notes) ? entry.notes.join(" · ") : "";
+        let when = "";
+        if (entry.at) {
+          const d = new Date(entry.at);
+          when = Number.isNaN(d.getTime()) ? String(entry.at) : d.toLocaleString();
+        }
+        return `<li><strong>${escDash(from)} → ${escDash(to)}</strong><div class="meta">${escDash(when)}${notes ? " · " + escDash(notes) : ""}</div></li>`;
+      }).join("");
     }
 
     function advanceLabel(phase) {
@@ -616,13 +821,11 @@
         <div class="stat"><div class="num">${systems.length}</div><div class="label">Systems</div></div>
       `;
       updateHero(meta, systems.length);
+      renderRecent(games, players, forces, systems);
+      renderPhaseLog(meta);
       const btn = document.getElementById("btn-advance");
       if (btn) btn.textContent = advanceLabel(meta.phase);
       return meta;
-    }
-
-    function escDash(s) {
-      return String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     }
 
     async function refreshWaitingPanel() {
@@ -678,11 +881,97 @@
         const notes = (result.log || []).join(" · ");
         log.textContent = notes || `Now turn ${result.to.turn}, ${result.to.phase}`;
         if (result.victory) {
-          log.innerHTML += `<br><span class="victory">Victor: ${result.victory.winner}</span> — ${result.victory.reason}`;
+          const line = document.createElement("div");
+          line.innerHTML = `<span class="victory">Victor: ${escDash(result.victory.winner)}</span> — ${escDash(result.victory.reason || "")}`;
+          log.appendChild(line);
         }
         await refreshDashboard();
       } catch (err) {
         log.textContent = err.message || "Advance failed";
+      }
+    });
+
+    document.getElementById("btn-backup").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      try {
+        const blob = await SH.downloadBackup();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sunset-heresy-backup.json";
+        a.click();
+        URL.revokeObjectURL(url);
+        log.textContent = "Backup downloaded. It omits password hashes and sessions.";
+      } catch (err) {
+        log.textContent = err.message || "Backup failed";
+      }
+    });
+
+    const resetOverlay = document.getElementById("reset-overlay");
+    const keepMapInput = document.getElementById("keep-map");
+    const keepControlInput = document.getElementById("keep-control");
+    const keepControlLabel = document.getElementById("keep-control-label");
+    const keepMapHint = document.getElementById("keep-map-hint");
+
+    function syncResetOptions() {
+      const keepMap = keepMapInput.checked;
+      if (!keepMap) {
+        keepControlInput.checked = false;
+        keepControlInput.disabled = true;
+        keepControlLabel.classList.add("is-disabled");
+        keepMapHint.textContent = "Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.";
+      } else {
+        keepControlInput.disabled = false;
+        keepControlLabel.classList.remove("is-disabled");
+        keepMapHint.textContent = "The current systems, links, positions, power, and durability stay. Control is a separate choice.";
+      }
+    }
+
+    function openResetDialog() {
+      keepMapInput.checked = false;
+      syncResetOptions();
+      document.getElementById("reset-confirm").value = "";
+      resetOverlay.hidden = false;
+      document.getElementById("reset-confirm").focus();
+    }
+
+    function closeResetDialog() {
+      resetOverlay.hidden = true;
+    }
+
+    keepMapInput.addEventListener("change", syncResetOptions);
+
+    document.getElementById("btn-reset").addEventListener("click", openResetDialog);
+    document.getElementById("reset-cancel").addEventListener("click", () => {
+      closeResetDialog();
+      document.getElementById("turn-log").textContent = "Reset cancelled.";
+    });
+    resetOverlay.addEventListener("click", (event) => {
+      if (event.target === resetOverlay) closeResetDialog();
+    });
+
+    document.getElementById("reset-go").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      const typed = document.getElementById("reset-confirm").value.trim();
+      if (typed !== "RESET") {
+        log.textContent = "Type RESET to confirm.";
+        return;
+      }
+      try {
+        const result = await SH.resetCampaign({
+          confirm: "RESET",
+          keep_map: keepMapInput.checked,
+          keep_control: keepControlInput.checked
+        });
+        closeResetDialog();
+        let mapNote = "Baseline map restored.";
+        if (result.control_kept) mapNote = "Current map and system control kept.";
+        else if (result.control_reset_to_start) mapNote = "Current map kept. System control reset to starting values.";
+        else if (!result.systems_restored) mapNote = "Baseline map was missing, so the current map was left in place.";
+        log.textContent = `Campaign reset. ${result.forces} forces, ${result.players} players. ${mapNote}`;
+        await refreshDashboard();
+      } catch (err) {
+        log.textContent = err.message || "Reset failed";
       }
     });
 
@@ -705,7 +994,6 @@
         const isAdmin = SH.role === "campaign_admin";
         const join = document.getElementById("join-banner");
         if (join) join.hidden = SH.isLoggedIn();
-        document.getElementById("turn-panel").classList.toggle("open", isAdmin);
         // Hide players card for non-admins
         document.querySelectorAll('a.card[href="player_admin.html"]').forEach((el) => {
           el.style.display = isAdmin ? "" : "none";
