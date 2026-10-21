@@ -47,6 +47,9 @@
  *   CORS_ORIGINS (optional comma-separated extra origins; same-origin is always allowed)
  *   DISCORD_FEEDBACK_WEBHOOK (optional; off when unset)
  *   MAX_BODY_BYTES (default 1048576)
+ *   TRUST_PROXY (unset or 0: ignore X-Forwarded-For and rate-limit the socket
+ *     address. Render is one proxy hop, so set TRUST_PROXY=1 there. The hop
+ *     count is how many entries to trust from the right of X-Forwarded-For.)
  *
  * Static files are an allow-list (HTML pages, js/, css/, images). data/, schema/,
  * server source, and dotfiles are not served.
@@ -298,11 +301,25 @@ const AUTH_WINDOW_MS = 15 * 60 * 1000;
 const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15, feedback: 10 };
 const authBuckets = new Map();
 
+function trustProxyHops() {
+  const raw = String(process.env.TRUST_PROXY == null ? "" : process.env.TRUST_PROXY).trim().toLowerCase();
+  if (!raw || raw === "0" || raw === "false" || raw === "off" || raw === "no") return 0;
+  if (raw === "true" || raw === "yes" || raw === "on") return 1;
+  if (/^\d+$/.test(raw)) {
+    const n = Number(raw);
+    if (n > 0 && n < 20) return n;
+  }
+  return 0;
+}
+
 function clientIp(req) {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.trim()) {
-    const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
-    if (parts.length) return parts[parts.length - 1];
+  const hops = trustProxyHops();
+  if (hops > 0) {
+    const fwd = req.headers["x-forwarded-for"];
+    if (typeof fwd === "string" && fwd.trim()) {
+      const parts = fwd.split(",").map((s) => s.trim()).filter(Boolean);
+      if (parts.length) return parts[Math.max(0, parts.length - hops)];
+    }
   }
   const sock = req.socket || req.connection;
   return (sock && sock.remoteAddress) || "unknown";
@@ -1203,6 +1220,48 @@ function sanitizeGameBody(body) {
   delete body.assigned;
 }
 
+function parsePositiveInteger(value) {
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value < 1 || !Number.isSafeInteger(value)) return null;
+    return value;
+  }
+  if (typeof value === "string" && /^[1-9]\d*$/.test(value.trim())) {
+    const n = Number(value.trim());
+    if (Number.isSafeInteger(n) && n >= 1) return n;
+  }
+  return null;
+}
+
+function parseVictoryPoints(value) {
+  if (value == null || value === "") return { ok: true, value: null };
+  if (typeof value === "boolean") return { ok: false };
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value < 0 || !Number.isSafeInteger(value)) return { ok: false };
+    return { ok: true, value };
+  }
+  if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value.trim())) {
+    const n = Number(value.trim());
+    if (Number.isSafeInteger(n)) return { ok: true, value: n };
+  }
+  return { ok: false };
+}
+
+function victoryPointError(body) {
+  if (!body || typeof body !== "object") return null;
+  for (const [key, label] of [
+    ["attacker_vp", "Attacker"],
+    ["defender_vp", "Defender"]
+  ]) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const parsed = parseVictoryPoints(body[key]);
+    if (!parsed.ok) {
+      return { status: 400, error: label + " victory points must be a non-negative integer" };
+    }
+    body[key] = parsed.value;
+  }
+  return null;
+}
+
 function normalizeGameResult(body) {
   if (!body.result) body.result = "in_progress";
   if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
@@ -1244,6 +1303,8 @@ function validateGameWrite(body, auth, existing) {
       return { status: 400, error: "A conceded battle needs winner_id set to the attacker or the defender" };
     }
   }
+  const vp = victoryPointError(body);
+  if (vp) return vp;
 
   const systems = readCollection("systems");
   if (!systems.some((s) => Number(s.sys_id) === Number(body.sys_id))) {
@@ -1704,6 +1765,11 @@ async function updateBattle(res, auth, existing, list, idx, body) {
 }
 
 function replaceBattles(res, body) {
+  for (const raw of body) {
+    if (!raw || typeof raw !== "object") return send(res, 400, { error: "Expected game objects" });
+    const vp = victoryPointError(raw);
+    if (vp) return send(res, vp.status, { error: vp.error });
+  }
   const state = battleState();
   const old = readCollection("games");
   old.forEach((g) => {
@@ -1804,6 +1870,16 @@ function resultPhrase(result) {
   );
 }
 
+function winnerPlayerId(game) {
+  if (!game) return null;
+  if (game.result === "attacker_win") return Number(game.attacker_id) || null;
+  if (game.result === "defender_win") return Number(game.defender_id) || null;
+  if (game.result === "conceded" && game.winner_id != null && game.winner_id !== "") {
+    return Number(game.winner_id) || null;
+  }
+  return null;
+}
+
 function otherParticipant(game, playerId) {
   if (Number(game.attacker_id) === Number(playerId)) return Number(game.defender_id);
   if (Number(game.defender_id) === Number(playerId)) return Number(game.attacker_id);
@@ -1834,6 +1910,22 @@ function announceBattleChange(previous, game, actor) {
   const ref = { type: "game", game_id: game.game_id };
   const title = battlePlace(game);
   const prevState = previous ? previous.result_state : null;
+  if (previous && previous.result_state === "applied" && !sameProposal(previous, game)) {
+    const winnerId = winnerPlayerId(previous);
+    const targets = winnerId
+      ? [winnerId]
+      : [previous.attacker_id, previous.defender_id].filter(Boolean);
+    const who = actor.role === "campaign_admin" ? "The campaign admin" : playerLabel(actor.player_id);
+    targets.forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_reopened",
+        text: who + " reopened your result for " + title + ". The previous outcome is no longer applied.",
+        ref
+      });
+    });
+  }
   const proposalChanged =
     !previous ||
     !sameProposal(previous, game) ||
@@ -1970,13 +2062,17 @@ async function voidBattle(req, res, idPart) {
   const title = battlePlace(game);
   const ref = { type: "game", game_id: game.game_id };
   const notices = [];
+  const winnerId = winnerPlayerId(existing);
   [existing.attacker_id, existing.defender_id].forEach((pid) => {
     if (!pid) return;
+    const won = winnerId != null && Number(pid) === Number(winnerId);
     notices.push({
       player_id: Number(pid),
       audience: "player",
       kind: "battle_result_voided",
-      text: "The campaign admin voided the result for " + title,
+      text: won
+        ? "The campaign admin voided your win for " + title + "."
+        : "The campaign admin voided the result for " + title + ".",
       ref
     });
   });
@@ -2087,13 +2183,15 @@ async function handleInbox(req, res, parts, method) {
   return send(res, 404, { error: "Unknown inbox action" });
 }
 
-function checkVictory(meta, systems, forces) {
+function checkVictory(meta, systems, forces, opts = {}) {
   const reasons = [];
-  const turn = Number(meta.turn) || 0;
+  const scoredTurn = opts.scoredTurn == null ? null : Number(opts.scoredTurn);
   const loyalScore = Number(meta.loyal_score) || 0;
   const traitorScore = Number(meta.traitor_score) || 0;
 
-  if (turn >= 3) {
+  // Double score and 70% control count only for a turn that has just been
+  // scored. The turn number is the one that finished, before it increments.
+  if (scoredTurn != null && scoredTurn >= 3) {
     if (loyalScore > 0 && traitorScore > 0) {
       if (loyalScore >= traitorScore * 2) reasons.push({ winner: "Loyalist", reason: "Double campaign score" });
       if (traitorScore >= loyalScore * 2) reasons.push({ winner: "Traitor", reason: "Double campaign score" });
@@ -2172,6 +2270,21 @@ function spendAction(meta, playerId, note) {
     remaining: ACTIONS_PER_TURN - entry.used
   });
   return { ok: true, entry };
+}
+
+function refundAction(meta, playerId, note) {
+  const turn = Number(meta.turn) || 1;
+  const entry = ensurePlayerActions(meta, playerId, turn);
+  const used = Number(entry.used) || 0;
+  if (used <= 0) return { ok: true, refunded: false, entry };
+  entry.used = used - 1;
+  entry.log = (entry.log || []).slice(-30);
+  entry.log.push({
+    at: new Date().toISOString(),
+    note: note || "refund",
+    remaining: ACTIONS_PER_TURN - entry.used
+  });
+  return { ok: true, refunded: true, entry };
 }
 
 function playerOwnsForce(force, auth) {
@@ -2299,6 +2412,7 @@ function voidUnresolvedBattles(turn) {
 
 function advanceCampaign(meta, options = {}) {
   const log = [];
+  let scoredTurn = null;
   let systems = recomputeControllers(readCollection("systems"));
   let forces = readCollection("forces");
   let phase = meta.phase || "Logistics";
@@ -2353,6 +2467,7 @@ function advanceCampaign(meta, options = {}) {
       forces = applyForceRecovery(forces, systems);
       log.push("Applied end-of-turn force recovery");
 
+      scoredTurn = turn;
       turn += 1;
       phase = "Logistics";
       // Reset action economy for the new turn
@@ -2373,7 +2488,7 @@ function advanceCampaign(meta, options = {}) {
     }
   ]);
 
-  const victory = checkVictory(meta, systems, forces);
+  const victory = checkVictory(meta, systems, forces, { scoredTurn });
   if (victory) {
     meta.victor = victory.winner;
     meta.victory_reason = victory.reason;
@@ -2451,8 +2566,12 @@ async function handleCampaign(req, res, parts, method) {
     const meta = readCollection("meta");
     // Direct set without side effects (admin correction)
     const from = { turn: meta.turn, phase: meta.phase };
+    if (body.turn != null && body.turn !== "") {
+      const turn = parsePositiveInteger(body.turn);
+      if (turn == null) return send(res, 400, { error: "turn must be a positive integer" });
+      meta.turn = turn;
+    }
     meta.phase = body.phase;
-    if (body.turn != null) meta.turn = Number(body.turn);
     meta.last_advanced_at = new Date().toISOString();
     writeCollection("meta", meta);
     return send(res, 200, { ok: true, from, to: { turn: meta.turn, phase: meta.phase }, meta });
@@ -2602,12 +2721,24 @@ async function handleActions(req, res, parts, method) {
       });
     }
 
-    const spent = trySpend(`Move force ${forceId} → ${toSys.sys_name}`);
-    if (!spent.ok) return send(res, 409, { error: spent.error });
+    if (Number(force.dest_sys_id) === destId) {
+      return send(res, 200, {
+        ok: true,
+        action: "move",
+        force,
+        actions_remaining: actionsRemaining(meta, playerId),
+        message: `Already ordered ${force.force_name} to move to ${toSys.sys_name}`
+      });
+    }
+    const alreadyOrdered = force.dest_sys_id != null && force.dest_sys_id !== "";
+    if (!alreadyOrdered) {
+      const spent = trySpend(`Move force ${forceId} → ${toSys.sys_name}`);
+      if (!spent.ok) return send(res, 409, { error: spent.error });
+      writeCollection("meta", meta);
+    }
 
     force.dest_sys_id = destId;
     writeCollection("forces", forces);
-    writeCollection("meta", meta);
     return send(res, 200, {
       ok: true,
       action: "move",
@@ -2618,7 +2749,10 @@ async function handleActions(req, res, parts, method) {
   }
 
   if (action === "hold") {
-    // Free: clear pending destination
+    // Hold costs nothing. Cancelling a Move that has not resolved refunds that action.
+    if (phase !== "Movement") {
+      return send(res, 409, { error: "Hold is only allowed during the Movement phase" });
+    }
     const forceId = Number(body.force_id);
     if (!forceId) return send(res, 400, { error: "force_id required" });
     let forces = readCollection("forces");
@@ -2627,14 +2761,22 @@ async function handleActions(req, res, parts, method) {
     if (Number(force.player_id) !== Number(playerId) && auth.account.role !== "campaign_admin") {
       return send(res, 403, { error: "Not your force" });
     }
+    const hadMove = force.dest_sys_id != null && force.dest_sys_id !== "";
     force.dest_sys_id = null;
+    let refunded = false;
+    if (hadMove && spendForPlayer) {
+      refunded = refundAction(meta, playerId, `Hold refunds the move for force ${forceId}`).refunded;
+      if (refunded) writeCollection("meta", meta);
+    }
     writeCollection("forces", forces);
     return send(res, 200, {
       ok: true,
       action: "hold",
       force,
       actions_remaining: actionsRemaining(meta, playerId),
-      message: `${force.force_name} holds position`
+      message: refunded
+        ? `${force.force_name} holds. The move action was refunded.`
+        : `${force.force_name} holds position`
     });
   }
 

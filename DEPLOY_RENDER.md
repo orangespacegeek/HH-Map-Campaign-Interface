@@ -47,6 +47,7 @@ Set these on the service, not in a committed file.
 | `CAMPAIGN_ADMIN_PASSWORD` | the password you chose |
 | `DISCORD_FEEDBACK_WEBHOOK` | leave unset unless feedback should also post to Discord |
 | `CORS_ORIGINS` | leave unset. The site only needs to call itself. |
+| `TRUST_PROXY` | `1`. Render is one proxy hop and appends the client address. The login limiter uses that address. Leave this unset on a machine that is not behind a proxy, or a client can pick their own limit by sending `X-Forwarded-For`. |
 
 Do not set `CAMPAIGN_ADMIN_FORCE_PASSWORD` on the first deploy.
 

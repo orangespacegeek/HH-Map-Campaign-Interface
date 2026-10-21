@@ -54,6 +54,7 @@ The restart re-hashes the admin account and deletes `data/sessions.json`. Sign i
 | `CORS_ORIGINS` | No | Comma-separated extra browser origins allowed to call the API with cookies. Same-origin is always allowed. Leave unset for a normal single-site deploy. |
 | `DISCORD_FEEDBACK_WEBHOOK` | No | Discord webhook URL. When set, new feedback is also posted to that channel. Unset means feedback is stored only. |
 | `MAX_BODY_BYTES` | No | Request body limit. Default `1048576` (1 MB). |
+| `TRUST_PROXY` | No | Leave unset when Node sees the client directly. The rate limiter then ignores `X-Forwarded-For`. Render's proxy is one hop and appends the real client IP, so set this to `1` there. A number is how many proxy hops to trust, counting from the right. |
 
 `data/accounts.json`, `data/sessions.json`, `data/invites.json`, `data/notifications.json`, and `data/feedback.json` are created on first use and are gitignored. Do not commit them. The sample players, forces, systems, games, and meta in `data/` are the demo campaign and are tracked. `data/baseline/systems.json` is the Port Maw map a reset restores. A fresh `DATA_DIR` with no `systems.json` is seeded from that file on first boot, so sign-up can offer a starting system before anyone resets.
 

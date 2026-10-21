@@ -201,7 +201,7 @@
           <select id="act-move-force"></select>
           <select id="act-move-dest"></select>
           <button type="button" id="btn-move">Order move</button>
-          <button type="button" class="ghost" id="btn-hold">Hold (clear)</button>
+          <button type="button" class="ghost" id="btn-hold">Hold</button>
         </div>
       </div>
     </section>
@@ -630,7 +630,7 @@
       if (phase === "Logistics") {
         hint.textContent = "Logistics: Reinforce (1), Fortify (1), or Generate Force (2). Max 2 actions per turn.";
       } else if (phase === "Movement") {
-        hint.textContent = "Movement: order a force to a linked system (1 action). Hold is free and clears a pending move.";
+        hint.textContent = "Movement: order a force to a linked system (1 action). Changing that order is free. Hold cancels it and refunds the action.";
       } else {
         hint.textContent = "Battles phase: no logistics or movement orders. Resolve games, then advance the turn.";
         forms.hidden = true;
