@@ -20,7 +20,7 @@ Generate Force: costs 2 Actions. Creates a new Force at Strength 3, only in Alle
 
 Reinforce: costs 1 Action. +1 Strength up to a maximum of 3, only in Allegiance-controlled system, including systems with opposing Forces.
 
-Fortify: costs 1 Action. +1 System Durability up to a maximum of 10 (see System Control), only in Allegiance-controlled system, including systems with opposing Forces.
+Fortify: costs 1 Action. +1 System Durability up to a maximum of 10 (see System Control), only in Allegiance-controlled system, including systems with opposing Forces. The player must have one of their own active Forces present in that system (added as part of web app build).
 
 *Movement*
 

@@ -2859,7 +2859,9 @@ async function handleActions(req, res, parts, method) {
     const dur = systemDurability(sys);
     if (dur >= 10) return send(res, 400, { error: "System already at maximum durability (10)" });
 
-    // Must have at least one of your forces present (sensible; rules imply acting on owned presence)
+    // campaign_rules.md (Logistics): Fortify requires one of the acting player's own
+    // active forces in the system (added as part of web app build). Campaign admin may
+    // still fortify without that force.
     const forces = readCollection("forces");
     const present = forces.some(
       (f) =>
