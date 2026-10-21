@@ -173,8 +173,9 @@ test("fortify rules name the own-force requirement and the map disables it", () 
   );
   assert.match(
     rulesHtml,
-    /name">Fortify<\/div>[\s\S]*own active Forces in the system \(added as part of web app build\)/
+    /name">Fortify<\/div>[\s\S]*own active Forces in the system\./
   );
+  assert.doesNotMatch(rulesHtml, /added as part of web app build/);
   assert.match(server, /campaign_rules\.md \(Logistics\): Fortify requires one of the acting player's own/);
   assert.match(server, /active forces in the system \(added as part of web app build\)/);
   assert.match(server, /if \(!present && auth\.account\.role !== "campaign_admin"\)/);

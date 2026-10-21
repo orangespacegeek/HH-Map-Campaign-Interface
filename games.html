@@ -478,7 +478,7 @@
     function forcesFor(sysId, playerId, includeId) {
       return forces.filter(f => {
         if (includeId != null && includeId !== "" && Number(f.force_id) === Number(includeId)) return Number(f.player_id) === Number(playerId);
-        if (f.status === "destroyed") return false;
+        if (f.status === "destroyed" || f.status === "removed") return false;
         if (Number(f.sys_id) !== Number(sysId)) return false;
         return Number(f.player_id) === Number(playerId);
       });
@@ -488,7 +488,7 @@
       return p ? p.allegiance : "";
     }
     function playersWithForces(sysId, includeId) {
-      const ids = new Set(forces.filter(f => f.status !== "destroyed" && Number(f.sys_id) === Number(sysId)).map(f => Number(f.player_id)));
+      const ids = new Set(forces.filter(f => f.status !== "destroyed" && f.status !== "removed" && Number(f.sys_id) === Number(sysId)).map(f => Number(f.player_id)));
       if (includeId != null && includeId !== "") ids.add(Number(includeId));
       return players.filter(p => ids.has(Number(p.player_id)));
     }
@@ -568,7 +568,7 @@
       document.getElementById("f-id").value = g ? g.game_id : "";
       document.getElementById("f-turn").value = g ? g.turn : (meta.turn || 1);
       document.getElementById("f-date").value = g ? (g.played_on || "") : new Date().toISOString().slice(0, 10);
-      const ownForce = forces.find(f => SH.role === "player" && myPlayerId() != null && Number(f.player_id) === myPlayerId() && f.status !== "destroyed");
+      const ownForce = forces.find(f => SH.role === "player" && myPlayerId() != null && Number(f.player_id) === myPlayerId() && f.status !== "destroyed" && f.status !== "removed");
       document.getElementById("f-sys").value = g ? g.sys_id : (ownForce ? ownForce.sys_id : (systems[0] && systems[0].sys_id));
       document.getElementById("f-gsys").value = g ? (g.game_system || "HH") : "HH";
       document.getElementById("f-mission").value = g ? (g.mission || "") : "";

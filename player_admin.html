@@ -1050,7 +1050,7 @@
 
     async function deletePlayer() {
       if (!editingId) return;
-      if (!confirm(`Delete player #${editingId}? Forces stay in the forces list but lose their owner link.`)) return;
+      if (!confirm(`Delete player #${editingId}? Their forces are marked removed and stay on the force list. Battle history is kept. This player id is not reused.`)) return;
       try {
         await SH.remove("players", editingId);
         await reload();

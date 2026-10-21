@@ -97,7 +97,8 @@
       (f) =>
         Number(f.sys_id) === Number(sysId) &&
         String(f.status || "active").toLowerCase() !== "destroyed" &&
-        String(f.status || "").toLowerCase() !== "retired"
+        String(f.status || "").toLowerCase() !== "retired" &&
+        String(f.status || "").toLowerCase() !== "removed"
     );
   }
 
