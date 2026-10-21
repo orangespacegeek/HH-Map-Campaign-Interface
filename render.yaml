@@ -24,6 +24,8 @@ services:
         sync: false
       - key: CORS_ORIGINS
         sync: false
+      - key: TRUST_PROXY
+        value: "1"
     disk:
       name: campaign-data
       mountPath: /var/data

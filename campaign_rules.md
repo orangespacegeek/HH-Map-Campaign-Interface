@@ -26,7 +26,7 @@ Fortify: costs 1 Action. +1 System Durability up to a maximum of 10 (see System 
 
 Move: costs 1 Action. A player orders a Force they own from their current system to a connected system.
 
-Hold: costs 0 Action. A player may give a Force they own the Hold action to remain in their current system.
+Hold: costs 0 Action. A player may give a Force they own the Hold action to remain in their current system. Hold is used in the Movement phase. If that Force already has a Move order, Hold cancels the order and refunds the action. Changing the destination of a Move that has not resolved yet does not spend another action.
 
 *Battles*
 
