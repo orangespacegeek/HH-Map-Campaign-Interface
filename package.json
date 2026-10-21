@@ -5,6 +5,7 @@
   "description": "Sunset Heresy campaign tracker – static UI + shared JSON API",
   "scripts": {
     "start": "node server.js",
-    "server": "node server.js"
+    "server": "node server.js",
+    "reset-campaign": "node server.js reset-campaign"
   }
 }

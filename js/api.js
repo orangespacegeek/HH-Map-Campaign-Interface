@@ -115,7 +115,7 @@
   }
 
   function authHeaders() {
-    const h = { "Content-Type": "application/json" };
+    const h = { "Content-Type": "application/json", "X-SH-Request": "1" };
     if (token) h.Authorization = "Bearer " + token;
     return h;
   }
@@ -357,7 +357,7 @@
     }
     const res = await fetch(apiBase() + "/api/auth/login", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-SH-Request": "1" },
       credentials: "include",
       body: JSON.stringify(creds)
     });
@@ -402,7 +402,7 @@
     if (mode !== "server") throw new Error("Sign up needs the live server");
     const res = await fetch(apiBase() + "/api/auth/signup", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "X-SH-Request": "1" },
       credentials: "include",
       body: JSON.stringify(body || {})
     });
@@ -519,6 +519,61 @@
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || "Could not update messages");
+    return data;
+  }
+
+  async function submitFeedback(body) {
+    await probe();
+    if (mode !== "server") throw new Error("Feedback needs the live server");
+    const res = await fetch(apiBase() + "/api/feedback", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not send feedback");
+    return data;
+  }
+
+  async function listFeedback() {
+    await probe();
+    const res = await fetch(apiBase() + "/api/feedback", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load feedback");
+    return data;
+  }
+
+  async function downloadBackup() {
+    await probe();
+    if (mode !== "server") throw new Error("Backup needs the live server");
+    const res = await fetch(apiBase() + "/api/admin/backup", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || "Could not download backup");
+    }
+    return res.blob();
+  }
+
+  async function resetCampaign(body) {
+    await probe();
+    if (mode !== "server") throw new Error("Reset needs the live server");
+    const res = await fetch(apiBase() + "/api/campaign/reset", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Reset failed");
     return data;
   }
 
@@ -669,13 +724,35 @@
   }
 
   function navAuthHtml() {
-    const onLogin = /(?:^|\/)login\.html$/.test(location.pathname);
-    const active = onLogin ? " active" : "";
     if (isLoggedIn()) {
       const name = meCache.label || meCache.role;
-      return '<a class="nav-account' + active + '" href="login.html">' + escapeHtml(name) + "</a>";
+      const onAccount = /(?:^|\/)account\.html$/.test(location.pathname);
+      const active = onAccount ? " active" : "";
+      return '<a class="nav-account' + active + '" href="account.html">' + escapeHtml(name) + "</a>";
     }
+    const onLogin = /(?:^|\/)login\.html$/.test(location.pathname);
+    const active = onLogin ? " active" : "";
     return '<a class="nav-login' + active + '" href="login.html">Log in</a>';
+  }
+
+  function syncFeedbackLink() {
+    const menu = document.getElementById("site-menu");
+    if (!menu) return;
+    let link = menu.querySelector('a[href="feedback.html"]');
+    if (!isLoggedIn()) {
+      if (link) link.remove();
+      return;
+    }
+    if (!link) {
+      link = document.createElement("a");
+      link.href = "feedback.html";
+      link.textContent = "Feedback";
+      const logout = document.getElementById("nav-logout");
+      if (logout && logout.parentElement === menu) menu.insertBefore(link, logout);
+      else menu.appendChild(link);
+    }
+    const path = (location.pathname || "").split("/").pop() || "";
+    link.classList.toggle("active", path === "feedback.html");
   }
 
   function wireSiteMenu() {
@@ -743,7 +820,8 @@
       .replace(/\u0026/g, "\u0026amp;")
       .replace(/\u003c/g, "\u0026lt;")
       .replace(/\u003e/g, "\u0026gt;")
-      .replace(/\u0022/g, "\u0026quot;");
+      .replace(/\u0022/g, "\u0026quot;")
+      .replace(/\u0027/g, "\u0026#39;");
   }
 
   async function applyNavPermissions() {
@@ -756,6 +834,7 @@
     });
     const slot = document.getElementById("nav-auth");
     if (slot) slot.innerHTML = navAuthHtml();
+    syncFeedbackLink();
     const logoutBtn = document.getElementById("nav-logout");
     if (logoutBtn) {
       logoutBtn.hidden = !isLoggedIn();
@@ -821,6 +900,10 @@
     logout,
     me,
     setPassword,
+    submitFeedback,
+    listFeedback,
+    downloadBackup,
+    resetCampaign,
     confirmGame,
     disputeGame,
     voidGame,
