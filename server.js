@@ -37,7 +37,8 @@
  *   --keep-control requires --keep-map.
  *
  * Env:
- *   PORT, HOST, DATA_DIR (default ./data)
+ *   PORT, HOST, DATA_DIR (default ./data). A missing systems.json is seeded from
+ *     data/baseline/systems.json so sign-up can choose a start system.
  *   CAMPAIGN_ADMIN_LOGIN (default admin)
  *   CAMPAIGN_ADMIN_PASSWORD (required for a chosen admin password; if unset on
  *     first boot a random password is generated and printed once)
@@ -111,6 +112,17 @@ const ADMIN_PAGES = ["player_admin.html"];
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA)) fs.mkdirSync(DATA, { recursive: true });
+}
+
+function seedBaselineSystems() {
+  const dest = path.join(DATA, "systems.json");
+  if (fs.existsSync(dest)) return false;
+  const baseline = loadBaselineSystems();
+  if (!baseline || !baseline.length) return false;
+  ensureDataDir();
+  atomicWrite(dest, JSON.stringify(baseline, null, 2) + "\n");
+  console.log("Seeded " + baseline.length + " systems from data/baseline/systems.json");
+  return true;
 }
 
 function atomicWrite(fp, text) {
@@ -1211,6 +1223,12 @@ function validateGameWrite(body, auth, existing) {
     if (existing && !isParticipant(existing, playerId)) {
       return { status: 403, error: "You can only edit a battle you are taking part in" };
     }
+    if (existing && existing.result_state === "applied") {
+      return { status: 403, error: "A confirmed battle can only be changed by the campaign admin" };
+    }
+    if (existing && existing.result_state === "void") {
+      return { status: 403, error: "A voided battle can only be changed by the campaign admin" };
+    }
   }
   const attackerId = Number(body.attacker_id);
   const defenderId = Number(body.defender_id);
@@ -1251,6 +1269,11 @@ function validateGameWrite(body, auth, existing) {
   if ((meta.phase || "Logistics") !== "Battles") {
     return { status: 409, error: "Battles can only be recorded during the Battles phase" };
   }
+  const turn = Number(meta.turn) || 1;
+  if (existing && Number(existing.turn) !== turn) {
+    return { status: 409, error: "You can only edit a battle from the current turn" };
+  }
+  body.turn = existing ? Number(existing.turn) : turn;
   if (!attF || !defF) return { status: 400, error: "Both forces are required" };
   if (Number(attF.force_id) === Number(defF.force_id)) return { status: 400, error: "A force cannot fight itself" };
   if (Number(attF.player_id) !== attackerId) {
@@ -1263,16 +1286,21 @@ function validateGameWrite(body, auth, existing) {
   if (Number(ownForce.player_id) !== playerId) {
     return { status: 403, error: "You can only put your own force on your side" };
   }
-  if (!existing) {
-    if (attF.status === "destroyed" || defF.status === "destroyed") {
-      return { status: 400, error: "Destroyed forces cannot be assigned to a new battle" };
-    }
-    if (Number(attF.sys_id) !== Number(body.sys_id) || Number(defF.sys_id) !== Number(body.sys_id)) {
-      return { status: 400, error: "Both forces must be in the battle's system" };
-    }
+  if (ownForce.status === "destroyed") {
+    return { status: 400, error: "Destroyed forces cannot be assigned to a battle" };
+  }
+  if (attF.status === "destroyed" || defF.status === "destroyed") {
+    return { status: 400, error: "Destroyed forces cannot be assigned to a battle" };
+  }
+  if (Number(attF.sys_id) !== Number(body.sys_id) || Number(defF.sys_id) !== Number(body.sys_id)) {
+    return { status: 400, error: "Both forces must be in the battle's system" };
   }
   if (attF.allegiance && defF.allegiance && attF.allegiance === defF.allegiance) {
     return { status: 400, error: "The two forces must be on opposing sides" };
+  }
+  const games = readCollection("games");
+  if (pairingAlreadyUsed(games, body.turn, attF.force_id, defF.force_id, existing && existing.game_id)) {
+    return { status: 409, error: "These two forces already have a battle this turn" };
   }
   return null;
 }
@@ -1551,6 +1579,24 @@ function pairingKey(a, b) {
   return x < y ? x + ":" + y : y + ":" + x;
 }
 
+function battleCountsTowardPairing(game) {
+  if (!game || game.result_state === "void") return false;
+  if (game.attacker_force_id == null || game.attacker_force_id === "") return false;
+  if (game.defender_force_id == null || game.defender_force_id === "") return false;
+  return true;
+}
+
+function pairingAlreadyUsed(games, turn, forceA, forceB, exceptGameId) {
+  if (forceA == null || forceA === "" || forceB == null || forceB === "") return false;
+  const key = pairingKey(forceA, forceB);
+  return games.some((g) => {
+    if (exceptGameId != null && Number(g.game_id) === Number(exceptGameId)) return false;
+    if (Number(g.turn) !== Number(turn)) return false;
+    if (!battleCountsTowardPairing(g)) return false;
+    return pairingKey(g.attacker_force_id, g.defender_force_id) === key;
+  });
+}
+
 function assignBattles(turn) {
   const forces = readCollection("forces");
   const systems = readCollection("systems");
@@ -1615,6 +1661,10 @@ function assignBattles(turn) {
 async function createBattle(res, auth, body) {
   sanitizeGameBody(body);
   normalizeGameResult(body);
+  if (auth.account.role !== "campaign_admin") {
+    const meta = readCollection("meta");
+    body.turn = Number(meta.turn) || 1;
+  }
   const problem = validateGameWrite(body, auth, null);
   if (problem) return send(res, problem.status, { error: problem.error });
   const list = readCollection("games");
@@ -1638,6 +1688,7 @@ async function createBattle(res, auth, body) {
 async function updateBattle(res, auth, existing, list, idx, body) {
   sanitizeGameBody(body);
   const merged = { ...existing, ...body, game_id: existing.game_id };
+  if (auth.account.role !== "campaign_admin") merged.turn = existing.turn;
   normalizeGameResult(merged);
   const problem = validateGameWrite(merged, auth, existing);
   if (problem) return send(res, problem.status, { error: problem.error });
@@ -1704,6 +1755,18 @@ async function confirmBattle(req, res, idPart) {
   }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "Waiting for your opponent to confirm this result" });
+  }
+  if (
+    !isAdmin &&
+    pairingAlreadyUsed(
+      list,
+      existing.turn,
+      existing.attacker_force_id,
+      existing.defender_force_id,
+      existing.game_id
+    )
+  ) {
+    return send(res, 409, { error: "These two forces already have a battle this turn" });
   }
   const previous = cloneData(existing);
   const game = cloneData(existing);
@@ -2136,6 +2199,104 @@ function controlledByAllegiance(sys, allegiance) {
   return c === allegiance;
 }
 
+function isUnresolvedBattle(game, turn) {
+  const state = game.result_state || "open";
+  if (!["open", "pending", "disputed"].includes(state)) return false;
+  if (game.turn == null || game.turn === "") return true;
+  return Number(game.turn) <= Number(turn);
+}
+
+function unresolvedBattles(turn) {
+  return readCollection("games").filter((g) => isUnresolvedBattle(g, turn));
+}
+
+function unresolvedBattleSummary(game) {
+  const systems = readCollection("systems");
+  const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
+  const where = sys && sys.sys_name ? sys.sys_name : "system " + game.sys_id;
+  const state = game.result_state || "open";
+  return (
+    "#" +
+    game.game_id +
+    " " +
+    where +
+    " (" +
+    playerLabel(game.attacker_id) +
+    " vs " +
+    playerLabel(game.defender_id) +
+    ", " +
+    state +
+    ")"
+  );
+}
+
+function unresolvedBattlePayload(game) {
+  return {
+    game_id: game.game_id,
+    turn: game.turn == null || game.turn === "" ? null : Number(game.turn),
+    sys_id: game.sys_id,
+    result_state: game.result_state || "open",
+    result: game.result || null,
+    attacker_id: game.attacker_id ?? null,
+    defender_id: game.defender_id ?? null,
+    summary: unresolvedBattleSummary(game)
+  };
+}
+
+function unresolvedAdvanceError(games) {
+  const listed = games.map((g) => unresolvedBattleSummary(g)).join("; ");
+  const n = games.length;
+  return (
+    "Cannot advance while " +
+    n +
+    " battle" +
+    (n === 1 ? " is" : "s are") +
+    " still open: " +
+    listed +
+    '. Pass { "force": true } to void them and advance. Voided battles are not scored and do not change strength or influence.'
+  );
+}
+
+function voidUnresolvedBattles(turn) {
+  const games = readCollection("games");
+  const state = battleState();
+  const notices = [];
+  let count = 0;
+  games.forEach((game) => {
+    if (!isUnresolvedBattle(game, turn)) return;
+    if (game.resolution) reverseResolution(game, state, games);
+    const title = battlePlace(game);
+    game.result = "in_progress";
+    game.winner_id = null;
+    game.result_state = "void";
+    game.proposed_by = null;
+    game.proposed_at = null;
+    game.disputed_by = null;
+    game.disputed_at = null;
+    game.dispute_note = null;
+    game.resolution = null;
+    game.voided_at = new Date().toISOString();
+    game.void_reason = "Turn advanced with this battle unresolved";
+    [game.attacker_id, game.defender_id].forEach((pid) => {
+      if (!pid) return;
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_voided",
+        text: "The turn advanced and voided " + title + ". No result was applied.",
+        ref: { type: "game", game_id: game.game_id }
+      });
+    });
+    count += 1;
+  });
+  if (count) {
+    saveBattleState(state);
+    writeCollection("games", games);
+    writeNotices(notices);
+  }
+  return count;
+}
+
 function advanceCampaign(meta, options = {}) {
   const log = [];
   let systems = recomputeControllers(readCollection("systems"));
@@ -2165,7 +2326,25 @@ function advanceCampaign(meta, options = {}) {
       log.push("Applied pending moves; advanced to Battles phase");
       if (assigned) log.push(`Assigned ${assigned} battle${assigned === 1 ? "" : "s"} between opposing forces`);
     } else {
-      // End of Battles → score, recover, new turn
+      // End of Battles → void anything still unresolved, then score, recover, new turn.
+      // Unresolved battles are not carried into the next turn. A normal advance
+      // refuses while any remain. { force: true } voids them: no result is
+      // applied, and strength and influence are left as they were.
+      const open = unresolvedBattles(turn);
+      if (open.length && !options.force) {
+        return {
+          ok: false,
+          code: "unresolved_battles",
+          error: unresolvedAdvanceError(open),
+          battles: open.map(unresolvedBattlePayload)
+        };
+      }
+      if (open.length) {
+        const voided = voidUnresolvedBattles(turn);
+        log.push(`Voided ${voided} unresolved battle${voided === 1 ? "" : "s"} (no result applied)`);
+        systems = recomputeControllers(readCollection("systems"));
+        forces = readCollection("forces");
+      }
       const gained = scoreFromSystems(systems);
       meta.loyal_score = (Number(meta.loyal_score) || 0) + gained.loyal;
       meta.traitor_score = (Number(meta.traitor_score) || 0) + gained.traitor;
@@ -2251,7 +2430,14 @@ async function handleCampaign(req, res, parts, method) {
         victory_reason: meta.victory_reason
       });
     }
-    const result = advanceCampaign(meta, {});
+    const result = advanceCampaign(meta, { force: !!body.force });
+    if (result && result.ok === false) {
+      return send(res, 409, {
+        error: result.error,
+        code: result.code,
+        battles: result.battles
+      });
+    }
     return send(res, 200, result);
   }
 
@@ -2650,25 +2836,39 @@ function loadBaselineSystems() {
   return data;
 }
 
-function defaultHomeSystem(player, owned, systems) {
+function systemsControlledBy(systems, allegiance) {
+  return systems
+    .filter((s) => normalizeController(s) === allegiance)
+    .sort((a, b) => Number(a.sys_id) - Number(b.sys_id));
+}
+
+function defaultHomeSystem(player, systems, allegianceIndex) {
   const ids = new Set(systems.map((s) => Number(s.sys_id)));
-  const candidates = [
-    Number(player.start_sys_id),
-    owned[0] && Number(owned[0].home_sys_id),
-    owned[0] && Number(owned[0].sys_id)
-  ];
-  for (const id of candidates) {
-    if (id && ids.has(id)) return id;
+  const chosen = Number(player.start_sys_id);
+  if (chosen && ids.has(chosen)) return chosen;
+  let homes = systemsControlledBy(systems, player.allegiance);
+  if (!homes.length) {
+    homes = systems
+      .filter((s) => {
+        const controller = normalizeController(s);
+        return controller === "Contested" || controller === "Neutral";
+      })
+      .sort((a, b) => Number(a.sys_id) - Number(b.sys_id));
   }
+  if (homes.length) return Number(homes[allegianceIndex % homes.length].sys_id);
   return systems[0] ? Number(systems[0].sys_id) : 1;
 }
 
 function buildStartingForces(players, existingForces, systems) {
   const out = [];
   let next = 1;
+  const allegianceCount = {};
   players.forEach((player) => {
     const owned = existingForces.filter((f) => Number(f.player_id) === Number(player.player_id));
-    const home = defaultHomeSystem(player, owned, systems);
+    const alleg = player.allegiance || "";
+    const index = allegianceCount[alleg] || 0;
+    allegianceCount[alleg] = index + 1;
+    const home = defaultHomeSystem(player, systems, index);
     for (let n = 0; n < 2; n++) {
       const prev = owned[n];
       const fallback =
@@ -3197,6 +3397,7 @@ function logRequest(req, res, pathname, started) {
 }
 
 ensureDataDir();
+seedBaselineSystems();
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();

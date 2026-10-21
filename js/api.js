@@ -625,7 +625,12 @@
         body: JSON.stringify(opts || {})
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Advance failed");
+      if (!res.ok) {
+        const err = new Error(data.error || "Advance failed");
+        err.code = data.code || null;
+        err.battles = data.battles || null;
+        throw err;
+      }
       return data;
     }
     const meta = localRead("meta");
