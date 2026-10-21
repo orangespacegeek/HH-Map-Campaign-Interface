@@ -69,7 +69,7 @@ That username is how they sign in afterwards. A used, revoked, or expired code i
 
 ## 6. Start the campaign you actually want to play
 
-The repo ships a sample already on turn 3. After the first deploy, sign in as admin, open the dashboard, and choose **Reset campaign**. Leave both keep-boxes unchecked and type `RESET`. That sets turn 1, Logistics, restores the Port Maw starting map, clears the sample battle, and gives every current player two strength-3 forces. Accounts stay. Check **Keep current map** only if you have edited systems, links, or positions and want to keep that layout. **Keep current system control** is available only after that, and it keeps each system's loyal and traitor scores.
+The repo ships a sample already on turn 3. A brand-new disk has no `systems.json`; the first boot copies `data/baseline/systems.json` into `DATA_DIR`, so sign-up can offer a starting system before the reset. After the first deploy, sign in as admin, open the dashboard, and choose **Reset campaign**. Leave both keep-boxes unchecked and type `RESET`. That sets turn 1, Logistics, restores the Port Maw starting map, clears the sample battle, and gives every current player two strength-3 forces in that player's starting system. A player who never chose one is placed in a system their side already controls, not in Port Maw with everyone else. Accounts stay. Check **Keep current map** only if you have edited systems, links, or positions and want to keep that layout. **Keep current system control** is available only after that, and it keeps each system's loyal and traitor scores.
 
 You can do the same over SSH or a one-off shell only on a service that has a disk and shell access (paid instances):
 

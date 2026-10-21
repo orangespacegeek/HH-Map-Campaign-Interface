@@ -55,7 +55,7 @@ The restart re-hashes the admin account and deletes `data/sessions.json`. Sign i
 | `DISCORD_FEEDBACK_WEBHOOK` | No | Discord webhook URL. When set, new feedback is also posted to that channel. Unset means feedback is stored only. |
 | `MAX_BODY_BYTES` | No | Request body limit. Default `1048576` (1 MB). |
 
-`data/accounts.json`, `data/sessions.json`, `data/invites.json`, `data/notifications.json`, and `data/feedback.json` are created on first use and are gitignored. Do not commit them. The sample players, forces, systems, games, and meta in `data/` are the demo campaign and are tracked. `data/baseline/systems.json` is the Port Maw map a reset restores.
+`data/accounts.json`, `data/sessions.json`, `data/invites.json`, `data/notifications.json`, and `data/feedback.json` are created on first use and are gitignored. Do not commit them. The sample players, forces, systems, games, and meta in `data/` are the demo campaign and are tracked. `data/baseline/systems.json` is the Port Maw map a reset restores. A fresh `DATA_DIR` with no `systems.json` is seeded from that file on first boot, so sign-up can offer a starting system before anyone resets.
 
 The static server only serves HTML pages, `js/`, `css/`, and images. `data/`, `schema/`, server source, and dotfiles are not on the web.
 
@@ -76,7 +76,7 @@ The invite table shows whether each code is active, used, revoked, or expired, a
 
 ## Starting a fresh campaign
 
-The files in `data/` are a sample already in progress (turn 3, Battles, one force). A fresh campaign is turn 1, Logistics, with two strength-3 forces per player in that player's starting system. Accounts are kept.
+The files in `data/` are a sample already in progress (turn 3, Battles, one force). A fresh campaign is turn 1, Logistics, with two strength-3 forces per player. Each force is placed in that player's starting system. If they never chose one, reset spreads that side across the systems their allegiance already controls (Loyalist forces in Loyalist systems, Traitor forces in Traitor systems) instead of stacking everyone in Port Maw. Accounts are kept.
 
 From the dashboard, as campaign admin, choose **Reset campaign** and type `RESET`. Two checkboxes sit in that dialog. **Keep current map** comes first. **Keep current system control** stays disabled until the map is kept.
 
@@ -102,6 +102,8 @@ npm run reset-campaign -- --purge-accounts
 `--purge-accounts` is the only switch that deletes logins. It removes player accounts and sessions and leaves the campaign admin. The player roster stays. Do not use it for a normal fresh start.
 
 Reset clears battles, notifications, the campaign score, the victor, and private action notes. It does not remove the admin account.
+
+Ending the Battles phase scores the turn only when every battle on this turn (and any older battle still open, pending, or disputed) has been applied. Otherwise advance returns 409 and lists those battles. Send `{ "force": true }` — the same flag that advances past a victor — to void them and continue. Voiding discards the unconfirmed result. It does not change strength or influence, and it does not carry the battle into the next turn. A confirmed battle is left as it is. Players cannot edit a confirmed battle; only the campaign admin can, and that edit reverses the old result before applying the new one. A player also cannot record a second battle between the same two forces in one turn.
 
 Before a reset on a live game, use **Download backup** on the dashboard. The file includes players, forces, systems, games, meta (including private action notes), invites, notifications, and feedback. Password hashes and sessions are left out. Invite codes are included, so treat the file as secret.
 

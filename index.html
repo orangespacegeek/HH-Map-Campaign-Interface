@@ -576,7 +576,7 @@
         <button type="button" id="btn-backup">Download backup</button>
         <button type="button" id="btn-reset">Reset campaign</button>
       </div>
-      <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts.</p>
+      <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
       <div class="turn-log" id="turn-log"></div>
     </div>
 
@@ -874,20 +874,37 @@
       document.getElementById("waiting-body").innerHTML = lines.join("");
     }
 
+    function showAdvanceResult(result) {
+      const log = document.getElementById("turn-log");
+      const notes = (result.log || []).join(" · ");
+      log.textContent = notes || `Now turn ${result.to.turn}, ${result.to.phase}`;
+      if (result.victory) {
+        const line = document.createElement("div");
+        line.innerHTML = `<span class="victory">Victor: ${escDash(result.victory.winner)}</span> — ${escDash(result.victory.reason || "")}`;
+        log.appendChild(line);
+      }
+    }
+
     document.getElementById("btn-advance").addEventListener("click", async () => {
       const log = document.getElementById("turn-log");
       try {
         const result = await SH.advancePhase();
-        const notes = (result.log || []).join(" · ");
-        log.textContent = notes || `Now turn ${result.to.turn}, ${result.to.phase}`;
-        if (result.victory) {
-          const line = document.createElement("div");
-          line.innerHTML = `<span class="victory">Victor: ${escDash(result.victory.winner)}</span> — ${escDash(result.victory.reason || "")}`;
-          log.appendChild(line);
-        }
+        showAdvanceResult(result);
         await refreshDashboard();
       } catch (err) {
         log.textContent = err.message || "Advance failed";
+        if (err.code !== "unresolved_battles") return;
+        const ok = window.confirm(
+          "Void the open battles and advance the turn? Unconfirmed results are discarded. Strength and influence stay as they are."
+        );
+        if (!ok) return;
+        try {
+          const forced = await SH.advancePhase({ force: true });
+          showAdvanceResult(forced);
+          await refreshDashboard();
+        } catch (err2) {
+          log.textContent = err2.message || "Advance failed";
+        }
       }
     });
 

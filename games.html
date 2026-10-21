@@ -82,6 +82,7 @@
     .badge.pending { background: #422006; color: var(--warn); }
     .badge.applied { background: #14532d; color: var(--success); }
     .badge.disputed { background: #7f1d1d; color: #fecaca; }
+    .badge.void { background: #3f3f46; color: #d4d4d8; }
 
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 60; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
     .overlay.open { opacity: 1; pointer-events: auto; }
@@ -332,6 +333,7 @@
     function canEditGame(g) {
       if (SH.role === "campaign_admin") return true;
       if (SH.role !== "player") return false;
+      if (g && (g.result_state === "applied" || g.result_state === "void")) return false;
       const pid = myPlayerId();
       return pid != null && (Number(g.attacker_id) === pid || Number(g.defender_id) === pid);
     }
@@ -388,6 +390,7 @@
             ${g.result_state === "pending" ? `<span class="badge pending">Awaiting confirm</span>` : ""}
             ${g.result_state === "disputed" ? `<span class="badge disputed">Disputed</span>` : ""}
             ${g.result_state === "applied" ? `<span class="badge applied">Applied</span>` : ""}
+            ${g.result_state === "void" ? `<span class="badge void">Void</span>` : ""}
             <span class="score">${g.attacker_vp ?? "—"} – ${g.defender_vp ?? "—"}</span>
           </div>
           <div class="meta">

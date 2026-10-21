@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "server": "node server.js",
-    "reset-campaign": "node server.js reset-campaign"
+    "reset-campaign": "node server.js reset-campaign",
+    "test": "node --test test/"
   }
 }
