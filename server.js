@@ -14,7 +14,7 @@
  *   GET  /api/auth/me
  *   POST /api/auth/set-password   (logged in) { password, current_password }
  *   POST /api/auth/create-invite  (campaign_admin) legacy: { player_id } → invite_code
- *   GET  /api/auth/invites        (campaign_admin) list tester invite codes
+ *   GET  /api/auth/invites        (campaign_admin) list player invite codes
  *   POST /api/auth/invites        (campaign_admin) { note?, expires_in_days?, max_uses? }
  *   POST /api/auth/invites/revoke (campaign_admin) { invite_id }
  *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
@@ -556,6 +556,23 @@ function publicForce(f, playersById) {
   };
 }
 
+function ownSignupInvite(account) {
+  const playerId = account && account.player_id;
+  if (playerId == null || playerId === "") return null;
+  let best = null;
+  readCollection("invites").forEach((invite) => {
+    const uses = Array.isArray(invite.used_by) ? invite.used_by : [];
+    const mine = uses.find((u) => Number(u.player_id) === Number(playerId));
+    if (!mine) return;
+    const row = {
+      code: formatInviteCode(invite.code),
+      used_at: mine.used_at || null
+    };
+    if (!best || String(row.used_at || "") > String(best.used_at || "")) best = row;
+  });
+  return best;
+}
+
 function mePayload(account) {
   const base = {
     account_id: account.account_id,
@@ -563,7 +580,9 @@ function mePayload(account) {
     label: account.label,
     login: account.login || null,
     player_id: account.player_id,
-    provider: account.provider || "local"
+    provider: account.provider || "local",
+    // This player's own code only. Other sign-ups on a shared code stay on the admin invite list.
+    signup_invite: ownSignupInvite(account)
   };
   if (account.player_id) {
     const players = readCollection("players");
@@ -883,7 +902,7 @@ async function handleAuth(req, res, parts, method) {
   }
 
   // Legacy: attach a one-time code to a player the admin already created.
-  // Tester onboarding uses POST /api/auth/invites + POST /api/auth/signup instead.
+  // Player onboarding uses POST /api/auth/invites + POST /api/auth/signup instead.
   if (action === "create-invite" && method === "POST") {
     const auth = getSession(req);
     const gate = requireRole(auth, ["campaign_admin"]);
@@ -1856,7 +1875,7 @@ function battlePlace(game) {
   const systems = readCollection("systems");
   const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
   const where = sys && sys.sys_name ? sys.sys_name : "system " + game.sys_id;
-  return "battle #" + game.game_id + " at " + where;
+  return "Battle #" + game.game_id + " at " + where;
 }
 
 function resultPhrase(result) {
@@ -3226,7 +3245,7 @@ function backupPayload() {
   const accounts = readCollection("accounts").map(publicAccount);
   return {
     exported_at: new Date().toISOString(),
-    note: "Password hashes and sessions are omitted. Invite codes are included so a restore can keep tester sign-up working. Treat this file as secret.",
+    note: "Password hashes and sessions are omitted. Invite codes are included so a restore can keep player sign-up working. Treat this file as secret.",
     players: readCollection("players"),
     forces: readCollection("forces"),
     systems: readCollection("systems"),

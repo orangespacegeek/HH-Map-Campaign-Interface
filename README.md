@@ -4,7 +4,7 @@ Horus Heresy-style map campaign for the Port Maw sub-sector. Players open it fro
 
 ## Features
 
-- Invite sign-up. The admin issues a code. The tester chooses their own username and password.
+- Invite sign-up. The admin issues a code. The player chooses their own username and password.
 - Campaign turns: Logistics, Movement, Battles. Two actions per turn. The dashboard shows the live turn, scores, recent battles, and phase log. Turn controls are on the dashboard for the campaign admin.
 - Map actions: move, hold, reinforce, fortify, and generate force, checked against the rules.
 - Battle log with named players and forces. A result applies when the opponent confirms it. The admin can apply, void, or resolve a dispute. Actions waiting shows what still needs a person.
@@ -60,20 +60,20 @@ The restart re-hashes the admin account and deletes `data/sessions.json`. Sign i
 
 The static server only serves HTML pages, `js/`, `css/`, and images. `data/`, `schema/`, server source, and dotfiles are not on the web.
 
-## Inviting testers
+## Inviting players
 
-The campaign admin only issues a code. The tester creates their own login and player record.
+The campaign admin only issues a code. The player creates their own login and player record. Codes are permanent campaign invites, not a test-only pass.
 
 1. Sign in as the campaign admin and open **Players**.
-2. Under **Tester invites**, optionally add a note, an expiry in days, and a use limit (default is one use), then choose **Generate code**.
-3. Copy the code and send it to the tester with the site URL.
-4. The tester opens **Log in → Sign up** (`login.html?tab=signup`), enters the code, and fills in their own username, password, player name, display name, contact, and allegiance.
+2. Under **Player invites**, optionally add a note, an expiry in days, and a use limit (default is one use), then choose **Generate code**.
+3. Copy the code and send it to the player with the site URL.
+4. The player opens **Log in → Sign up** (`login.html?tab=signup`), enters the code, and fills in their own username, password, player name, display name, contact, and allegiance.
 5. The server checks the code, rejects it if it is missing, used up, revoked, or expired, and stores the password with the same scrypt hash as other accounts. The username they choose is how they sign in after the code is consumed.
 6. Sign-up signs them in. Later they use **Sign in** with that username and password.
 
 Codes are 16 characters (about 78 bits). Login and sign-up are limited per IP (30 login attempts and 15 sign-ups per 15 minutes). A fresh code for someone who already has an account does not clear their password.
 
-The invite table shows whether each code is active, used, revoked, or expired, and who used it. **Revoke** stops an unused or still-open code immediately. On Render, keep the persistent disk mounted at `DATA_DIR` so invites, accounts, and players survive restarts. See [DEPLOY_RENDER.md](DEPLOY_RENDER.md).
+The invite table shows whether each code is active, used, revoked, or expired, who used it, and when. Each player row and the player editor show that same code, plus everyone who used it and the time. A player sees only their own code on **My account**. Public pages and other players do not receive codes. **Revoke** stops an unused or still-open code immediately. On Render, keep the persistent disk mounted at `DATA_DIR` so invites, accounts, and players survive restarts. See [DEPLOY_RENDER.md](DEPLOY_RENDER.md).
 
 ## Starting a fresh campaign
 

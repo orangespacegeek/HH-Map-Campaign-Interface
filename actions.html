@@ -55,7 +55,15 @@
     .card.needs { border-color: #7f1d1d; }
     .card.disputed { border-color: #854d0e; }
     .card .top { display: flex; flex-wrap: wrap; gap: 0.4rem 0.65rem; align-items: center; margin-bottom: 0.4rem; }
-    .card .title { font-weight: 600; font-size: 1rem; }
+    .card .title { font-weight: 600; font-size: 1rem; min-width: 0; }
+    .battle-no {
+      flex: 0 0 auto;
+      font-weight: 700;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
     .card .meta { font-size: 0.82rem; color: var(--muted); line-height: 1.45; }
     .card .meta strong { color: var(--text); font-weight: 600; }
     .note { margin-top: 0.45rem; font-size: 0.82rem; font-style: italic; }
@@ -87,6 +95,19 @@
     }
     .msg .when { display: block; margin-top: 0.2rem; font-size: 0.72rem; color: var(--muted); }
     .msg.unread { border-color: rgba(240, 192, 64, 0.45); }
+    a.msg { display: block; color: inherit; text-decoration: none; }
+    a.msg:hover { border-color: var(--accent); }
+    a.report-link {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      margin-top: 0.35rem;
+      color: var(--accent);
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    a.report-link:hover { text-decoration: underline; }
     .empty { color: var(--muted); font-size: 0.88rem; padding: 0.4rem 0 0.2rem; }
     .toast {
       position: fixed; bottom: calc(1.2rem + var(--safe-bottom)); left: 50%;
@@ -192,8 +213,12 @@
       const dispute = item.result_state === "disputed"
         ? `<div class="note">Disputed by <strong>${esc(item.disputed_by_name || "a commander")}</strong>${item.disputed_at ? " · " + esc(when(item.disputed_at)) : ""}${item.dispute_note ? " — " + esc(item.dispute_note) : ""}</div>`
         : "";
+      const report = item.result_state === "disputed"
+        ? `<a class="report-link" href="games.html#game-${encodeURIComponent(item.game_id)}">Open Battle #${esc(item.game_id)}</a>`
+        : "";
       return `
         <div class="top">
+          <span class="battle-no">Battle #${esc(item.game_id)}</span>
           <span class="title">${esc(item.mission || "Battle")} · ${esc(item.system_name)}</span>
           <span class="badge result">${esc(resultLabel(item.result))}</span>
           <span class="badge ${stateClass(item.result_state)}">${esc(stateLabel(item.result_state))}</span>
@@ -206,6 +231,7 @@
         </div>
         ${item.notes ? `<div class="note">${esc(item.notes)}</div>` : ""}
         ${dispute}
+        ${report}
       `;
     }
 
@@ -226,6 +252,17 @@
           </div>`;
       }
       return "";
+    }
+
+    function messageMarkup(n) {
+      const stamp = esc(when(n.created_at));
+      const gameId = n.ref && n.ref.game_id != null ? n.ref.game_id : null;
+      const num = gameId != null ? `<span class="battle-no">Battle #${esc(gameId)}</span> ` : "";
+      if (gameId != null) {
+        const href = "games.html#game-" + encodeURIComponent(gameId);
+        return `<a class="msg${n.read ? "" : " unread"}" href="${href}">${num}${esc(n.text)}<span class="when">Open Battle #${esc(gameId)}${stamp ? " · " + stamp : ""}</span></a>`;
+      }
+      return `<div class="msg${n.read ? "" : " unread"}">${esc(n.text)}<span class="when">${stamp}</span></div>`;
     }
 
     function section(title, inner) {
@@ -265,7 +302,7 @@
       html += section(
         "Messages",
         notes.length
-          ? `<div class="stack">${notes.map((n) => `<div class="msg${n.read ? "" : " unread"}">${esc(n.text)}<span class="when">${esc(when(n.created_at))}</span></div>`).join("")}</div>`
+          ? `<div class="stack">${notes.map((n) => messageMarkup(n)).join("")}</div>`
           : `<p class="empty">No messages yet.</p>`
       );
 

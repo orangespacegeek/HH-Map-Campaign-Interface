@@ -94,6 +94,7 @@
     <div id="profile-card" class="card" hidden>
       <h3>Profile</h3>
       <p class="who" id="who"></p>
+      <p class="who" id="invite-line" hidden></p>
       <form id="profile-form">
         <div class="form-group">
           <label for="display_name">Display name</label>
@@ -186,6 +187,17 @@
         document.getElementById("display_name").value = me.player.display_name || "";
         document.getElementById("contact").value = me.player.contact || "";
         document.getElementById("notes").value = me.player.notes || "";
+        const invite = me.signup_invite;
+        if (invite && invite.code) {
+          const line = document.getElementById("invite-line");
+          let when = "";
+          if (invite.used_at) {
+            const d = new Date(invite.used_at);
+            when = Number.isNaN(d.getTime()) ? "" : " · used " + d.toLocaleString();
+          }
+          line.hidden = false;
+          line.textContent = "Invite code " + invite.code + when;
+        }
       } else {
         document.getElementById("lead").textContent = "This login is not tied to a player record, so there is no display name to edit. You can still change the password.";
       }

@@ -67,12 +67,44 @@
     .battle-card .top {
       display: flex; flex-wrap: wrap; gap: 0.4rem 0.8rem; align-items: center; margin-bottom: 0.45rem;
     }
-    .battle-card .title { font-weight: 600; font-size: 1rem; }
+    .battle-card .title { font-weight: 600; font-size: 1rem; min-width: 0; }
+    .battle-no {
+      flex: 0 0 auto;
+      font-weight: 700;
+      color: var(--accent);
+      font-variant-numeric: tabular-nums;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
     .battle-card .score {
       font-size: 1.1rem; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.02em;
     }
     .battle-card .meta { font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
     .battle-card .notes { margin-top: 0.45rem; font-size: 0.82rem; color: var(--text); font-style: italic; }
+    .battle-card { scroll-margin-top: 8rem; }
+    .battle-card.linked {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(240, 192, 64, 0.55);
+    }
+    .dispute {
+      margin-top: 0.65rem;
+      padding: 0.7rem 0.75rem;
+      border-radius: 8px;
+      background: #2a1a12;
+      border: 1px solid #854d0e;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+    .dispute-note { margin-top: 0.35rem; font-style: italic; }
+    .report-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.7rem; }
+    .report-actions button { min-height: 44px; }
+    #dispute-panel { margin-bottom: 0.85rem; }
+    #dispute-panel[hidden] { display: none; }
+    #dispute-panel .dispute { margin-top: 0; }
+    @media (max-width: 640px) {
+      .report-actions { flex-direction: column; }
+      .report-actions button { width: 100%; }
+    }
 
     .badge { display: inline-block; padding: 0.18rem 0.5rem; border-radius: 4px; font-size: 0.68rem; font-weight: 600; }
     .badge.attacker_win, .badge.win { background: #14532d; color: var(--success); }
@@ -157,6 +189,7 @@
       <button type="button" class="ghost" id="btn-close">✕</button>
     </div>
     <div class="drawer-body">
+      <div id="dispute-panel" hidden></div>
       <form id="form">
         <input type="hidden" id="f-id" />
         <div class="form-row">
@@ -350,6 +383,33 @@
     function isDecisiveClient(result) {
       return result === "attacker_win" || result === "defender_win" || result === "draw" || result === "conceded";
     }
+    function whenLabel(iso) {
+      if (!iso) return "";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "";
+      return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+    function linkedGameId() {
+      const match = /^#game-(\d+)$/.exec(location.hash || "");
+      return match ? Number(match[1]) : null;
+    }
+    function disputeBlock(g) {
+      if (!g || g.result_state !== "disputed") return "";
+      const who = g.disputed_by ? playerName(g.disputed_by) : "the campaign admin";
+      const when = whenLabel(g.disputed_at);
+      const note = g.dispute_note ? `<div class="dispute-note">${esc(g.dispute_note)}</div>` : "";
+      const adminBtns = SH.role === "campaign_admin"
+        ? `<div class="report-actions">
+            <button type="button" class="primary" data-apply="${g.game_id}">Apply result</button>
+            <button type="button" class="danger" data-void="${g.game_id}">Void result</button>
+          </div>`
+        : "";
+      return `<div class="dispute">
+        <div class="dispute-who">Disputed by <strong>${esc(who)}</strong>${when ? " · " + esc(when) : ""}</div>
+        ${note}
+        ${adminBtns}
+      </div>`;
+    }
 
     function renderStats() {
       const done = games.filter(g => g.result !== "in_progress").length;
@@ -370,7 +430,9 @@
           systemName(g.sys_id).toLowerCase().includes(q) ||
           (g.notes || "").toLowerCase().includes(q) ||
           (g.attacker_list || "").toLowerCase().includes(q) ||
-          (g.defender_list || "").toLowerCase().includes(q)
+          (g.defender_list || "").toLowerCase().includes(q) ||
+          String(g.game_id) === q ||
+          ("battle #" + g.game_id).includes(q)
         );
       }
       return list.sort((a, b) => b.game_id - a.game_id);
@@ -380,11 +442,14 @@
       const list = filtered();
       cards.innerHTML = "";
       empty.hidden = list.length > 0;
+      const linkedId = linkedGameId();
       list.forEach(g => {
         const div = document.createElement("div");
-        div.className = "battle-card";
+        div.id = "game-" + g.game_id;
+        div.className = "battle-card" + (linkedId === Number(g.game_id) ? " linked" : "");
         div.innerHTML = `
           <div class="top">
+            <span class="battle-no">Battle #${esc(g.game_id)}</span>
             <span class="title">${esc(g.mission || "Battle")} · ${esc(systemName(g.sys_id))}</span>
             <span class="badge ${g.result}">${resultLabel(g.result)}</span>
             ${g.result_state === "pending" ? `<span class="badge pending">Awaiting confirm</span>` : ""}
@@ -399,6 +464,7 @@
             ${g.attacker_list || g.defender_list ? "<br>" + esc(g.attacker_list || "—") + " vs " + esc(g.defender_list || "—") : ""}
           </div>
           ${g.notes ? `<div class="notes">${esc(g.notes)}</div>` : ""}
+          ${disputeBlock(g)}
           <div style="margin-top:0.55rem;display:flex;gap:0.4rem;flex-wrap:wrap">
             ${canEditGame(g) ? `<button type="button" data-edit="${g.game_id}">Edit</button>` : ""}
             ${canConfirmGame(g) ? `<button type="button" class="primary" data-confirm="${g.game_id}">Confirm result</button>` : ""}
@@ -488,7 +554,17 @@
 
     function openDrawer(g) {
       editingId = g ? g.game_id : null;
-      document.getElementById("drawer-title").textContent = g ? `Edit Battle #${g.game_id}` : "Log Battle";
+      const panel = document.getElementById("dispute-panel");
+      if (g && g.result_state === "disputed") {
+        panel.hidden = false;
+        panel.innerHTML = disputeBlock(g);
+      } else {
+        panel.hidden = true;
+        panel.innerHTML = "";
+      }
+      document.getElementById("drawer-title").textContent = g
+        ? (g.result_state === "disputed" ? `Battle #${g.game_id}` : `Edit Battle #${g.game_id}`)
+        : "Log Battle";
       document.getElementById("f-id").value = g ? g.game_id : "";
       document.getElementById("f-turn").value = g ? g.turn : (meta.turn || 1);
       document.getElementById("f-date").value = g ? (g.played_on || "") : new Date().toISOString().slice(0, 10);
@@ -592,6 +668,51 @@
     overlay.addEventListener("click", closeDrawer);
     document.getElementById("btn-save").addEventListener("click", save);
     document.getElementById("btn-delete").addEventListener("click", del);
+    async function resolveFromReport(act, id) {
+      if (act === "void" && !confirm("Void this result? Campaign changes from it will be undone.")) return;
+      try {
+        if (act === "apply") {
+          await SH.confirmGame(id);
+          showToast("Result applied");
+        } else {
+          await SH.voidGame(id);
+          showToast("Result voided");
+        }
+        await reload();
+        closeDrawer();
+        SH.refreshWaitingBadge();
+      } catch (err) {
+        showToast(err.message || "That did not go through");
+      }
+    }
+
+    document.body.addEventListener("click", async (e) => {
+      const applyBtn = e.target.closest("[data-apply]");
+      const voidBtn = e.target.closest("[data-void]");
+      if (!applyBtn && !voidBtn) return;
+      const id = applyBtn ? applyBtn.dataset.apply : voidBtn.dataset.void;
+      await resolveFromReport(applyBtn ? "apply" : "void", id);
+    });
+
+    function openLinkedBattle() {
+      const id = linkedGameId();
+      if (!id) return;
+      const g = games.find((x) => Number(x.game_id) === id);
+      if (!g) return;
+      if (searchQ) {
+        searchQ = "";
+        const search = document.getElementById("search");
+        if (search) search.value = "";
+        render();
+      }
+      const card = document.getElementById("game-" + id);
+      if (card) {
+        card.classList.add("linked");
+        requestAnimationFrame(() => card.scrollIntoView({ block: "start" }));
+      }
+      openDrawer(g);
+    }
+
     cards.addEventListener("click", async (e) => {
       const confirmBtn = e.target.closest("[data-confirm]");
       if (confirmBtn) {
@@ -625,6 +746,8 @@
           } else addBtn.hidden = true;
         }
         await reload();
+        openLinkedBattle();
+        window.addEventListener("hashchange", openLinkedBattle);
       } catch (err) {
         console.error(err);
         showToast("Could not load battles");
