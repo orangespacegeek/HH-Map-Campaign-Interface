@@ -139,7 +139,7 @@
       gap: 0.65rem;
       align-items: center;
       justify-content: space-between;
-      margin: -0.4rem 0 1.1rem;
+      margin: 0 0 1.1rem;
       padding: 0.85rem 1rem;
       background: var(--panel);
       border: 1px solid var(--accent);
@@ -362,9 +362,12 @@
 
     .stats {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 0.65rem;
-      margin-bottom: 1.3rem;
+      margin-bottom: 1rem;
+    }
+    @media (min-width: 720px) {
+      .stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
     }
     .stat {
       background: var(--panel);
@@ -441,6 +444,15 @@
     .wait-item { padding: 0.45rem 0; border-bottom: 1px solid #1f1f30; font-size: 0.88rem; }
     .wait-item:last-of-type { border-bottom: none; }
     .wait-item .meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.12rem; }
+    .battle-no { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    a.wait-item {
+      display: block;
+      min-height: 44px;
+      padding: 0.55rem 0.15rem;
+      color: var(--text);
+      text-decoration: none;
+    }
+    a.wait-item:hover { background: rgba(240, 192, 64, 0.08); }
     .score-row {
       display: flex;
       align-items: center;
@@ -538,6 +550,27 @@
   </nav>
 </header>
   <main>
+    <div class="stats" id="stats">
+      <div class="stat"><div class="num">1</div><div class="label">Players</div></div>
+      <div class="stat"><div class="num">13</div><div class="label">Systems</div></div>
+      <div class="stat"><div class="num">1</div><div class="label">Forces</div></div>
+      <div class="stat"><div class="num" style="color:var(--traitor)">1</div><div class="label">Battles logged</div></div>
+    </div>
+
+    <div class="panel" id="score-panel">
+      <h3>Campaign score</h3>
+      <div class="score-row">
+        <span class="score-label loyal">Loyalist</span>
+        <div class="score-bar"><div id="score-loyal-bar" style="width:0%;background:var(--loyal)"></div></div>
+        <span class="score-val" id="score-loyal">—</span>
+      </div>
+      <div class="score-row">
+        <span class="score-label traitor">Traitor</span>
+        <div class="score-bar"><div id="score-traitor-bar" style="width:0%;background:var(--traitor)"></div></div>
+        <span class="score-val" id="score-traitor">—</span>
+      </div>
+    </div>
+
     <section class="hero">
       <div class="hero-text">
         <h2 id="hero-title">Sunset Heresy</h2>
@@ -556,6 +589,12 @@
         <a class="join-primary" href="login.html">Sign in</a>
         <a class="join-secondary" href="login.html?tab=signup">Sign up with an invite</a>
       </div>
+    </div>
+
+    <div class="panel" id="waiting-panel" hidden>
+      <h3 id="waiting-title">Actions waiting</h3>
+      <div id="waiting-body"></div>
+      <a class="more" href="actions.html">Open actions</a>
     </div>
 
     <div class="turn-panel" id="turn-panel">
@@ -578,19 +617,6 @@
       </div>
       <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
       <div class="turn-log" id="turn-log"></div>
-    </div>
-
-    <div class="panel" id="waiting-panel" hidden>
-      <h3 id="waiting-title">Actions waiting</h3>
-      <div id="waiting-body"></div>
-      <a class="more" href="actions.html">Open actions</a>
-    </div>
-
-    <div class="stats" id="stats">
-      <div class="stat"><div class="num">1</div><div class="label">Players</div></div>
-      <div class="stat"><div class="num">1</div><div class="label">Forces</div></div>
-      <div class="stat"><div class="num" style="color:var(--traitor)">1</div><div class="label">Battles logged</div></div>
-      <div class="stat"><div class="num">13</div><div class="label">Systems</div></div>
     </div>
 
     <div class="grid">
@@ -627,32 +653,12 @@
     </div>
 
     <div class="panel">
-      <h3>Campaign score</h3>
-      <div class="score-row">
-        <span class="score-label loyal">Loyalist</span>
-        <div class="score-bar"><div id="score-loyal-bar" style="width:0%;background:var(--loyal)"></div></div>
-        <span class="score-val" id="score-loyal">—</span>
-      </div>
-      <div class="score-row">
-        <span class="score-label traitor">Traitor</span>
-        <div class="score-bar"><div id="score-traitor-bar" style="width:0%;background:var(--traitor)"></div></div>
-        <span class="score-val" id="score-traitor">—</span>
-      </div>
-    </div>
-
-    <div class="panel">
       <h3>Recent battles</h3>
       <ul class="recent-list" id="recent-battles">
         <li>Loading…</li>
       </ul>
     </div>
 
-    <div class="panel">
-      <h3>Phase log</h3>
-      <ul class="recent-list" id="phase-log">
-        <li>Loading…</li>
-      </ul>
-    </div>
   </main>
 
   <footer id="footer-note">Loading campaign…</footer>
@@ -734,7 +740,7 @@
           (meta.turn ?? "—") +
           ", " +
           (meta.phase || "—") +
-          " phase. Scores, recent battles, and the phase log are the live campaign.";
+          " phase. Scores and recent battles are the live campaign.";
       }
       document.getElementById("meta-turn").textContent = meta.turn ?? "—";
       document.getElementById("meta-phase").textContent = meta.phase ?? "—";
@@ -775,28 +781,7 @@
           (g.attacker_vp ?? "—") + " – " + (g.defender_vp ?? "—"),
           escDash(pname(g.defender_id)) + (defF ? " (" + escDash(defF) + ")" : "")
         ];
-        return `<li><strong>${escDash(g.mission || "Battle")}</strong> at ${escDash(sname(g.sys_id))} · Turn ${escDash(g.turn)} <span class="badge win">${escDash(resultLabel(g.result))}</span><div class="meta">${bits.join(" · ")}</div></li>`;
-      }).join("");
-    }
-
-    function renderPhaseLog(meta) {
-      const ul = document.getElementById("phase-log");
-      if (!ul) return;
-      const entries = Array.isArray(meta.phase_log) ? meta.phase_log.slice().reverse() : [];
-      if (!entries.length) {
-        ul.innerHTML = `<li>No phase changes recorded yet.</li>`;
-        return;
-      }
-      ul.innerHTML = entries.slice(0, 8).map((entry) => {
-        const from = entry.from ? "Turn " + (entry.from.turn ?? "—") + " " + (entry.from.phase || "") : "Start";
-        const to = entry.to ? "Turn " + (entry.to.turn ?? "—") + " " + (entry.to.phase || "") : "";
-        const notes = Array.isArray(entry.notes) ? entry.notes.join(" · ") : "";
-        let when = "";
-        if (entry.at) {
-          const d = new Date(entry.at);
-          when = Number.isNaN(d.getTime()) ? String(entry.at) : d.toLocaleString();
-        }
-        return `<li><strong>${escDash(from)} → ${escDash(to)}</strong><div class="meta">${escDash(when)}${notes ? " · " + escDash(notes) : ""}</div></li>`;
+        return `<li><strong class="battle-no">Battle #${escDash(g.game_id)}</strong> · ${escDash(g.mission || "Battle")} at ${escDash(sname(g.sys_id))} · Turn ${escDash(g.turn)} <span class="badge win">${escDash(resultLabel(g.result))}</span><div class="meta">${bits.join(" · ")}</div></li>`;
       }).join("");
     }
 
@@ -816,13 +801,12 @@
       ]);
       document.getElementById("stats").innerHTML = `
         <div class="stat"><div class="num">${players.length}</div><div class="label">Players</div></div>
+        <div class="stat"><div class="num">${systems.length}</div><div class="label">Systems</div></div>
         <div class="stat"><div class="num">${forces.length}</div><div class="label">Forces</div></div>
         <div class="stat"><div class="num" style="color:var(--traitor)">${games.length}</div><div class="label">Battles logged</div></div>
-        <div class="stat"><div class="num">${systems.length}</div><div class="label">Systems</div></div>
       `;
       updateHero(meta, systems.length);
       renderRecent(games, players, forces, systems);
-      renderPhaseLog(meta);
       const btn = document.getElementById("btn-advance");
       if (btn) btn.textContent = advanceLabel(meta.phase);
       return meta;
@@ -854,18 +838,44 @@
       const count = actions.length;
       title.textContent = count ? "Actions waiting · " + count : "Messages";
       const lines = [];
+      function resultLabelDash(r) {
+        return ({
+          attacker_win: "Attacker win",
+          defender_win: "Defender win",
+          draw: "Draw",
+          conceded: "Conceded",
+          in_progress: "In progress"
+        })[r] || r || "Result";
+      }
+      function battleNo(item) {
+        return "Battle #" + (item.game_id == null ? "—" : item.game_id);
+      }
+      function disputeWaitItem(item, verb) {
+        const href = "games.html#game-" + encodeURIComponent(item.game_id);
+        const sides = escDash(item.attacker_name || "—") + " (" + escDash(item.attacker_force || "no force") + ") vs " +
+          escDash(item.defender_name || "—") + " (" + escDash(item.defender_force || "no force") + ")";
+        return `<a class="wait-item" href="${href}"><strong class="battle-no">${escDash(battleNo(item))}</strong> · ${escDash(verb)}<div class="meta">${escDash(item.system_name)} · ${sides}</div><div class="meta">${escDash(resultLabelDash(item.result))}</div></a>`;
+      }
       actions.slice(0, 4).forEach((item) => {
         const verb = item.duty === "admin"
           ? (item.result_state === "disputed" ? "Disputed result to resolve" : "Pending result to resolve")
           : "Confirm or dispute";
+        if (item.result_state === "disputed") {
+          lines.push(disputeWaitItem(item, verb));
+          return;
+        }
         lines.push(
-          `<div class="wait-item"><strong>${escDash(verb)}</strong> · ${escDash(item.system_name)} · ${escDash(item.attacker_name || "—")} vs ${escDash(item.defender_name || "—")}<div class="meta">Submitted by ${escDash(item.proposed_by_name || "—")}</div></div>`
+          `<div class="wait-item"><strong class="battle-no">${escDash(battleNo(item))}</strong> · ${escDash(verb)} · ${escDash(item.system_name)} · ${escDash(item.attacker_name || "—")} vs ${escDash(item.defender_name || "—")}<div class="meta">Submitted by ${escDash(item.proposed_by_name || "—")}</div></div>`
         );
       });
       mine.slice(0, 3).forEach((item) => {
         const label = item.result_state === "disputed" ? "Your result was disputed" : "Your result is pending";
+        if (item.result_state === "disputed") {
+          lines.push(disputeWaitItem(item, label));
+          return;
+        }
         lines.push(
-          `<div class="wait-item"><strong>${label}</strong> · ${escDash(item.system_name)}<div class="meta">${escDash(item.attacker_name || "—")} vs ${escDash(item.defender_name || "—")}</div></div>`
+          `<div class="wait-item"><strong class="battle-no">${escDash(battleNo(item))}</strong> · ${label} · ${escDash(item.system_name)}<div class="meta">${escDash(item.attacker_name || "—")} vs ${escDash(item.defender_name || "—")}</div></div>`
         );
       });
       if (!lines.length && unread) {

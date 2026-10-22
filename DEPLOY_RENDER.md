@@ -62,7 +62,7 @@ Save and deploy. The first boot creates the admin account from `CAMPAIGN_ADMIN_P
 ## 5. Invite players
 
 1. Open **Players**.
-2. Under **Tester invites**, generate a code. The default is one use.
+2. Under **Player invites**, generate a code. The default is one use. Invites stay valid for the campaign; they are not limited to a test period.
 3. Send the code and the site URL to the player.
 4. They open **Log in → Sign up**, enter the code, and choose their own username and password.
 

@@ -338,6 +338,13 @@
       color: var(--muted);
       margin-top: 0.15rem;
     }
+    .invite-on-player {
+      margin-top: 0.28rem;
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.35;
+    }
+    .invite-on-player .invite-code { color: var(--text); font-size: 0.78rem; }
 
     .row-actions {
       display: flex;
@@ -561,12 +568,12 @@
       <button type="button" class="primary" id="btn-add">+ Player</button>
     </div>
     <section class="invite-panel" id="invite-panel">
-      <h2>Tester invites</h2>
-      <p class="form-hint">Generate a code and send it to the tester. They sign up at <strong>Log in → Sign up</strong> and enter their own username, password, and player details. You do not create their account first.</p>
+      <h2>Player invites</h2>
+      <p class="form-hint">Generate a code and send it to the player. They sign up at <strong>Log in → Sign up</strong> and enter their own username, password, and player details. You do not create their account first. Each player row below shows the code they used.</p>
       <div class="invite-form">
         <div class="form-group">
           <label for="inv-note">Note</label>
-          <input id="inv-note" maxlength="120" placeholder="Weekend test group" />
+          <input id="inv-note" maxlength="120" placeholder="Weekend group" />
         </div>
         <div class="form-group">
           <label for="inv-days">Expires in days</label>
@@ -580,7 +587,7 @@
       </div>
       <div id="invite-fresh" class="invite-fresh" hidden>
         <div>
-          <div class="label">New code — share this with the tester</div>
+          <div class="label">New code — share this with the player</div>
           <div class="code" id="invite-fresh-code"></div>
         </div>
         <button type="button" id="invite-fresh-copy">Copy</button>
@@ -705,6 +712,11 @@
         </div>
       </form>
 
+      <div class="detail-section" id="invite-section">
+        <h3>Invite used</h3>
+        <div id="invite-detail"></div>
+      </div>
+
       <div class="detail-section" id="forces-section" hidden>
         <h3>Forces owned</h3>
         <div id="forces-list"></div>
@@ -817,6 +829,32 @@
       return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
     }
 
+    function formatStamp(iso) {
+      if (!iso) return "—";
+      const d = new Date(iso);
+      if (Number.isNaN(d.getTime())) return "—";
+      return d.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+
+    function playerInvites(playerId) {
+      return invites.filter((inv) =>
+        (inv.used_by || []).some((u) => Number(u.player_id) === Number(playerId))
+      );
+    }
+
+    function inviteDetailsHtml(playerId) {
+      const rows = playerInvites(playerId);
+      if (!rows.length) return `<span class="invite-note">No invite code</span>`;
+      return rows.map((inv) => {
+        const used = (inv.used_by || []).map((u) => {
+          const who = u.display_name || u.player_name || u.login || "player";
+          const login = u.login ? escapeHtml(u.login) + " · " : "";
+          return `<div>Used by ${login}${escapeHtml(who)} · ${escapeHtml(formatStamp(u.used_at))}</div>`;
+        }).join("");
+        return `<div class="invite-on-player"><span class="invite-code">${escapeHtml(inv.code_display || inv.code || "")}</span>${used}</div>`;
+      }).join("");
+    }
+
     function renderInvites() {
       const tbody = document.getElementById("invite-tbody");
       const empty = document.getElementById("invite-empty");
@@ -825,7 +863,8 @@
       invites.forEach((inv) => {
         const used = (inv.used_by || []).map((u) => {
           const who = u.display_name || u.player_name || "player";
-          return escapeHtml(u.login || who) + " (" + escapeHtml(who) + ")";
+          const when = u.used_at ? " · " + escapeHtml(formatStamp(u.used_at)) : "";
+          return escapeHtml(u.login || who) + " (" + escapeHtml(who) + ")" + when;
         }).join(", ");
         const tr = document.createElement("tr");
         tr.innerHTML = `
@@ -884,7 +923,11 @@
         list = list.filter(p =>
           (p.player_name || "").toLowerCase().includes(q) ||
           (p.display_name || "").toLowerCase().includes(q) ||
-          (p.contact || "").toLowerCase().includes(q)
+          (p.contact || "").toLowerCase().includes(q) ||
+          playerInvites(p.player_id).some((inv) =>
+            String(inv.code_display || "").toLowerCase().includes(q) ||
+            String(inv.code || "").toLowerCase().includes(q)
+          )
         );
       }
       return list.sort((a, b) => a.player_id - b.player_id);
@@ -903,6 +946,7 @@
           <td>
             <strong>${escapeHtml(p.player_name)}</strong>
             <div style="font-size:0.72rem;color:var(--muted)">${escapeHtml(p.contact || "")}</div>
+            ${inviteDetailsHtml(p.player_id)}
           </td>
           <td class="hide-sm">${escapeHtml(p.display_name || "—")}</td>
           <td><span class="badge ${all}">${p.allegiance}</span></td>
@@ -943,6 +987,9 @@
       document.getElementById("f-notes").value = player ? (player.notes || "") : "";
 
       btnDelete.hidden = !player;
+      document.getElementById("invite-detail").innerHTML = player
+        ? inviteDetailsHtml(player.player_id)
+        : `<span class="invite-note">No invite code</span>`;
       if (player) {
         const owned = forces.filter(f => f.player_id === player.player_id);
         forcesSection.hidden = false;
@@ -1003,7 +1050,7 @@
 
     async function deletePlayer() {
       if (!editingId) return;
-      if (!confirm(`Delete player #${editingId}? Forces stay in the forces list but lose their owner link.`)) return;
+      if (!confirm(`Delete player #${editingId}? Their forces are marked removed and stay on the force list. Battle history is kept. This player id is not reused.`)) return;
       try {
         await SH.remove("players", editingId);
         await reload();
@@ -1017,17 +1064,24 @@
     function exportCsv() {
       const headers = [
         "player_id","player_name","display_name","contact","status","role",
-        "allegiance","start_sys_id","notes","joined_at"
+        "allegiance","start_sys_id","notes","joined_at","invite_code","invite_used"
       ];
-      const rows = players.map(p =>
-        headers.map(h => {
-          let v = p[h] == null ? "" : String(p[h]);
+      const rows = players.map(p => {
+        const codes = playerInvites(p.player_id);
+        const extra = {
+          invite_code: codes.map((inv) => inv.code_display || inv.code || "").join("; "),
+          invite_used: codes.flatMap((inv) => (inv.used_by || []).map((u) =>
+            (u.login || u.display_name || u.player_name || "player") + " @ " + (u.used_at || "")
+          )).join("; ")
+        };
+        return headers.map(h => {
+          let v = extra[h] != null ? String(extra[h]) : (p[h] == null ? "" : String(p[h]));
           if (v.includes(",") || v.includes('"') || v.includes("\n")) {
             v = '"' + v.replace(/"/g, '""') + '"';
           }
           return v;
-        }).join(",")
-      );
+        }).join(",");
+      });
       const csv = [headers.join(","), ...rows].join("\n");
       const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
       const a = document.createElement("a");

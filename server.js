@@ -14,7 +14,7 @@
  *   GET  /api/auth/me
  *   POST /api/auth/set-password   (logged in) { password, current_password }
  *   POST /api/auth/create-invite  (campaign_admin) legacy: { player_id } → invite_code
- *   GET  /api/auth/invites        (campaign_admin) list tester invite codes
+ *   GET  /api/auth/invites        (campaign_admin) list player invite codes
  *   POST /api/auth/invites        (campaign_admin) { note?, expires_in_days?, max_uses? }
  *   POST /api/auth/invites/revoke (campaign_admin) { invite_id }
  *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
@@ -163,6 +163,89 @@ function writeCollection(name, data) {
 function nextId(list, idKey) {
   if (!list.length) return 1;
   return list.reduce((m, row) => Math.max(m, Number(row[idKey]) || 0), 0) + 1;
+}
+
+function considerPlayerId(max, value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= max) return max;
+  return n;
+}
+
+/** Highest player id still stored anywhere, so a deleted row cannot be reused. */
+function highestPlayerId() {
+  let max = 0;
+  readCollection("players").forEach((p) => {
+    max = considerPlayerId(max, p.player_id);
+  });
+  readCollection("forces").forEach((f) => {
+    max = considerPlayerId(max, f.player_id);
+  });
+  readCollection("games").forEach((g) => {
+    max = considerPlayerId(max, g.attacker_id);
+    max = considerPlayerId(max, g.defender_id);
+    max = considerPlayerId(max, g.winner_id);
+    max = considerPlayerId(max, g.proposed_by);
+    max = considerPlayerId(max, g.disputed_by);
+  });
+  readCollection("accounts").forEach((a) => {
+    max = considerPlayerId(max, a.player_id);
+  });
+  const invites = readCollection("invites");
+  if (Array.isArray(invites)) {
+    invites.forEach((invite) => {
+      (invite.used_by || []).forEach((use) => {
+        max = considerPlayerId(max, use.player_id);
+      });
+    });
+  }
+  return max;
+}
+
+/**
+ * Next player id from meta.next_player_id. The counter only moves forward.
+ * If it is missing, or older data references a higher id, seed past that id.
+ */
+function allocatePlayerId() {
+  const meta = readCollection("meta") || {};
+  const id = Math.max(Number(meta.next_player_id) || 1, highestPlayerId() + 1);
+  meta.next_player_id = id + 1;
+  writeCollection("meta", meta);
+  return id;
+}
+
+function dropSessionsForPlayer(playerId) {
+  const accounts = readCollection("accounts");
+  const ids = new Set(
+    accounts.filter((a) => Number(a.player_id) === Number(playerId)).map((a) => a.account_id)
+  );
+  if (!ids.size) return;
+  const sessions = readCollection("sessions").filter((s) => !ids.has(s.account_id));
+  writeCollection("sessions", sessions);
+}
+
+/**
+ * Removing a player keeps the force rows and every battle. Forces are marked
+ * "removed" (not destroyed, and not given to anyone else) so they drop out of
+ * pairing, fortify, and the map. Open and pending battles for those forces are
+ * voided with no winner. Applied battles stay.
+ */
+function retireRemovedPlayer(playerId) {
+  const forces = readCollection("forces");
+  const owned = forces.filter((f) => Number(f.player_id) === Number(playerId));
+  owned.forEach((force) => {
+    force.status = "removed";
+    force.dest_sys_id = null;
+  });
+  if (owned.length) writeCollection("forces", forces);
+  const games = readCollection("games");
+  const state = battleState();
+  voidUnfoughtBattles(
+    owned.map((force) => force.force_id),
+    { games, state, reason: "player_removed" }
+  );
+  writeCollection("games", games);
+  saveBattleState(state);
+  dropSessionsForPlayer(playerId);
 }
 
 function hashPassword(password, salt) {
@@ -556,6 +639,23 @@ function publicForce(f, playersById) {
   };
 }
 
+function ownSignupInvite(account) {
+  const playerId = account && account.player_id;
+  if (playerId == null || playerId === "") return null;
+  let best = null;
+  readCollection("invites").forEach((invite) => {
+    const uses = Array.isArray(invite.used_by) ? invite.used_by : [];
+    const mine = uses.find((u) => Number(u.player_id) === Number(playerId));
+    if (!mine) return;
+    const row = {
+      code: formatInviteCode(invite.code),
+      used_at: mine.used_at || null
+    };
+    if (!best || String(row.used_at || "") > String(best.used_at || "")) best = row;
+  });
+  return best;
+}
+
 function mePayload(account) {
   const base = {
     account_id: account.account_id,
@@ -563,7 +663,9 @@ function mePayload(account) {
     label: account.label,
     login: account.login || null,
     player_id: account.player_id,
-    provider: account.provider || "local"
+    provider: account.provider || "local",
+    // This player's own code only. Other sign-ups on a shared code stay on the admin invite list.
+    signup_invite: ownSignupInvite(account)
   };
   if (account.player_id) {
     const players = readCollection("players");
@@ -883,7 +985,7 @@ async function handleAuth(req, res, parts, method) {
   }
 
   // Legacy: attach a one-time code to a player the admin already created.
-  // Tester onboarding uses POST /api/auth/invites + POST /api/auth/signup instead.
+  // Player onboarding uses POST /api/auth/invites + POST /api/auth/signup instead.
   if (action === "create-invite" && method === "POST") {
     const auth = getSession(req);
     const gate = requireRole(auth, ["campaign_admin"]);
@@ -1052,7 +1154,7 @@ async function handleAuth(req, res, parts, method) {
 
     const players = readCollection("players");
     const player = {
-      player_id: nextId(players, "player_id"),
+      player_id: allocatePlayerId(),
       player_name: playerName,
       display_name: displayName,
       contact,
@@ -1360,9 +1462,16 @@ function validateGameWrite(body, auth, existing) {
     return { status: 400, error: "The two forces must be on opposing sides" };
   }
   const games = readCollection("games");
-  if (pairingAlreadyUsed(games, body.turn, attF.force_id, defF.force_id, existing && existing.game_id)) {
-    return { status: 409, error: "These two forces already have a battle this turn" };
-  }
+  const paired = playerPairingError(
+    forces,
+    games,
+    body.turn,
+    body.sys_id,
+    attF.force_id,
+    defF.force_id,
+    existing && existing.game_id
+  );
+  if (paired) return paired;
   return null;
 }
 
@@ -1522,6 +1631,21 @@ function applyResolution(game, state, games) {
     forceEffects.push(effect);
   });
 
+  // A force destroyed by this battle cannot fight its other open or pending
+  // battles this phase. Void those. Do not touch this battle, and do not
+  // invent a winner or reverse anything that was never applied.
+  const destroyedIds = forceEffects.filter((entry) => entry.set_destroyed).map((entry) => entry.force_id);
+  if (destroyedIds.length) {
+    const meta = readCollection("meta");
+    voidUnfoughtBattles(destroyedIds, {
+      games,
+      state,
+      turn: Number(meta.turn) || Number(game.turn) || 1,
+      exceptGameId: game.game_id,
+      reason: "force_destroyed"
+    });
+  }
+
   game.resolution = {
     system: systemEffect,
     forces: forceEffects,
@@ -1645,6 +1769,34 @@ function battleCountsTowardPairing(game) {
   if (game.attacker_force_id == null || game.attacker_force_id === "") return false;
   if (game.defender_force_id == null || game.defender_force_id === "") return false;
   return true;
+}
+
+/**
+ * A player may only create or update a battle whose forces are one of the
+ * auto-paired matchups for this system and turn. Outnumbered pairings count
+ * each specific matchup once (2 vs 5 pairs the smaller side with particular
+ * opponents, not with every opposing force). Admin writes skip this.
+ * A filled slot is 409. A matchup that was never paired is 400.
+ */
+function playerPairingError(forces, games, turn, sysId, forceA, forceB, exceptGameId) {
+  const key = pairingKey(forceA, forceB);
+  const slots = buildPairings(
+    activeSideForces(forces, sysId, "Loyalist"),
+    activeSideForces(forces, sysId, "Traitor")
+  ).filter((pair) => pairingKey(pair.attacker.force_id, pair.defender.force_id) === key).length;
+  if (!slots) {
+    return { status: 400, error: "These forces are not paired against each other this turn" };
+  }
+  const used = games.filter((g) => {
+    if (exceptGameId != null && Number(g.game_id) === Number(exceptGameId)) return false;
+    if (Number(g.turn) !== Number(turn)) return false;
+    if (!battleCountsTowardPairing(g)) return false;
+    return pairingKey(g.attacker_force_id, g.defender_force_id) === key;
+  }).length;
+  if (used >= slots) {
+    return { status: 409, error: "These two forces already have a battle this turn" };
+  }
+  return null;
 }
 
 function pairingAlreadyUsed(games, turn, forceA, forceB, exceptGameId) {
@@ -1822,17 +1974,17 @@ async function confirmBattle(req, res, idPart) {
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "Waiting for your opponent to confirm this result" });
   }
-  if (
-    !isAdmin &&
-    pairingAlreadyUsed(
+  if (!isAdmin) {
+    const paired = playerPairingError(
+      readCollection("forces"),
       list,
       existing.turn,
+      existing.sys_id,
       existing.attacker_force_id,
       existing.defender_force_id,
       existing.game_id
-    )
-  ) {
-    return send(res, 409, { error: "These two forces already have a battle this turn" });
+    );
+    if (paired) return send(res, paired.status, { error: paired.error });
   }
   const previous = cloneData(existing);
   const game = cloneData(existing);
@@ -1856,7 +2008,7 @@ function battlePlace(game) {
   const systems = readCollection("systems");
   const sys = systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
   const where = sys && sys.sys_name ? sys.sys_name : "system " + game.sys_id;
-  return "battle #" + game.game_id + " at " + where;
+  return "Battle #" + game.game_id + " at " + where;
 }
 
 function resultPhrase(result) {
@@ -2410,6 +2562,67 @@ function voidUnresolvedBattles(turn) {
   return count;
 }
 
+/**
+ * Void open and pending battles that a force can no longer fight.
+ * Applied battles stay as history. A battle with no resolution is left
+ * unreversed. No winner is written.
+ * options.turn limits the void to that campaign turn (the current phase).
+ * options.exceptGameId skips the battle that just destroyed the force.
+ * The caller saves games and battle state.
+ */
+function voidUnfoughtBattles(forceIds, options) {
+  const wanted = new Set((forceIds || []).map((id) => Number(id)).filter((id) => id));
+  if (!wanted.size) return 0;
+  const games = options.games;
+  const state = options.state;
+  const turn = options.turn == null ? null : Number(options.turn);
+  const exceptGameId = options.exceptGameId;
+  const reason = options.reason || "force_destroyed";
+  const notices = [];
+  let count = 0;
+  games.forEach((game) => {
+    if (exceptGameId != null && Number(game.game_id) === Number(exceptGameId)) return;
+    if (turn != null && Number(game.turn) !== turn) return;
+    const stateName = game.result_state || "open";
+    if (stateName !== "open" && stateName !== "pending") return;
+    const involved =
+      wanted.has(Number(game.attacker_force_id)) || wanted.has(Number(game.defender_force_id));
+    if (!involved) return;
+    if (game.resolution && state) reverseResolution(game, state, games);
+    const title = battlePlace(game);
+    game.result = "in_progress";
+    game.winner_id = null;
+    game.result_state = "void";
+    game.proposed_by = null;
+    game.proposed_at = null;
+    game.disputed_by = null;
+    game.disputed_at = null;
+    game.dispute_note = null;
+    game.resolution = null;
+    game.voided_at = new Date().toISOString();
+    game.void_reason = reason;
+    const text =
+      reason === "player_removed"
+        ? title + " was voided because a player was removed. No result was applied."
+        : title + " was voided because one of its forces was destroyed. No result was applied.";
+    const seen = new Set();
+    [game.attacker_id, game.defender_id].forEach((pid) => {
+      if (!pid || seen.has(Number(pid))) return;
+      seen.add(Number(pid));
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_voided",
+        text,
+        ref: { type: "game", game_id: game.game_id }
+      });
+    });
+    count += 1;
+  });
+  if (notices.length) writeNotices(notices);
+  return count;
+}
+
 function advanceCampaign(meta, options = {}) {
   const log = [];
   let scoredTurn = null;
@@ -2840,7 +3053,9 @@ async function handleActions(req, res, parts, method) {
     const dur = systemDurability(sys);
     if (dur >= 10) return send(res, 400, { error: "System already at maximum durability (10)" });
 
-    // Must have at least one of your forces present (sensible; rules imply acting on owned presence)
+    // campaign_rules.md (Logistics): Fortify requires one of the acting player's own
+    // active forces in the system (added as part of web app build). Campaign admin may
+    // still fortify without that force.
     const forces = readCollection("forces");
     const present = forces.some(
       (f) =>
@@ -2944,7 +3159,7 @@ async function handleActions(req, res, parts, method) {
 }
 
 function publicMeta(meta) {
-  const hidden = new Set(["player_actions", "admin_pin"]);
+  const hidden = new Set(["player_actions", "admin_pin", "next_player_id"]);
   const safe = {};
   Object.keys(meta || {}).forEach((key) => {
     if (hidden.has(key)) return;
@@ -3090,6 +3305,7 @@ function resetCampaign(options = {}) {
   }
   const forces = buildStartingForces(players, existingForces, systems);
   const games = readCollection("games");
+  const nextPlayerId = Math.max(Number(previous.next_player_id) || 1, highestPlayerId() + 1);
   const now = new Date().toISOString();
   let mapNote = "Baseline map restored";
   if (keepMap && keepControl) mapNote = "Current map and system control kept";
@@ -3113,7 +3329,8 @@ function resetCampaign(options = {}) {
       }
     ],
     victor: null,
-    victory_reason: null
+    victory_reason: null,
+    next_player_id: nextPlayerId
   };
   writeCollection("meta", meta);
   writeCollection("forces", forces);
@@ -3226,7 +3443,7 @@ function backupPayload() {
   const accounts = readCollection("accounts").map(publicAccount);
   return {
     exported_at: new Date().toISOString(),
-    note: "Password hashes and sessions are omitted. Invite codes are included so a restore can keep tester sign-up working. Treat this file as secret.",
+    note: "Password hashes and sessions are omitted. Invite codes are included so a restore can keep player sign-up working. Treat this file as secret.",
     players: readCollection("players"),
     forces: readCollection("forces"),
     systems: readCollection("systems"),
@@ -3410,7 +3627,8 @@ async function handleApi(req, res, pathname) {
     }
 
     const list = readCollection(collection);
-    if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
+    if (collection === "players") body.player_id = allocatePlayerId();
+    else if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
     if (list.some((r) => r[spec.idKey] === body[spec.idKey])) {
       return send(res, 409, { error: "ID already exists" });
     }
@@ -3512,6 +3730,7 @@ async function handleApi(req, res, pathname) {
       reverseResolution(existing, state, list);
       saveBattleState(state);
     }
+    if (collection === "players") retireRemovedPlayer(existing.player_id);
     const next = list.filter((r) => String(r[spec.idKey]) !== String(idPart));
     writeCollection(collection, next);
     return send(res, 200, { ok: true, deleted: idPart });

@@ -97,7 +97,8 @@
       (f) =>
         Number(f.sys_id) === Number(sysId) &&
         String(f.status || "active").toLowerCase() !== "destroyed" &&
-        String(f.status || "").toLowerCase() !== "retired"
+        String(f.status || "").toLowerCase() !== "retired" &&
+        String(f.status || "").toLowerCase() !== "removed"
     );
   }
 
@@ -316,9 +317,8 @@
     const present = forcesAt(sys.sys_id).filter(
       (f) => String(f.status || "active").toLowerCase() === "active"
     );
-    const mine = present.filter(
-      (f) => isAdmin || Number(f.player_id) === Number(me.player_id)
-    );
+    const own = present.filter((f) => Number(f.player_id) === Number(me.player_id));
+    const mine = isAdmin ? present : own;
     const allegiance = isAdmin
       ? (mine[0] && mine[0].allegiance) || (me.player && me.player.allegiance) || ""
       : (me.player && me.player.allegiance) || (mine[0] && mine[0].allegiance) || "";
@@ -425,14 +425,26 @@
         box.appendChild(actionNote("Reinforce is only available in a system your allegiance controls."));
       }
 
-      if (mine.length && controlled) {
+      // A player fortifies only with one of their own active forces here.
+      // Admin keeps the server override and may fortify for any force present.
+      if ((isAdmin ? mine.length : own.length) && controlled) {
         const fortify = document.createElement("button");
         fortify.type = "button";
         fortify.textContent = "Fortify";
+        const actor = isAdmin ? mine[0] : own[0];
         fortify.addEventListener("click", () => {
-          run(() => SH.fortifySystem(Number(sys.sys_id), actorExtra(mine[0])));
+          run(() => SH.fortifySystem(Number(sys.sys_id), actorExtra(actor)));
         });
         grid.appendChild(fortify);
+      } else if (!isAdmin && controlled && !own.length) {
+        const fortify = document.createElement("button");
+        fortify.type = "button";
+        fortify.textContent = "Fortify";
+        fortify.disabled = true;
+        fortify.title = "Fortify needs one of your active forces in this system.";
+        const why = actionNote("Fortify needs one of your active forces in this system.");
+        why.style.gridColumn = "1 / -1";
+        grid.append(fortify, why);
       }
 
       if (controlled) {
