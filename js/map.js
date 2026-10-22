@@ -467,7 +467,7 @@
       }
 
       const nameInput = document.createElement("input");
-      nameInput.maxLength = 80;
+      nameInput.maxLength = 100;
       nameInput.placeholder = "New force name (optional)";
       nameInput.setAttribute("aria-label", "New force name");
 
@@ -719,6 +719,7 @@
 
   loadCampaign()
     .then(() => {
+      if (window.SH) SH.applyNavPermissions();
       if (!systems.length) {
         showMapProblem("Could not load systems. Start the campaign server and refresh.");
         return;

@@ -368,6 +368,86 @@ function clipText(value, max) {
   return String(value == null ? "" : value).trim().slice(0, max);
 }
 
+// Trim first, then reject. Silent clipping hid pasted essays in the stored row.
+function limitText(value, max, label) {
+  const text = String(value == null ? "" : value).trim();
+  if (text.length > max) return { error: label + " must be at most " + max + " characters" };
+  return { text };
+}
+
+const FORCE_TEXT_LIMITS = {
+  force_name: ["Force name", 100],
+  legion: ["Legion / faction", 60],
+  warlord_name: ["Warlord", 60],
+  force_type: ["Force type", 40],
+  game_system: ["Game system", 16],
+  subfaction: ["Subfaction", 60],
+  organisation: ["Organisation", 80],
+  allies: ["Allies", 120],
+  notes: ["Notes", 500]
+};
+
+const PLAYER_TEXT_LIMITS = {
+  player_name: ["Player name", 80],
+  display_name: ["Display name", 80],
+  contact: ["Contact", 120],
+  notes: ["Notes", 500]
+};
+
+const SYSTEM_TEXT_LIMITS = {
+  sys_name: ["System name", 80],
+  sys_struct: ["Infrastructure", 120],
+  sys_links: ["Links", 200],
+  sys_notes: ["Notes", 500]
+};
+
+const GAME_TEXT_LIMITS = {
+  mission: ["Mission", 80],
+  notes: ["Notes", 500]
+};
+
+function textLimitError(body, spec, required) {
+  if (!body || typeof body !== "object") return null;
+  for (const key of Object.keys(spec)) {
+    if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+    const [label, max] = spec[key];
+    if (body[key] == null) {
+      if (required && required[key]) return label + " is required";
+      continue;
+    }
+    const limited = limitText(body[key], max, label);
+    if (limited.error) return limited.error;
+    if (!limited.text) {
+      if (required && required[key]) return label + " is required";
+      body[key] = null;
+      continue;
+    }
+    body[key] = limited.text;
+  }
+  return null;
+}
+
+function collectionTextError(collection, rows) {
+  const spec = {
+    forces: FORCE_TEXT_LIMITS,
+    players: PLAYER_TEXT_LIMITS,
+    systems: SYSTEM_TEXT_LIMITS
+  }[collection];
+  if (!spec) return null;
+  const required =
+    collection === "forces"
+      ? { force_name: true }
+      : collection === "players"
+        ? { player_name: true, display_name: true }
+        : { sys_name: true };
+  for (const row of rows) {
+    if (!row || typeof row !== "object") return "Expected JSON objects";
+    const err = textLimitError(row, spec, required);
+    if (err) return err;
+  }
+  return null;
+}
+
 function sessionCookie(req, token, maxAgeSeconds) {
   const secure =
     (req.headers["x-forwarded-proto"] || "").split(",")[0].trim() === "https" ||
@@ -611,6 +691,23 @@ function publicPlayer(p) {
     status: p.status,
     start_sys_id: p.start_sys_id || null
   };
+}
+
+// Roster fields are shared. Notes and allies are the owner's private list text.
+const FORCE_PRIVATE_KEYS = ["notes", "allies"];
+
+function forceForViewer(force, auth) {
+  const account = auth && auth.account;
+  const owner =
+    account &&
+    (account.role === "campaign_admin" ||
+      (account.role === "player" && Number(force.player_id) === Number(account.player_id)));
+  if (owner) return force;
+  const copy = { ...force };
+  FORCE_PRIVATE_KEYS.forEach((key) => {
+    delete copy[key];
+  });
+  return copy;
 }
 
 function publicForce(f, playersById) {
@@ -960,6 +1057,9 @@ async function handleAuth(req, res, parts, method) {
     const body = (await readBody(req)) || {};
     if (!body.password || String(body.password).length < 6) {
       return send(res, 400, { error: "Password must be at least 6 characters" });
+    }
+    if (String(body.password).length > 128) {
+      return send(res, 400, { error: "Password must be at most 128 characters" });
     }
     if (isProduction() && String(body.password) === PUBLISHED_ADMIN_PASSWORD) {
       return send(res, 400, { error: "Choose a different password" });
@@ -1378,6 +1478,8 @@ function normalizeGameResult(body) {
 }
 
 function validateGameWrite(body, auth, existing) {
+  const textError = textLimitError(body, GAME_TEXT_LIMITS);
+  if (textError) return { status: 400, error: textError };
   const isAdmin = auth.account.role === "campaign_admin";
   if (!isAdmin) {
     const playerId = Number(auth.account.player_id);
@@ -1919,6 +2021,8 @@ async function updateBattle(res, auth, existing, list, idx, body) {
 function replaceBattles(res, body) {
   for (const raw of body) {
     if (!raw || typeof raw !== "object") return send(res, 400, { error: "Expected game objects" });
+    const textError = textLimitError(raw, GAME_TEXT_LIMITS);
+    if (textError) return send(res, 400, { error: textError });
     const vp = victoryPointError(raw);
     if (vp) return send(res, vp.status, { error: vp.error });
   }
@@ -2129,7 +2233,11 @@ async function disputeBattle(req, res, idPart) {
   const gate = requireRole(auth, ["player", "campaign_admin"]);
   if (!gate.ok) return send(res, gate.status, { error: gate.error });
   const body = (await readBody(req)) || {};
-  const note = clipText(body.note, 300);
+  const noteRaw = String(body.note == null ? "" : body.note).trim();
+  if (noteRaw.length > 300) {
+    return send(res, 400, { error: "Dispute note must be at most 300 characters" });
+  }
+  const note = noteRaw;
   const list = readCollection("games");
   const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
   if (idx < 0) return send(res, 404, { error: "Not found" });
@@ -3106,7 +3214,14 @@ async function handleActions(req, res, parts, method) {
       });
     }
 
-    // Costs 2 actions
+    const flavor = {};
+    ["force_name", "game_system", "force_type", "legion", "warlord_name", "subfaction", "organisation", "allies", "notes"].forEach((key) => {
+      if (body[key] !== undefined && body[key] !== null) flavor[key] = body[key];
+    });
+    const textError = textLimitError(flavor, FORCE_TEXT_LIMITS);
+    if (textError) return send(res, 400, { error: textError });
+
+    // Costs 2 actions. Reject overlong text before spending.
     const remaining = actionsRemaining(meta, playerId);
     if (spendForPlayer && remaining < 2) {
       return send(res, 409, {
@@ -3120,25 +3235,23 @@ async function handleActions(req, res, parts, method) {
       if (!s2.ok) return send(res, 409, { error: s2.error });
     }
 
-    const forceName =
-      (body.force_name && String(body.force_name).trim()) ||
-      `New ${allegiance} Force`;
+    const forceName = flavor.force_name || `New ${allegiance} Force`;
     const newForce = {
       force_id: nextId(forces, "force_id"),
       player_id: Number(playerId),
       force_name: forceName,
-      game_system: body.game_system || "HH",
-      force_type: body.force_type || "Legion",
+      game_system: flavor.game_system || "HH",
+      force_type: flavor.force_type || "Legion",
       allegiance,
-      legion: body.legion || "",
-      warlord_name: body.warlord_name || "",
+      legion: flavor.legion || "",
+      warlord_name: flavor.warlord_name || "",
       points: body.points != null ? Number(body.points) : 3000,
       home_sys_id: sysId,
       sys_id: sysId,
       dest_sys_id: null,
       strength: 3,
       status: "active",
-      notes: body.notes || "Raised this turn",
+      notes: flavor.notes || "Raised this turn",
       fought_this_turn: false
     };
     forces.push(newForce);
@@ -3575,15 +3688,15 @@ async function handleApi(req, res, pathname) {
       }
       return send(res, 200, data);
     }
-    // player reading forces — full list ok (no PII on forces beyond player_id)
+    // Roster for every force. Notes and allies stay on the owner's own row.
     if (collection === "forces") {
       const data = readCollection(collection);
       if (idPart != null) {
         const row = data.find((r) => String(r[spec.idKey]) === String(idPart));
         if (!row) return send(res, 404, { error: "Not found" });
-        return send(res, 200, row);
+        return send(res, 200, forceForViewer(row, auth));
       }
-      return send(res, 200, data);
+      return send(res, 200, data.map((row) => forceForViewer(row, auth)));
     }
     return send(res, 403, { error: "Forbidden" });
   }
@@ -3606,6 +3719,8 @@ async function handleApi(req, res, pathname) {
     const body = await readBody(req);
     if (!Array.isArray(body)) return send(res, 400, { error: "Expected JSON array" });
     if (collection === "games") return replaceBattles(res, body);
+    const bulkText = collectionTextError(collection, body);
+    if (bulkText) return send(res, 400, { error: bulkText });
     writeCollection(collection, body);
     return send(res, 200, body);
   }
@@ -3624,6 +3739,22 @@ async function handleApi(req, res, pathname) {
       return createBattle(res, auth, body);
     } else {
       return send(res, 403, { error: "Forbidden" });
+    }
+
+    const createSpec =
+      collection === "forces" ? FORCE_TEXT_LIMITS : collection === "players" ? PLAYER_TEXT_LIMITS : SYSTEM_TEXT_LIMITS;
+    const createRequired =
+      collection === "forces"
+        ? { force_name: true }
+        : collection === "players"
+          ? { player_name: true, display_name: true }
+          : { sys_name: true };
+    const createText = textLimitError(body, createSpec, createRequired);
+    if (createText) return send(res, 400, { error: createText });
+    for (const key of Object.keys(createRequired)) {
+      if (createRequired[key] && (body[key] == null || body[key] === "")) {
+        return send(res, 400, { error: createSpec[key][0] + " is required" });
+      }
     }
 
     const list = readCollection(collection);
@@ -3647,25 +3778,26 @@ async function handleApi(req, res, pathname) {
 
     if (collection === "players") {
       if (isAdmin) {
-        // full edit
-      } else if (isPlayer && existing.player_id === auth.account.player_id) {
+        const err = textLimitError(body, PLAYER_TEXT_LIMITS, { player_name: true, display_name: true });
+        if (err) return send(res, 400, { error: err });
+      } else if (isPlayer && Number(existing.player_id) === Number(auth.account.player_id)) {
+        const err = textLimitError(
+          body,
+          {
+            display_name: PLAYER_TEXT_LIMITS.display_name,
+            contact: PLAYER_TEXT_LIMITS.contact,
+            notes: PLAYER_TEXT_LIMITS.notes
+          },
+          { display_name: true }
+        );
+        if (err) return send(res, 400, { error: err });
         const safe = { ...existing };
-        if (body.display_name !== undefined) {
-          const name = clipText(body.display_name, 80);
-          if (!name) return send(res, 400, { error: "Display name is required" });
-          safe.display_name = name;
-        }
-        if (body.contact !== undefined) {
-          const contact = clipText(body.contact, 120);
-          safe.contact = contact || null;
-        }
-        if (body.notes !== undefined) {
-          const notes = clipText(body.notes, 500);
-          safe.notes = notes || null;
-        }
+        if (body.display_name !== undefined && body.display_name !== null) safe.display_name = body.display_name;
+        if (body.contact !== undefined) safe.contact = body.contact || null;
+        if (body.notes !== undefined) safe.notes = body.notes || null;
         list[idx] = safe;
         writeCollection(collection, list);
-        if (body.display_name !== undefined) {
+        if (body.display_name !== undefined && body.display_name !== null) {
           const accounts = readCollection("accounts");
           const acc = accounts.find((a) => a.account_id === auth.account.account_id);
           if (acc) {
@@ -3678,9 +3810,13 @@ async function handleApi(req, res, pathname) {
         return send(res, 403, { error: "Cannot edit this player" });
       }
     } else if (collection === "forces") {
+      if (isAdmin || (isPlayer && Number(existing.player_id) === Number(auth.account.player_id))) {
+        const err = textLimitError(body, FORCE_TEXT_LIMITS, { force_name: true });
+        if (err) return send(res, 400, { error: err });
+      }
       if (isAdmin) {
-        // full
-      } else if (isPlayer && existing.player_id === auth.account.player_id) {
+        // full edit after the text check
+      } else if (isPlayer && Number(existing.player_id) === Number(auth.account.player_id)) {
         // Flavour / list fields only — campaign position & strength go through /api/actions
         const allowed = [
           "force_name", "notes", "warlord_name", "points", "game_system",
@@ -3699,6 +3835,8 @@ async function handleApi(req, res, pathname) {
       }
     } else if (collection === "systems") {
       if (!isAdmin) return send(res, 403, { error: "Forbidden" });
+      const err = textLimitError(body, SYSTEM_TEXT_LIMITS, { sys_name: true });
+      if (err) return send(res, 400, { error: err });
     } else if (collection === "games") {
       if (!isAdmin && !isPlayer) return send(res, 403, { error: "Forbidden" });
       return updateBattle(res, auth, existing, list, idx, body);
