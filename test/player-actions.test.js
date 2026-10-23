@@ -157,35 +157,21 @@ test("admin sees who has spent this turn's action budget", async () => {
     const withEmpty = await api(ctx, admin, "GET", "/api/actions/players");
     const emptyRow = row(withEmpty.json, empty.player_id);
     assert.equal(emptyRow.active_forces, 0);
-    assert.equal(emptyRow.can_act, true);
     assert.equal(emptyRow.actions_remaining, 2);
     assert.equal(emptyRow.finished, false);
+    assert.equal(emptyRow.can_act, undefined);
+    assert.ok(Array.isArray(withEmpty.json.needs_side));
+    assert.equal(withEmpty.json.needs_side.length, 0);
     assert.equal(withEmpty.json.finished, 2);
     assert.equal(withEmpty.json.active_players, 3);
     assert.equal(withEmpty.json.ready_to_advance, false);
 
-    const shield = await signup(ctx, admin, "act_shield", "Blackshield", 1);
-    const withShield = await api(ctx, admin, "GET", "/api/actions/players");
-    const shieldRow = row(withShield.json, shield.player_id);
-    assert.equal(shieldRow.can_act, false);
-    assert.equal(shieldRow.actions_remaining, 2);
-    assert.equal(shieldRow.finished, true);
-    assert.equal(withShield.json.finished, 3);
-    assert.equal(withShield.json.active_players, 4);
-    assert.equal(withShield.json.ready_to_advance, false);
-
     assert.equal((await api(ctx, admin, "PUT", "/api/players/" + empty.player_id, { status: "inactive" })).status, 200);
     const withoutEmpty = await api(ctx, admin, "GET", "/api/actions/players");
     assert.equal(row(withoutEmpty.json, empty.player_id), undefined);
-    assert.equal(withoutEmpty.json.active_players, 3);
-    assert.equal(withoutEmpty.json.finished, 3);
+    assert.equal(withoutEmpty.json.active_players, 2);
+    assert.equal(withoutEmpty.json.finished, 2);
     assert.equal(withoutEmpty.json.ready_to_advance, true);
-
-    assert.equal((await api(ctx, admin, "DELETE", "/api/players/" + shield.player_id)).status, 200);
-    const withoutShield = await api(ctx, admin, "GET", "/api/actions/players");
-    assert.equal(row(withoutShield.json, shield.player_id), undefined);
-    assert.equal(withoutShield.json.active_players, 2);
-    assert.equal(withoutShield.json.ready_to_advance, true);
 
     const meta = (await api(ctx, admin, "GET", "/api/meta")).json;
     meta.turn = 2;
@@ -206,8 +192,15 @@ test("the admin dashboard is the only place that renders the action roster", () 
   const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
   const rosterAt = html.indexOf('id="action-roster"');
   assert.ok(rosterAt > 0);
-  const roster = html.slice(rosterAt, rosterAt + 700);
+  const roster = html.slice(rosterAt, html.indexOf("turn-actions", rosterAt));
   assert.match(roster, /data-role="campaign_admin"/);
   assert.match(roster, /All players are done\. Ready to advance the turn\./);
+  assert.match(roster, /Players who still need a side are listed separately/);
+  assert.doesNotMatch(roster, /Can't act/);
+  assert.doesNotMatch(roster, /Blackshields cannot spend/);
   assert.match(html, /SH\.playerActions\(\)/);
+  const login = fs.readFileSync(path.join(ROOT, "login.html"), "utf8");
+  assert.match(login, /<option value="Loyalist">Loyalist<\/option>/);
+  assert.match(login, /<option value="Traitor">Traitor<\/option>/);
+  assert.doesNotMatch(login, /value="Blackshield"/);
 });

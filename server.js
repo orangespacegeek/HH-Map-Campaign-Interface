@@ -285,8 +285,144 @@ function randomInvite() {
 }
 
 const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/;
-const ALLEGIANCES = ["Loyalist", "Traitor", "Blackshield"];
+const ALLEGIANCES = ["Loyalist", "Traitor"];
+const NEEDS_SIDE = "needs side";
 const INVITE_MAX_USES_CAP = 25;
+
+function isBlackshieldMark(value) {
+  const text = String(value == null ? "" : value).trim().toLowerCase();
+  return text === "blackshield" || text === "blackshields";
+}
+
+function sideOf(player) {
+  if (!player) return null;
+  return ALLEGIANCES.includes(player.allegiance) ? player.allegiance : null;
+}
+
+function requirePlayerSide(value) {
+  const allegiance = String(value == null ? "" : value).trim();
+  if (!ALLEGIANCES.includes(allegiance)) {
+    return { ok: false, error: "Allegiance must be Loyalist or Traitor" };
+  }
+  return { ok: true, allegiance };
+}
+
+function otherSide(allegiance) {
+  if (allegiance === "Loyalist") return "Traitor";
+  if (allegiance === "Traitor") return "Loyalist";
+  return null;
+}
+
+/**
+ * Force allegiance is the owning player's side. A Blackshields army is a force
+ * type on that side. When the stored allegiance is still the old Blackshield
+ * mark, fill force_type Blackshields only if the type is blank or the same mark.
+ * A type that was already filled in (Legion, Militia, …) is kept.
+ */
+function applyOwnerSide(force, side) {
+  const marked = isBlackshieldMark(force.allegiance);
+  const next = { ...force, allegiance: side };
+  const type = String(force.force_type || "").trim();
+  if (marked && (!type || isBlackshieldMark(type))) next.force_type = "Blackshields";
+  else if (!marked && isBlackshieldMark(type)) next.force_type = "Blackshields";
+  return next;
+}
+
+function preserveBlackshieldMark(force) {
+  if (!isBlackshieldMark(force.allegiance)) return force;
+  const type = String(force.force_type || "").trim();
+  const nextType = !type || isBlackshieldMark(type) ? "Blackshields" : type;
+  if (force.allegiance === "Blackshield" && force.force_type === nextType) return force;
+  return { ...force, allegiance: "Blackshield", force_type: nextType };
+}
+
+function readExistingCollection(name) {
+  const spec = COLLECTIONS[name];
+  if (!spec) return [];
+  const fp = path.join(DATA, spec.file);
+  if (!fs.existsSync(fp)) return [];
+  const data = JSON.parse(fs.readFileSync(fp, "utf8"));
+  return data;
+}
+
+function alignOwnerForces(playerId, side) {
+  const forces = readCollection("forces");
+  let changed = false;
+  const next = forces.map((force) => {
+    if (Number(force.player_id) !== Number(playerId)) return force;
+    const updated = applyOwnerSide(force, side);
+    if (updated.allegiance === force.allegiance && updated.force_type === force.force_type) return force;
+    changed = true;
+    return updated;
+  });
+  if (changed) writeCollection("forces", next);
+  return changed;
+}
+
+function forceWithOwnerSide(force) {
+  const owner = readCollection("players").find((player) => Number(player.player_id) === Number(force.player_id));
+  if (!owner) return { ok: false, error: "Force owner was not found" };
+  const side = sideOf(owner);
+  if (!side) {
+    return { ok: false, error: "Assign this player a Loyalist or Traitor side before editing their forces" };
+  }
+  return { ok: true, force: applyOwnerSide(force, side) };
+}
+
+/**
+ * Idempotent load migration. Blackshield was never a third side.
+ * Players marked Blackshield become "needs side" until an admin assigns one.
+ * Forces of a Loyalist or Traitor player take that side. Their type becomes
+ * Blackshields only when it was blank or already a Blackshield mark.
+ * Forces of a player who still needs a side keep the Blackshield mark so the
+ * same pass can finish them after the admin assigns a side.
+ * A pre-change backup is written only when something actually changes.
+ * The admin Download backup (GET /api/admin/backup) is a separate full export.
+ */
+function migrateBlackshieldAllegiance() {
+  ensureDataDir();
+  const players = readExistingCollection("players");
+  const forces = readExistingCollection("forces");
+  const nextPlayers = players.map((player) => {
+    if (!isBlackshieldMark(player.allegiance)) return player;
+    return { ...player, allegiance: NEEDS_SIDE };
+  });
+  const sideById = new Map();
+  nextPlayers.forEach((player) => {
+    const side = sideOf(player);
+    if (side) sideById.set(Number(player.player_id), side);
+  });
+  const nextForces = forces.map((force) => {
+    const side = sideById.get(Number(force.player_id));
+    if (side) return applyOwnerSide(force, side);
+    return preserveBlackshieldMark(force);
+  });
+  const playersChanged = JSON.stringify(players) !== JSON.stringify(nextPlayers);
+  const forcesChanged = JSON.stringify(forces) !== JSON.stringify(nextForces);
+  if (!playersChanged && !forcesChanged) return { changed: false };
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = path.join(DATA, "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const backupFile = path.join(dir, "pre-blackshield-" + stamp + ".json");
+  atomicWrite(
+    backupFile,
+    JSON.stringify(
+      {
+        taken_at: new Date().toISOString(),
+        reason: "Before removing Blackshield as a player allegiance",
+        players,
+        forces
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  if (playersChanged) writeCollection("players", nextPlayers);
+  if (forcesChanged) writeCollection("forces", nextForces);
+  const flagged = nextPlayers.filter((player, index) => player.allegiance === NEEDS_SIDE && players[index] && players[index].allegiance !== NEEDS_SIDE).length;
+  console.log("Blackshield migration: " + flagged + " players flagged as needs side. Backup: " + backupFile);
+  return { changed: true, backup: backupFile, flagged };
+}
 
 function normalizeInviteCode(code) {
   return String(code || "")
@@ -1122,10 +1258,9 @@ async function handleAuth(req, res, parts, method) {
     const displayName = String(body.display_name == null ? "" : body.display_name).trim();
     if (!displayName) return send(res, 400, { error: "Display name is required" });
     if (displayName.length > 80) return send(res, 400, { error: "Display name must be at most 80 characters" });
-    const allegiance = String(body.allegiance == null ? "" : body.allegiance).trim();
-    if (!ALLEGIANCES.includes(allegiance)) {
-      return send(res, 400, { error: "Allegiance must be Loyalist, Traitor, or Blackshield" });
-    }
+    const side = requirePlayerSide(body.allegiance);
+    if (!side.ok) return send(res, 400, { error: side.error });
+    const allegiance = side.allegiance;
     const contactRaw = String(body.contact == null ? "" : body.contact).trim();
     if (contactRaw.length > 120) return send(res, 400, { error: "Contact must be at most 120 characters" });
     const notesRaw = String(body.notes == null ? "" : body.notes).trim();
@@ -1565,7 +1700,7 @@ function loserForceIds(game) {
  * Durability drops by 1 while it is above 0. The battle that reaches 0 does
  * not also drop power; the next battle does. Power does not go below 0.
  * A draw reduces both strengths and does not change sys_loyal / sys_traitor.
- * Blackshield winners do not change either system score (there is no track).
+ * Only a Loyalist or Traitor winner moves that side's system track.
  */
 function applyResolution(game, state, games) {
   if (!game || !isDecisive(game.result) || game.result_state !== "applied") {
@@ -1735,7 +1870,8 @@ function activeSideForces(forces, sysId, allegiance) {
  * Counts are split as evenly as possible: 2 vs 5 means one force fights three
  * times and the other twice (sorted by force_id, extras go to the lower ids).
  * Loyalist is the attacker and Traitor the defender so the pairing is stable.
- * Only Loyalist vs Traitor is auto-paired. Blackshield forces are left out.
+ * Only Loyalist and Traitor forces are auto-paired. Any other allegiance,
+ * including a force still marked Blackshield because its owner needs a side, is left out.
  */
 function buildPairings(loyal, traitor) {
   if (!loyal.length || !traitor.length) return [];
@@ -2418,34 +2554,44 @@ function actionsUsedThisTurn(meta, playerId) {
 }
 
 function canSpendCampaignActions(player) {
-  const allegiance = player && player.allegiance;
-  return allegiance === "Loyalist" || allegiance === "Traitor";
+  return sideOf(player) != null;
+}
+
+function rosterName(player) {
+  return player.display_name || player.player_name || "Player " + player.player_id;
 }
 
 function playerActionRoster() {
   const meta = readCollection("meta") || {};
   const forces = readCollection("forces");
   const turn = Number(meta.turn) || 1;
-  const players = readCollection("players")
-    .filter((player) => String(player.status || "active").toLowerCase() === "active")
+  const everyone = readCollection("players");
+  const needsSide = everyone
+    .filter((player) => !sideOf(player))
+    .map((player) => ({
+      player_id: player.player_id,
+      display_name: rosterName(player),
+      status: player.status || "active",
+      allegiance: player.allegiance || ""
+    }))
+    .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)));
+  const players = everyone
+    .filter((player) => String(player.status || "active").toLowerCase() === "active" && sideOf(player))
     .map((player) => {
       const used = actionsUsedThisTurn(meta, player.player_id);
       const remaining = Math.max(0, ACTIONS_PER_TURN - used);
       const activeForces = forces.filter(
         (force) => Number(force.player_id) === Number(player.player_id) && force.status === "active"
       ).length;
-      const canAct = canSpendCampaignActions(player);
       return {
         player_id: player.player_id,
-        display_name: player.display_name || player.player_name || "Player " + player.player_id,
-        allegiance: player.allegiance || "",
+        display_name: rosterName(player),
+        allegiance: player.allegiance,
         actions_used: Math.min(used, ACTIONS_PER_TURN),
         actions_remaining: remaining,
         actions_per_turn: ACTIONS_PER_TURN,
         active_forces: activeForces,
-        can_act: canAct,
-        // Out of the shared 2-action budget, or unable to spend at all.
-        finished: remaining === 0 || !canAct
+        finished: remaining === 0
       };
     })
     .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)));
@@ -2458,6 +2604,7 @@ function playerActionRoster() {
     active_players: activePlayers,
     finished,
     ready_to_advance: activePlayers > 0 && finished === activePlayers,
+    needs_side: needsSide,
     players
   };
 }
@@ -2503,13 +2650,10 @@ function playerOwnsForce(force, auth) {
 }
 
 function opposingForcesInSystem(forces, sysId, allegiance) {
+  const other = otherSide(allegiance);
+  if (!other) return [];
   return forces.filter(
-    (f) =>
-      f.status === "active" &&
-      Number(f.sys_id) === Number(sysId) &&
-      f.allegiance &&
-      f.allegiance !== allegiance &&
-      f.allegiance !== "Blackshield"
+    (f) => f.status === "active" && Number(f.sys_id) === Number(sysId) && f.allegiance === other
   );
 }
 
@@ -2947,9 +3091,9 @@ async function handleActions(req, res, parts, method) {
   const players = readCollection("players");
   const player = players.find((p) => Number(p.player_id) === Number(playerId));
   if (!player) return send(res, 404, { error: "Player not found" });
-  const allegiance = player.allegiance;
-  if (!allegiance || allegiance === "Blackshield") {
-    return send(res, 400, { error: "Player needs Loyalist or Traitor allegiance for campaign actions" });
+  const allegiance = sideOf(player);
+  if (!allegiance) {
+    return send(res, 400, { error: "This player needs a Loyalist or Traitor side before they can take campaign actions" });
   }
 
   // Admin bypasses action economy only when explicitly requested
@@ -3283,9 +3427,9 @@ function buildStartingForces(players, existingForces, systems) {
   const allegianceCount = {};
   players.forEach((player) => {
     const owned = existingForces.filter((f) => Number(f.player_id) === Number(player.player_id));
-    const alleg = player.allegiance || "";
-    const index = allegianceCount[alleg] || 0;
-    allegianceCount[alleg] = index + 1;
+    const alleg = sideOf(player) || "";
+    const index = allegianceCount[alleg || "unassigned"] || 0;
+    allegianceCount[alleg || "unassigned"] = index + 1;
     const home = defaultHomeSystem(player, systems, index);
     for (let n = 0; n < 2; n++) {
       const prev = owned[n];
@@ -3297,7 +3441,7 @@ function buildStartingForces(players, existingForces, systems) {
         force_name: (prev && prev.force_name) || fallback,
         game_system: (prev && prev.game_system) || "HH",
         force_type: (prev && prev.force_type) || "Legion",
-        allegiance: player.allegiance || (prev && prev.allegiance) || "",
+        allegiance: alleg || (prev && isBlackshieldMark(prev.allegiance) ? "Blackshield" : ""),
         legion: (prev && prev.legion) || "",
         subfaction: (prev && prev.subfaction) || "",
         allies: (prev && prev.allies) || "",
@@ -3668,11 +3812,12 @@ async function handleApi(req, res, pathname) {
     if (!Array.isArray(body)) return send(res, 400, { error: "Expected JSON array" });
     if (collection === "games") return replaceBattles(res, body);
     writeCollection(collection, body);
-    return send(res, 200, body);
+    if (collection === "players" || collection === "forces") migrateBlackshieldAllegiance();
+    return send(res, 200, readCollection(collection));
   }
 
   if (method === "POST" && collection !== "meta") {
-    const body = await readBody(req);
+    let body = await readBody(req);
     if (!body || typeof body !== "object") return send(res, 400, { error: "Expected object" });
 
     if (collection === "players" || collection === "systems") {
@@ -3688,8 +3833,17 @@ async function handleApi(req, res, pathname) {
     }
 
     const list = readCollection(collection);
-    if (collection === "players") body.player_id = allocatePlayerId();
-    else if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
+    if (collection === "players") {
+      const side = requirePlayerSide(body.allegiance);
+      if (!side.ok) return send(res, 400, { error: side.error });
+      body.allegiance = side.allegiance;
+      body.player_id = allocatePlayerId();
+    } else if (collection === "forces") {
+      if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
+      const assigned = forceWithOwnerSide(body);
+      if (!assigned.ok) return send(res, 400, { error: assigned.error });
+      body = assigned.force;
+    } else if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
     if (list.some((r) => r[spec.idKey] === body[spec.idKey])) {
       return send(res, 409, { error: "ID already exists" });
     }
@@ -3708,7 +3862,17 @@ async function handleApi(req, res, pathname) {
 
     if (collection === "players") {
       if (isAdmin) {
-        // full edit
+        const next = { ...existing, ...body, player_id: existing.player_id };
+        if (body.allegiance !== undefined) {
+          const side = requirePlayerSide(body.allegiance);
+          if (!side.ok) return send(res, 400, { error: side.error });
+          next.allegiance = side.allegiance;
+        }
+        list[idx] = next;
+        writeCollection(collection, list);
+        const side = sideOf(next);
+        if (side) alignOwnerForces(next.player_id, side);
+        return send(res, 200, list[idx]);
       } else if (isPlayer && existing.player_id === auth.account.player_id) {
         const safe = { ...existing };
         if (body.display_name !== undefined) {
@@ -3740,7 +3904,12 @@ async function handleApi(req, res, pathname) {
       }
     } else if (collection === "forces") {
       if (isAdmin) {
-        // full
+        const merged = { ...existing, ...body, force_id: existing.force_id };
+        const assigned = forceWithOwnerSide(merged);
+        if (!assigned.ok) return send(res, 400, { error: assigned.error });
+        list[idx] = assigned.force;
+        writeCollection(collection, list);
+        return send(res, 200, list[idx]);
       } else if (isPlayer && existing.player_id === auth.account.player_id) {
         // Flavour / list fields only — campaign position & strength go through /api/actions
         const allowed = [
@@ -3752,7 +3921,9 @@ async function handleApi(req, res, pathname) {
           if (body[k] !== undefined) safe[k] = body[k];
         });
         safe.player_id = existing.player_id;
-        list[idx] = safe;
+        const assigned = forceWithOwnerSide(safe);
+        if (!assigned.ok) return send(res, 400, { error: assigned.error });
+        list[idx] = assigned.force;
         writeCollection(collection, list);
         return send(res, 200, list[idx]);
       } else {
@@ -3820,6 +3991,7 @@ function logRequest(req, res, pathname, started) {
 
 ensureDataDir();
 seedBaselineSystems();
+migrateBlackshieldAllegiance();
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();

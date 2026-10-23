@@ -377,6 +377,17 @@
       line-height: 1.35;
     }
     .action-roster-alert[hidden] { display: none; }
+    .action-roster-needs {
+      margin: 0 0 0.7rem;
+      padding: 0.7rem 0.8rem;
+      border-radius: 10px;
+      background: rgba(240, 192, 64, 0.16);
+      border: 1px solid var(--accent);
+      color: var(--text);
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    .action-roster-needs[hidden] { display: none; }
     .badge.done { background: #14532d; color: #86efac; }
     .badge.stuck { background: #2a2a3a; color: var(--muted); }
     .turn-actions {
@@ -672,8 +683,9 @@
         <div class="phase-step" data-phase="Battles">Battles</div>
       </div>
       <div class="action-roster" id="action-roster" data-role="campaign_admin" hidden>
+        <p class="action-roster-needs" id="action-roster-needs" hidden role="status"></p>
         <p class="action-roster-summary" id="action-roster-summary"></p>
-        <p class="action-roster-hint">Active players only. Someone with no forces still has their 2 actions, because they can raise a force. Blackshields cannot spend actions, so they count as finished.</p>
+        <p class="action-roster-hint">Active Loyalist and Traitor players only. Someone with no forces still has their 2 actions, because they can raise a force. Players who still need a side are listed separately and are not counted.</p>
         <ul class="action-roster-list" id="action-roster-list"></ul>
         <p class="action-roster-alert" id="action-roster-alert" hidden role="status">All players are done. Ready to advance the turn.</p>
       </div>
@@ -910,14 +922,23 @@
         ? finishedLine(data.finished, data.active_players)
         : "No active players";
       document.getElementById("action-roster-alert").hidden = !data.ready_to_advance;
+      const needs = data.needs_side || [];
+      const needsEl = document.getElementById("action-roster-needs");
+      if (needs.length) {
+        const names = needs.map((player) => player.display_name).join(", ");
+        needsEl.hidden = false;
+        needsEl.textContent = (needs.length === 1 ? "1 player needs a side: " : needs.length + " players need a side: ") +
+          names + ". Assign Loyalist or Traitor on the Players page. They are not counted here.";
+      } else {
+        needsEl.hidden = true;
+        needsEl.textContent = "";
+      }
       const rows = (data.players || []).slice().sort((a, b) => {
-        const rank = (row) => (row.can_act && row.actions_remaining > 0 ? 0 : 1);
+        const rank = (row) => (row.actions_remaining > 0 ? 0 : 1);
         return rank(a) - rank(b) || String(a.display_name).localeCompare(String(b.display_name));
       });
       document.getElementById("action-roster-list").innerHTML = rows.map((row) => {
-        const state = !row.can_act
-          ? '<span class="badge stuck">Can\'t act</span>'
-          : row.actions_remaining === 0
+        const state = row.actions_remaining === 0
             ? '<span class="badge done">Done</span><span class="left">0 actions left</span>'
             : '<span class="left">' + row.actions_remaining + (row.actions_remaining === 1 ? " action" : " actions") + " left</span>";
         const forces = row.active_forces === 0 ? " · no forces" : "";
