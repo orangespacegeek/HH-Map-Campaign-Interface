@@ -2408,6 +2408,60 @@ function actionsRemaining(meta, playerId) {
   return Math.max(0, ACTIONS_PER_TURN - (Number(entry.used) || 0));
 }
 
+function actionsUsedThisTurn(meta, playerId) {
+  const turn = Number(meta && meta.turn) || 1;
+  const bag = meta && meta.player_actions && typeof meta.player_actions === "object" ? meta.player_actions : {};
+  const entry = bag[String(playerId)];
+  if (!entry || Number(entry.turn) !== turn) return 0;
+  const used = Number(entry.used) || 0;
+  return used > 0 ? used : 0;
+}
+
+function canSpendCampaignActions(player) {
+  const allegiance = player && player.allegiance;
+  return allegiance === "Loyalist" || allegiance === "Traitor";
+}
+
+function playerActionRoster() {
+  const meta = readCollection("meta") || {};
+  const forces = readCollection("forces");
+  const turn = Number(meta.turn) || 1;
+  const players = readCollection("players")
+    .filter((player) => String(player.status || "active").toLowerCase() === "active")
+    .map((player) => {
+      const used = actionsUsedThisTurn(meta, player.player_id);
+      const remaining = Math.max(0, ACTIONS_PER_TURN - used);
+      const activeForces = forces.filter(
+        (force) => Number(force.player_id) === Number(player.player_id) && force.status === "active"
+      ).length;
+      const canAct = canSpendCampaignActions(player);
+      return {
+        player_id: player.player_id,
+        display_name: player.display_name || player.player_name || "Player " + player.player_id,
+        allegiance: player.allegiance || "",
+        actions_used: Math.min(used, ACTIONS_PER_TURN),
+        actions_remaining: remaining,
+        actions_per_turn: ACTIONS_PER_TURN,
+        active_forces: activeForces,
+        can_act: canAct,
+        // Out of the shared 2-action budget, or unable to spend at all.
+        finished: remaining === 0 || !canAct
+      };
+    })
+    .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)));
+  const activePlayers = players.length;
+  const finished = players.filter((player) => player.finished).length;
+  return {
+    turn,
+    phase: meta.phase || "Logistics",
+    actions_per_turn: ACTIONS_PER_TURN,
+    active_players: activePlayers,
+    finished,
+    ready_to_advance: activePlayers > 0 && finished === activePlayers,
+    players
+  };
+}
+
 function spendAction(meta, playerId, note) {
   const turn = Number(meta.turn) || 1;
   const entry = ensurePlayerActions(meta, playerId, turn);
@@ -2821,6 +2875,7 @@ async function handleCampaign(req, res, parts, method) {
 /**
  * Player campaign actions (rules-enforced).
  *   GET  /api/actions/status
+ *   GET  /api/actions/players   (campaign_admin) remaining actions this turn
  *   POST /api/actions/move      { force_id, dest_sys_id }
  *   POST /api/actions/hold      { force_id }  (free: clear pending move)
  *   POST /api/actions/reinforce { force_id }
@@ -2855,6 +2910,12 @@ async function handleActions(req, res, parts, method) {
       payload.player_actions = meta.player_actions || {};
     }
     return send(res, 200, payload);
+  }
+
+  if (action === "players" && method === "GET") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    return send(res, 200, playerActionRoster());
   }
 
   const gate = requireRole(auth, ["player", "campaign_admin"]);

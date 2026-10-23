@@ -667,6 +667,19 @@
     return { ok: true, meta };
   }
 
+  async function playerActions() {
+    await probe();
+    if (mode !== "server") throw new Error("Player actions need the campaign server");
+    const res = await fetch(apiBase() + "/api/actions/players", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "API " + res.status);
+    return data;
+  }
+
   async function actionsStatus() {
     await probe();
     if (mode === "server") {
@@ -923,6 +936,7 @@
     advancePhase,
     setPhase,
     actionsStatus,
+    playerActions,
     doAction,
     moveForce: (forceId, destSysId, extra) =>
       doAction("move", { force_id: forceId, dest_sys_id: destSysId, ...(extra || {}) }),

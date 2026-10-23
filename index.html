@@ -312,6 +312,73 @@
       border-color: #3a5a3a;
       color: #86efac;
     }
+    .action-roster {
+      margin: 0.15rem 0 0.9rem;
+    }
+    .action-roster-summary {
+      font-weight: 700;
+      font-size: 0.95rem;
+      margin-bottom: 0.35rem;
+    }
+    .action-roster-hint {
+      color: var(--muted);
+      font-size: 0.75rem;
+      line-height: 1.4;
+      margin-bottom: 0.55rem;
+    }
+    .action-roster-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      margin-bottom: 0.75rem;
+    }
+    .action-roster-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.45rem 0.75rem;
+      padding: 0.55rem 0.7rem;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
+    .action-roster-row.is-done { border-color: #3a5a3a; }
+    .action-roster-name {
+      font-weight: 650;
+      min-width: 0;
+      flex: 1 1 8rem;
+    }
+    .action-roster-name small {
+      display: block;
+      margin-top: 0.1rem;
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-weight: 500;
+    }
+    .action-roster-state {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      flex-wrap: wrap;
+      gap: 0.35rem;
+      flex-shrink: 0;
+      font-size: 0.85rem;
+    }
+    .action-roster-alert {
+      margin: 0 0 0.75rem;
+      padding: 0.75rem 0.8rem;
+      border-radius: 10px;
+      background: rgba(240, 192, 64, 0.16);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .action-roster-alert[hidden] { display: none; }
+    .badge.done { background: #14532d; color: #86efac; }
+    .badge.stuck { background: #2a2a3a; color: var(--muted); }
     .turn-actions {
       display: flex;
       flex-wrap: wrap;
@@ -604,6 +671,12 @@
         <div class="phase-step" data-phase="Movement">Movement</div>
         <div class="phase-step" data-phase="Battles">Battles</div>
       </div>
+      <div class="action-roster" id="action-roster" data-role="campaign_admin" hidden>
+        <p class="action-roster-summary" id="action-roster-summary"></p>
+        <p class="action-roster-hint">Active players only. Someone with no forces still has their 2 actions, because they can raise a force. Blackshields cannot spend actions, so they count as finished.</p>
+        <ul class="action-roster-list" id="action-roster-list"></ul>
+        <p class="action-roster-alert" id="action-roster-alert" hidden role="status">All players are done. Ready to advance the turn.</p>
+      </div>
       <div class="turn-actions" data-role="campaign_admin">
         <button type="button" class="primary" id="btn-advance">Advance phase</button>
         <select id="set-phase" aria-label="Set phase">
@@ -809,7 +882,50 @@
       renderRecent(games, players, forces, systems);
       const btn = document.getElementById("btn-advance");
       if (btn) btn.textContent = advanceLabel(meta.phase);
+      await refreshActionRoster();
       return meta;
+    }
+
+    function finishedLine(finished, total) {
+      return finished + " of " + total + (total === 1 ? " player" : " players") + " finished";
+    }
+
+    async function refreshActionRoster() {
+      const panel = document.getElementById("action-roster");
+      if (!panel) return;
+      if (SH.role !== "campaign_admin" || SH.mode !== "server") {
+        panel.hidden = true;
+        return;
+      }
+      let data;
+      try {
+        data = await SH.playerActions();
+      } catch (_) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      const summary = document.getElementById("action-roster-summary");
+      summary.textContent = data.active_players
+        ? finishedLine(data.finished, data.active_players)
+        : "No active players";
+      document.getElementById("action-roster-alert").hidden = !data.ready_to_advance;
+      const rows = (data.players || []).slice().sort((a, b) => {
+        const rank = (row) => (row.can_act && row.actions_remaining > 0 ? 0 : 1);
+        return rank(a) - rank(b) || String(a.display_name).localeCompare(String(b.display_name));
+      });
+      document.getElementById("action-roster-list").innerHTML = rows.map((row) => {
+        const state = !row.can_act
+          ? '<span class="badge stuck">Can\'t act</span>'
+          : row.actions_remaining === 0
+            ? '<span class="badge done">Done</span><span class="left">0 actions left</span>'
+            : '<span class="left">' + row.actions_remaining + (row.actions_remaining === 1 ? " action" : " actions") + " left</span>";
+        const forces = row.active_forces === 0 ? " · no forces" : "";
+        return '<li class="action-roster-row' + (row.finished ? " is-done" : "") + '">' +
+          '<div class="action-roster-name">' + escDash(row.display_name) +
+          "<small>" + escDash(row.allegiance || "No allegiance") + forces + "</small></div>" +
+          '<div class="action-roster-state">' + state + "</div></li>";
+      }).join("");
     }
 
     async function refreshWaitingPanel() {
