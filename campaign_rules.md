@@ -41,6 +41,7 @@ Resolution:
 - Winning Force: Increases their faction's score (sys_loyal or sys_traitor) for the system by +1.
 - Unable to schedule: the players are unable to mutually find the time to play this game. Neither player is penalized or gains a boon. (added as part of web app build)
 - No Show: one of the players did not respond to their opponent's attempts to schedule the game, or did not show up to, or attempt to reschedule, their scheduled game. The offending player's force loses the battle. The reporting player gains an additional logistics point next turn. This battle must be confirmed by the campaign admin. (added as part of web app build)
+- No Report: no report is made for the battle. Both players' forces suffer a loss. This must be confirmed by the campaign admin. (added as part of web app build)
 
 *System Control/Influence*
 

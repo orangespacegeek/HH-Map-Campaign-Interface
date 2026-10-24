@@ -191,6 +191,14 @@
       line-height: 1.35;
     }
     .auto-advance-blocked[hidden] { display: none; }
+    .auto-advance-blocked a {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      margin-left: 0.35rem;
+      color: var(--accent);
+      font-weight: 700;
+    }
     .deadline-toggle {
       flex: 1 1 100%;
       display: flex;
@@ -795,7 +803,7 @@
           <input type="checkbox" id="auto-advance-done" checked />
           Auto-advance when all players are done
         </label>
-        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Open battles are not voided.</p>
+        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Open battles are not voided. At the Battles deadline, an unreported battle is flagged No report, pending admin confirmation, and the loss is not applied until you confirm it.</p>
       </div>
       <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
       <div class="turn-log" id="turn-log"></div>
@@ -874,7 +882,8 @@
         conceded: "Conceded",
         in_progress: "In progress",
         unable_to_schedule: "Unable to schedule",
-        no_show: "No show"
+        no_show: "No show",
+        no_report: "No report"
       })[r] || r || "Result";
     }
 
@@ -980,8 +989,18 @@
       if (blocked) {
         const note = meta.auto_advance_blocked;
         const show = SH.role === "campaign_admin" && note && note.message;
+        blocked.replaceChildren();
         blocked.hidden = !show;
-        blocked.textContent = show ? note.message : "";
+        if (show) {
+          blocked.append(document.createTextNode(note.message));
+          if (Array.isArray(note.no_report) && note.no_report.length) {
+            blocked.append(document.createTextNode(" "));
+            const link = document.createElement("a");
+            link.href = "actions.html";
+            link.textContent = "Open the admin queue";
+            blocked.append(link);
+          }
+        }
       }
       renderDeadline();
       updatePhaseTrack(meta.phase);
@@ -1015,7 +1034,7 @@
       ul.innerHTML = recent.map((g) => {
         const attF = fname(g.attacker_force_id);
         const defF = fname(g.defender_force_id);
-        const scoreBit = g.result === "unable_to_schedule" || g.result === "no_show"
+        const scoreBit = g.result === "unable_to_schedule" || g.result === "no_show" || g.result === "no_report"
           ? resultLabel(g.result)
           : (g.attacker_vp ?? "—") + " – " + (g.defender_vp ?? "—");
         const bits = [
@@ -1150,7 +1169,8 @@
           conceded: "Conceded",
           in_progress: "In progress",
           unable_to_schedule: "Unable to schedule",
-          no_show: "No show"
+          no_show: "No show",
+          no_report: "No report"
         })[r] || r || "Result";
       }
       function battleNo(item) {
@@ -1165,6 +1185,8 @@
       actions.slice(0, 4).forEach((item) => {
         const verb = item.duty === "no_show"
           ? "No show to confirm"
+          : item.duty === "no_report"
+          ? "No report, pending admin confirmation"
           : item.duty === "admin"
           ? (item.result_state === "disputed" ? "Disputed result to resolve" : "Pending result to resolve")
           : "Confirm or dispute";

@@ -350,5 +350,138 @@ test("the rules and report form name both outcomes", () => {
   assert.match(actions, /data-act="reject"/);
   assert.match(actions, />Confirm</);
   assert.match(actions, />Reject</);
-  assert.match(actions, /a\.duty === "admin" \|\| a\.duty === "no_show"/);
+  assert.match(actions, /a\.duty === "admin" \|\| a\.duty === "no_show" \|\| a\.duty === "no_report"/);
+  assert.match(rulesMd, /No Report: no report is made for the battle\. Both players' forces suffer a loss\. This must be confirmed by the campaign admin\. \(added as part of web app build\)/);
+  assert.match(rulesHtml, /id="no-report"/);
+  assert.match(rulesHtml, /No Report:<\/strong> no report is made for the battle\. Both players' forces suffer a loss\. This must be confirmed by the campaign admin\./);
+  assert.match(games, /value="no_report"/);
+  assert.match(games, /No report, pending admin confirmation/);
+  assert.match(games, /SH\.role !== "campaign_admin"/);
+});
+
+test("a no report is admin-only, both forces lose, and rejection reverts", async () => {
+  const ctx = startServer();
+  try {
+    await ctx.ready;
+    const admin = await adminToken(ctx);
+    const loyal = await signup(ctx, admin, "report_loyal", "Loyalist", 2);
+    const traitor = await signup(ctx, admin, "report_traitor", "Traitor", 4);
+    const forces = await pairAtPortMaw(ctx, admin, loyal, traitor);
+    const before = await snapshot(ctx, admin, forces);
+
+    const playerMark = await api(ctx, loyal.token, "POST", "/api/games", battleBody(loyal, traitor, forces, {
+      result: "no_report"
+    }));
+    assert.equal(playerMark.status, 403, JSON.stringify(playerMark.json));
+    assert.match(playerMark.json.error, /campaign admin/);
+
+    const opened = await api(ctx, loyal.token, "POST", "/api/games", battleBody(loyal, traitor, forces, {
+      result: "in_progress"
+    }));
+    assert.equal(opened.status, 201, JSON.stringify(opened.json));
+    assert.equal(opened.json.result_state, "open");
+
+    const marked = await api(ctx, admin, "PUT", "/api/games/" + opened.json.game_id, battleBody(loyal, traitor, forces, {
+      result: "no_report"
+    }));
+    assert.equal(marked.status, 200, JSON.stringify(marked.json));
+    assert.equal(marked.json.result, "no_report");
+    assert.equal(marked.json.result_state, "pending");
+    assert.equal(marked.json.winner_id, null);
+    assert.equal(marked.json.attacker_vp, null);
+    assert.equal(marked.json.defender_vp, null);
+    assert.equal(marked.json.resolution, null);
+    assert.deepEqual(await snapshot(ctx, admin, forces), before);
+
+    const own = await api(ctx, loyal.token, "POST", "/api/games/" + opened.json.game_id + "/confirm", {});
+    assert.equal(own.status, 403, JSON.stringify(own.json));
+    assert.match(own.json.error, /campaign admin/);
+    const opponent = await api(ctx, traitor.token, "POST", "/api/games/" + opened.json.game_id + "/confirm", {});
+    assert.equal(opponent.status, 403, JSON.stringify(opponent.json));
+    assert.match(opponent.json.error, /campaign admin/);
+    const dispute = await api(ctx, traitor.token, "POST", "/api/games/" + opened.json.game_id + "/dispute", {});
+    assert.equal(dispute.status, 409, JSON.stringify(dispute.json));
+    const playerEdit = await api(ctx, loyal.token, "PUT", "/api/games/" + opened.json.game_id, battleBody(loyal, traitor, forces, {
+      result: "attacker_win",
+      attacker_vp: 1,
+      defender_vp: 0
+    }));
+    assert.equal(playerEdit.status, 403, JSON.stringify(playerEdit.json));
+    assert.match(playerEdit.json.error, /campaign admin/);
+
+    const adminInbox = await api(ctx, admin, "GET", "/api/inbox");
+    const queued = adminInbox.json.actions.find((item) => item.game_id === opened.json.game_id);
+    assert.ok(queued, JSON.stringify(adminInbox.json.actions));
+    assert.equal(queued.duty, "no_report");
+    const opponentInbox = await api(ctx, traitor.token, "GET", "/api/inbox");
+    assert.equal(opponentInbox.json.actions.some((item) => item.game_id === opened.json.game_id), false);
+    for (const player of [loyal, traitor]) {
+      const inbox = await api(ctx, player.token, "GET", "/api/inbox");
+      const note = inbox.json.notifications.find((row) => row.kind === "battle_result_submitted" && /no report/i.test(row.text));
+      assert.ok(note, JSON.stringify(inbox.json.notifications));
+      assert.match(note.text, /pending admin confirmation/);
+    }
+
+    const rejected = await api(ctx, admin, "POST", "/api/games/" + opened.json.game_id + "/reject", {});
+    assert.equal(rejected.status, 200, JSON.stringify(rejected.json));
+    assert.equal(rejected.json.result, "in_progress");
+    assert.equal(rejected.json.result_state, "open");
+    assert.equal(rejected.json.resolution, null);
+    assert.deepEqual(await snapshot(ctx, admin, forces), before);
+    for (const player of [loyal, traitor]) {
+      const inbox = await api(ctx, player.token, "GET", "/api/inbox");
+      const note = inbox.json.notifications.find((row) => row.kind === "battle_result_rejected" && /no report/i.test(row.text));
+      assert.ok(note, JSON.stringify(inbox.json.notifications));
+      assert.match(note.text, /nothing was applied/);
+    }
+
+    const deadline = await api(ctx, admin, "POST", "/api/campaign/phase-deadline", {
+      phase_ends_at: "2020-01-01T00:00:00.000Z"
+    });
+    assert.equal(deadline.status, 200, JSON.stringify(deadline.json));
+    assert.equal(deadline.json.advanced, false);
+    assert.equal(deadline.json.phase, "Battles");
+    const flagged = await api(ctx, admin, "GET", "/api/games/" + opened.json.game_id);
+    assert.equal(flagged.json.result, "no_report");
+    assert.equal(flagged.json.result_state, "pending");
+    assert.equal(flagged.json.resolution, null);
+    assert.deepEqual(await snapshot(ctx, admin, forces), before);
+    assert.match(deadline.json.auto_advance_blocked.message, /No report, pending admin confirmation: Battle #/);
+    assert.match(deadline.json.auto_advance_blocked.message, /Actions page/);
+    assert.deepEqual(deadline.json.auto_advance_blocked.no_report, [opened.json.game_id]);
+    const blockedAdvance = await api(ctx, admin, "POST", "/api/campaign/advance", {});
+    assert.equal(blockedAdvance.status, 409, JSON.stringify(blockedAdvance.json));
+
+    const confirmed = await api(ctx, admin, "POST", "/api/games/" + opened.json.game_id + "/confirm", {});
+    assert.equal(confirmed.status, 200, JSON.stringify(confirmed.json));
+    assert.equal(confirmed.json.result_state, "applied");
+    assert.equal(confirmed.json.winner_id, null);
+    assert.equal(confirmed.json.attacker_vp, null);
+    assert.equal(confirmed.json.defender_vp, null);
+    assert.equal(confirmed.json.action_bonus, null);
+    const after = await snapshot(ctx, admin, forces);
+    assert.equal(after.loyalStrength, before.loyalStrength - 1);
+    assert.equal(after.traitorStrength, before.traitorStrength - 1);
+    assert.equal(after.durability, before.durability - 1);
+    assert.equal(after.loyalScore, before.loyalScore);
+    assert.equal(after.traitorScore, before.traitorScore);
+    assert.equal(after.controller, before.controller);
+    assert.equal(after.loyalFought, true);
+    assert.equal(after.traitorFought, true);
+    const meta = (await api(ctx, admin, "GET", "/api/meta")).json;
+    assert.equal(meta.action_bonuses, undefined);
+    for (const player of [loyal, traitor]) {
+      const inbox = await api(ctx, player.token, "GET", "/api/inbox");
+      const note = inbox.json.notifications.find((row) => row.kind === "battle_result_applied" && /confirmed the no report/i.test(row.text));
+      assert.ok(note, JSON.stringify(inbox.json.notifications));
+      assert.match(note.text, /Both forces suffer a loss/);
+    }
+
+    const advance = await api(ctx, admin, "POST", "/api/campaign/advance", {});
+    assert.equal(advance.status, 200, JSON.stringify(advance.json));
+    assert.equal(advance.json.to.phase, "Logistics");
+    assert.equal(advance.json.to.turn, 2);
+  } finally {
+    await ctx.stop();
+  }
 });

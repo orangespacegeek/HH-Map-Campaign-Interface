@@ -1428,7 +1428,8 @@ const DECISIVE_RESULTS = [
   "draw",
   "conceded",
   "unable_to_schedule",
-  "no_show"
+  "no_show",
+  "no_report"
 ];
 const GAME_RESULTS = DECISIVE_RESULTS.concat(["in_progress"]);
 
@@ -1521,7 +1522,12 @@ function normalizeGameResult(body) {
   });
   if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
   else if (body.result === "defender_win") body.winner_id = Number(body.defender_id);
-  else if (body.result === "draw" || body.result === "in_progress" || body.result === "unable_to_schedule") {
+  else if (
+    body.result === "draw" ||
+    body.result === "in_progress" ||
+    body.result === "unable_to_schedule" ||
+    body.result === "no_report"
+  ) {
     body.winner_id = null;
   } else if (body.result === "conceded" && body.winner_id != null && body.winner_id !== "") {
     body.winner_id = Number(body.winner_id);
@@ -1533,7 +1539,7 @@ function normalizeGameResult(body) {
     if (body.attacker_vp == null) body.attacker_vp = 0;
     if (body.defender_vp == null) body.defender_vp = 0;
   }
-  if (body.result === "unable_to_schedule") {
+  if (body.result === "unable_to_schedule" || body.result === "no_report") {
     body.attacker_vp = null;
     body.defender_vp = null;
     body.no_show_id = null;
@@ -1563,6 +1569,9 @@ function validateGameWrite(body, auth, existing) {
   if (!GAME_RESULTS.includes(body.result)) {
     return { status: 400, error: "result is not valid" };
   }
+  if (body.result === "no_report" && !isAdmin) {
+    return { status: 403, error: "Only the campaign admin can mark a battle as no report" };
+  }
   if (body.result === "no_show") {
     const offender = Number(body.no_show_id);
     if (offender !== attackerId && offender !== defenderId) {
@@ -1571,6 +1580,14 @@ function validateGameWrite(body, auth, existing) {
     if (!isAdmin && offender === Number(auth.account.player_id)) {
       return { status: 400, error: "You can only report the other player as a no show" };
     }
+  }
+  if (
+    !isAdmin &&
+    existing &&
+    existing.result === "no_report" &&
+    existing.result_state === "pending"
+  ) {
+    return { status: 403, error: "A no report is waiting for the campaign admin" };
   }
   if (
     !isAdmin &&
@@ -1705,7 +1722,7 @@ function reverseResolution(game, state, games) {
 }
 
 function winnerAllegiance(game, state) {
-  if (!game || game.result === "draw" || game.result === "in_progress") return null;
+  if (!game || game.result === "draw" || game.result === "no_report" || game.result === "in_progress") return null;
   let winnerPlayerId = null;
   let winnerForceId = null;
   if (game.result === "attacker_win") {
@@ -1727,7 +1744,7 @@ function winnerAllegiance(game, state) {
 }
 
 function loserForceIds(game) {
-  if (game.result === "draw") {
+  if (game.result === "draw" || game.result === "no_report") {
     return [game.attacker_force_id, game.defender_force_id].filter((id) => id != null && id !== "");
   }
   if (game.result === "attacker_win") return [game.defender_force_id].filter((id) => id != null && id !== "");
@@ -1903,6 +1920,14 @@ function settleGame(game, previous, state, games, actor) {
       game.disputed_at = null;
       game.dispute_note = null;
     }
+  }
+  // Saving a no report, including an admin save, only flags it. Confirm applies
+  // the loss. The deadline flag uses the same pending state and does not call
+  // this with confirming set.
+  if (game.result === "no_report" && !actor.confirming) {
+    apply = false;
+    game.proposed_by = null;
+    if (!game.proposed_at) game.proposed_at = new Date().toISOString();
   }
   if (apply) {
     game.result_state = "applied";
@@ -2213,6 +2238,9 @@ async function confirmBattle(req, res, idPart) {
   if (!isDecisive(existing.result) || !canApply) {
     return send(res, 409, { error: "This battle has no result waiting to be applied" });
   }
+  if (existing.result === "no_report" && !isAdmin) {
+    return send(res, 403, { error: "A no report must be confirmed by the campaign admin" });
+  }
   if (existing.result === "no_show" && !isAdmin) {
     if (Number(existing.proposed_by) === playerId) {
       return send(res, 403, { error: "Waiting for the campaign admin to confirm this no show" });
@@ -2267,7 +2295,8 @@ function resultPhrase(result) {
       draw: "a draw",
       conceded: "a concession",
       unable_to_schedule: "unable to schedule",
-      no_show: "a no show"
+      no_show: "a no show",
+      no_report: "a no report"
     }[result] || "a result"
   );
 }
@@ -2333,7 +2362,7 @@ function announceBattleChange(previous, game, actor) {
     !sameProposal(previous, game) ||
     Number(previous.proposed_by) !== Number(game.proposed_by) ||
     prevState !== "pending";
-  const special = game.result === "unable_to_schedule" || game.result === "no_show";
+  const special = game.result === "unable_to_schedule" || game.result === "no_show" || game.result === "no_report";
 
   if (special && game.result_state === "pending" && proposalChanged) {
     const players = [game.attacker_id, game.defender_id].filter(Boolean);
@@ -2341,7 +2370,9 @@ function announceBattleChange(previous, game, actor) {
     const reporter = playerLabel(game.proposed_by);
     const text = game.result === "no_show"
       ? reporter + " reported " + offender + " as a no show for " + title + ". It is waiting for the campaign admin."
-      : reporter + " reported " + title + " as unable to schedule. Neither player is penalized.";
+      : game.result === "no_report"
+        ? "The campaign admin marked " + title + " as no report. No report, pending admin confirmation. Both forces will suffer a loss."
+        : reporter + " reported " + title + " as unable to schedule. Neither player is penalized.";
     players.forEach((pid) => {
       notices.push({
         player_id: Number(pid),
@@ -2351,7 +2382,7 @@ function announceBattleChange(previous, game, actor) {
         ref
       });
     });
-    if (game.result === "no_show") {
+    if (game.result === "no_show" || game.result === "no_report") {
       notices.push({
         player_id: null,
         audience: "campaign_admin",
@@ -2376,7 +2407,9 @@ function announceBattleChange(previous, game, actor) {
   if (special && game.result_state === "applied" && prevState !== "applied") {
     const text = game.result === "no_show"
       ? "The campaign admin confirmed the no show for " + title + ". " + playerLabel(game.no_show_id) + "'s force loses, and " + playerLabel(game.winner_id) + " gains an extra logistics action next turn."
-      : "Unable to schedule was confirmed for " + title + ". The battle is closed with no penalties.";
+      : game.result === "no_report"
+        ? "The campaign admin confirmed the no report for " + title + ". Both forces suffer a loss. Neither side gains victory points or control."
+        : "Unable to schedule was confirmed for " + title + ". The battle is closed with no penalties.";
     [game.attacker_id, game.defender_id].filter(Boolean).forEach((pid) => {
       notices.push({
         player_id: Number(pid),
@@ -2431,6 +2464,9 @@ async function disputeBattle(req, res, idPart) {
   if (existing.result === "no_show") {
     return send(res, 409, { error: "A no show is confirmed or rejected by the campaign admin" });
   }
+  if (existing.result === "no_report") {
+    return send(res, 409, { error: "A no report is confirmed or rejected by the campaign admin" });
+  }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "You can't dispute your own result" });
   }
@@ -2483,8 +2519,8 @@ async function rejectNoShow(req, res, idPart) {
   const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
   if (idx < 0) return send(res, 404, { error: "Not found" });
   const existing = list[idx];
-  if (existing.result !== "no_show" || existing.result_state !== "pending") {
-    return send(res, 409, { error: "Only a no show waiting for admin confirmation can be rejected" });
+  if (!["no_show", "no_report"].includes(existing.result) || existing.result_state !== "pending") {
+    return send(res, 409, { error: "Only a no show or no report waiting for admin confirmation can be rejected" });
   }
   const game = cloneData(existing);
   if (game.resolution) {
@@ -2509,7 +2545,9 @@ async function rejectNoShow(req, res, idPart) {
   writeCollection("games", list);
   const title = battlePlace(game);
   const ref = { type: "game", game_id: game.game_id };
-  const text = "The campaign admin rejected the no show for " + title + ". The battle is open again and nothing was applied.";
+  const text = existing.result === "no_report"
+    ? "The campaign admin rejected the no report for " + title + ". The battle is open again and nothing was applied."
+    : "The campaign admin rejected the no show for " + title + ". The battle is open again and nothing was applied.";
   const notices = [existing.attacker_id, existing.defender_id].filter(Boolean).map((pid) => ({
     player_id: Number(pid),
     audience: "player",
@@ -2632,6 +2670,8 @@ function inboxFor(account) {
       const involved = pid != null && isParticipant(game, pid);
       if (game.result === "no_show" && state === "pending") {
         if (isAdmin) actions.push({ ...card, duty: "no_show" });
+      } else if (game.result === "no_report" && state === "pending") {
+        if (isAdmin) actions.push({ ...card, duty: "no_report" });
       } else if (state === "pending" && involved && proposedBy !== pid) {
         actions.push({ ...card, duty: "confirm" });
       } else if (isAdmin && (state === "pending" || state === "disputed")) {
@@ -3223,6 +3263,82 @@ function autoAdvanceReason(meta, now) {
   return null;
 }
 
+function isUnreportedOpenBattle(game, turn) {
+  if ((game.result_state || "open") !== "open") return false;
+  if (!isUnresolvedBattle(game, turn)) return false;
+  return (game.result || "in_progress") === "in_progress";
+}
+
+/**
+ * A Battles deadline that arrives with battles still unreported flags them
+ * No report, pending admin confirmation. It does not apply the loss.
+ * Already-pending no reports are left alone so players are not notified twice.
+ */
+function flagUnreportedBattles(turn) {
+  const games = readCollection("games");
+  const notices = [];
+  let changed = false;
+  games.forEach((game) => {
+    if (!isUnreportedOpenBattle(game, turn)) return;
+    game.result = "no_report";
+    game.winner_id = null;
+    game.no_show_id = null;
+    game.attacker_vp = null;
+    game.defender_vp = null;
+    game.result_state = "pending";
+    game.proposed_by = null;
+    game.proposed_at = new Date().toISOString();
+    game.disputed_by = null;
+    game.disputed_at = null;
+    game.dispute_note = null;
+    game.resolution = null;
+    game.action_bonus = null;
+    const title = battlePlace(game);
+    const text = "The phase deadline passed with no report for " + title + ". No report, pending admin confirmation. Both forces will suffer a loss if the campaign admin confirms it.";
+    const ref = { type: "game", game_id: game.game_id };
+    [game.attacker_id, game.defender_id].filter(Boolean).forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_submitted",
+        text,
+        ref
+      });
+    });
+    notices.push({
+      player_id: null,
+      audience: "campaign_admin",
+      kind: "battle_result_submitted",
+      text,
+      ref
+    });
+    changed = true;
+  });
+  if (changed) {
+    writeCollection("games", games);
+    writeNotices(notices);
+  }
+  return changed;
+}
+
+function blockedAdvanceRecord(result, reason) {
+  const battles = result.battles || [];
+  const reports = battles.filter((battle) => battle.result === "no_report");
+  let message = "Auto-advance blocked: " + battles.length + " open battles";
+  if (reports.length) {
+    message += ". No report, pending admin confirmation: " +
+      reports.map((battle) => "Battle #" + battle.game_id).join(", ") +
+      ". Confirm or reject them on the Actions page.";
+  }
+  return {
+    at: new Date().toISOString(),
+    reason,
+    battles: battles.length,
+    no_report: reports.map((battle) => battle.game_id),
+    message
+  };
+}
+
 function maybeAutoAdvance() {
   return withAdvanceLock(() => {
     const meta = readCollection("meta");
@@ -3240,16 +3356,11 @@ function maybeAutoAdvance() {
     if ((Number(again.turn) || 1) !== fromTurn || (again.phase || "Logistics") !== fromPhase) {
       return { ok: true, advanced: false, skipped: "stale" };
     }
+    if (reason === "deadline" && fromPhase === "Battles") flagUnreportedBattles(fromTurn);
     const result = advanceCampaign(again, { automatic: true, reason, force: false });
     if (result && result.ok === false) {
       if (result.code === "unresolved_battles") {
-        const count = (result.battles || []).length;
-        again.auto_advance_blocked = {
-          at: new Date().toISOString(),
-          reason,
-          battles: count,
-          message: "Auto-advance blocked: " + count + " open battles"
-        };
+        again.auto_advance_blocked = blockedAdvanceRecord(result, reason);
         writeCollection("meta", again);
       }
       return { ok: false, advanced: false, result };

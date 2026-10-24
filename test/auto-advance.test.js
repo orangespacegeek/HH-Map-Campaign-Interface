@@ -304,17 +304,22 @@ test("open battles block auto-advance without voiding, then a later check advanc
     assert.equal(blocked.json.phase, "Battles");
     assert.equal(blocked.json.turn, 1);
     assert.ok(blocked.json.phase_ends_at);
-    assert.equal(blocked.json.auto_advance_blocked.message, "Auto-advance blocked: 1 open battles");
+    const flagged = "Auto-advance blocked: 1 open battles. No report, pending admin confirmation: Battle #" +
+      game.json.game_id + ". Confirm or reject them on the Actions page.";
+    assert.equal(blocked.json.auto_advance_blocked.message, flagged);
+    assert.deepEqual(blocked.json.auto_advance_blocked.no_report, [game.json.game_id]);
 
     await sleep(600);
     const still = await api(ctx, admin, "GET", "/api/games/" + game.json.game_id);
-    assert.equal(still.json.result_state, "open");
+    assert.equal(still.json.result, "no_report");
+    assert.equal(still.json.result_state, "pending");
+    assert.equal(still.json.resolution, null);
     assert.equal(still.json.voided_at, undefined);
     const mid = (await api(ctx, admin, "GET", "/api/meta")).json;
     assert.equal(mid.phase, "Battles");
     assert.equal(mid.turn, 1);
     assert.ok(mid.phase_ends_at);
-    assert.equal(mid.auto_advance_blocked.message, "Auto-advance blocked: 1 open battles");
+    assert.equal(mid.auto_advance_blocked.message, flagged);
     assert.equal(automaticEntries(mid).length, 0);
 
     assert.equal((await api(ctx, admin, "DELETE", "/api/games/" + game.json.game_id)).status, 200);

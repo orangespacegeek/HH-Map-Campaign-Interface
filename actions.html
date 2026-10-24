@@ -160,7 +160,7 @@
 </header>
 
   <main id="main">
-    <p class="lead" id="intro">A played result or unable to schedule stays pending until the other commander confirms it. A no show stays pending until the campaign admin confirms or rejects it. A dispute leaves the result unapplied and flags it for the campaign admin.</p>
+    <p class="lead" id="intro">A played result or unable to schedule stays pending until the other commander confirms it. A no show stays pending until the campaign admin confirms or rejects it. A no report is flagged when the Battles deadline passes with the battle still unreported, or when the admin marks it, and it stays pending until the admin confirms or rejects it. A dispute leaves the result unapplied and flags it for the campaign admin.</p>
     <div id="content"></div>
   </main>
   <div class="toast" id="toast" role="status"></div>
@@ -192,10 +192,12 @@
         conceded: "Conceded",
         in_progress: "In progress",
         unable_to_schedule: "Unable to schedule",
-        no_show: "No show"
+        no_show: "No show",
+        no_report: "No report"
       })[r] || r || "Result";
     }
     function stateLabel(state, result) {
+      if (result === "no_report" && state === "pending") return "No report, pending admin confirmation";
       if (result === "no_show" && state === "pending") return "Pending admin confirmation";
       if (state === "pending") return "Pending confirmation";
       if (state === "disputed") return "Disputed";
@@ -213,10 +215,14 @@
         ? "No victory points"
         : item.result === "no_show"
           ? "No show" + (item.no_show_name ? ": " + item.no_show_name : "")
-          : (item.attacker_vp ?? "—") + " – " + (item.defender_vp ?? "—");
+          : item.result === "no_report"
+            ? "Both forces suffer a loss"
+            : (item.attacker_vp ?? "—") + " – " + (item.defender_vp ?? "—");
       const submitted = item.proposed_by_name
         ? esc(item.proposed_by_name) + (item.proposed_at ? " · " + esc(when(item.proposed_at)) : "")
-        : "—";
+        : item.result === "no_report"
+          ? "Campaign admin"
+          : "—";
       const dispute = item.result_state === "disputed"
         ? `<div class="note">Disputed by <strong>${esc(item.disputed_by_name || "a commander")}</strong>${item.disputed_at ? " · " + esc(when(item.disputed_at)) : ""}${item.dispute_note ? " — " + esc(item.dispute_note) : ""}</div>`
         : "";
@@ -231,7 +237,7 @@
           <span class="badge ${stateClass(item.result_state)}">${esc(stateLabel(item.result_state, item.result))}</span>
         </div>
         <div class="meta">
-          Turn ${esc(item.turn ?? "—")} · ${esc(score)}${item.result === "unable_to_schedule" || item.result === "no_show" ? "" : " VP"}<br>
+          Turn ${esc(item.turn ?? "—")} · ${esc(score)}${item.result === "unable_to_schedule" || item.result === "no_show" || item.result === "no_report" ? "" : " VP"}<br>
           Attacker <strong>${esc(item.attacker_name || "—")}</strong> · ${esc(item.attacker_force || "no force")}<br>
           Defender <strong>${esc(item.defender_name || "—")}</strong> · ${esc(item.defender_force || "no force")}<br>
           Submitted by ${submitted}
@@ -243,11 +249,11 @@
     }
 
     function actionButtons(item) {
-      if (item.duty === "no_show") {
+      if (item.duty === "no_show" || item.duty === "no_report") {
         return `
           <div class="actions">
             <button type="button" class="primary" data-act="confirm" data-id="${item.game_id}">Confirm</button>
-            <button type="button" class="danger" data-act="reject" data-id="${item.game_id}">Reject</button>
+            <button type="button" class="danger" data-act="reject" data-kind="${item.duty}" data-id="${item.game_id}">Reject</button>
           </div>`;
       }
       if (item.duty === "confirm") {
@@ -285,7 +291,7 @@
 
     function render(data) {
       const needs = (data.actions || []).filter((a) => a.duty === "confirm");
-      const admin = (data.actions || []).filter((a) => a.duty === "admin" || a.duty === "no_show");
+      const admin = (data.actions || []).filter((a) => a.duty === "admin" || a.duty === "no_show" || a.duty === "no_report");
       const mine = data.mine || [];
       const notes = data.notifications || [];
       let html = "";
@@ -337,7 +343,9 @@
       const act = btn.dataset.act;
       const card = btn.closest("article");
       if (act === "void" && !confirm("Void this result? Campaign changes from it will be undone.")) return;
-      if (act === "reject" && !confirm("Reject this no show? Nothing will be applied and the battle goes back to open.")) return;
+      if (act === "reject" && !confirm(btn.dataset.kind === "no_report"
+        ? "Reject this no report? Nothing will be applied and the battle goes back to open."
+        : "Reject this no show? Nothing will be applied and the battle goes back to open.")) return;
       const buttons = card ? card.querySelectorAll("button") : [btn];
       buttons.forEach((b) => { b.disabled = true; });
       try {
@@ -353,7 +361,7 @@
           showToast("Result voided");
         } else if (act === "reject") {
           await SH.rejectGame(id);
-          showToast("No show rejected");
+          showToast(btn.dataset.kind === "no_report" ? "No report rejected" : "No show rejected");
         }
         await reload();
       } catch (err) {
