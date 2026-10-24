@@ -175,8 +175,71 @@
       border-radius: 6px;
       border: 1px solid var(--border);
     }
+    .hero-meta span[hidden] { display: none; }
     .hero-meta .k { color: var(--muted); }
-    .hero-meta .v { font-weight: 600; color: var(--text); }
+    .hero-meta .v { font-weight: 600; color: var(--text); text-align: right; }
+    .hero-meta .phase-deadline .v { line-height: 1.35; }
+    .hero-meta .phase-deadline.is-past .v { color: var(--accent); }
+    .auto-advance-blocked {
+      margin: 0.75rem 0;
+      padding: 0.75rem 0.8rem;
+      border-radius: 10px;
+      background: rgba(239, 68, 68, 0.16);
+      border: 1px solid var(--traitor);
+      color: var(--text);
+      font-weight: 700;
+      line-height: 1.35;
+    }
+    .auto-advance-blocked[hidden] { display: none; }
+    .deadline-toggle {
+      flex: 1 1 100%;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      min-height: 44px;
+      font-size: 0.9rem;
+    }
+    .deadline-editor {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      align-items: center;
+      margin-top: 0.85rem;
+    }
+    .deadline-editor label {
+      flex: 1 1 100%;
+      font-size: 0.8rem;
+      color: var(--muted);
+    }
+    .deadline-editor input {
+      flex: 1 1 12rem;
+      min-height: 44px;
+      font-size: 16px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.45rem 0.6rem;
+    }
+    .deadline-editor button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      min-height: 44px;
+      padding: 0.5rem 0.9rem;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .deadline-editor .admin-hint { flex: 1 1 100%; margin-top: 0; }
+    .deadline-editor button:hover,
+    .deadline-editor button:focus-visible { border-color: var(--accent); }
+    .deadline-editor button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    @media (max-width: 719px) {
+      .deadline-editor button,
+      .deadline-editor input { width: 100%; }
+    }
 
     .turn-panel {
       display: block;
@@ -467,6 +530,24 @@
       text-transform: uppercase;
       letter-spacing: 0.04em;
     }
+    a.stat {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 44px;
+      text-decoration: none;
+      color: inherit;
+      cursor: pointer;
+    }
+    a.stat:hover,
+    a.stat:focus-visible {
+      border-color: var(--accent);
+      background: #161622;
+    }
+    a.stat:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
 
     .grid {
       display: grid;
@@ -657,6 +738,10 @@
       <div class="hero-meta" id="hero-meta">
         <span><span class="k">Campaign turn</span><span class="v" id="meta-turn">—</span></span>
         <span><span class="k">Phase</span><span class="v" id="meta-phase">—</span></span>
+        <span class="phase-deadline" id="phase-deadline" hidden>
+          <span class="k">Phase ends</span>
+          <span class="v" id="phase-deadline-value"></span>
+        </span>
         <span><span class="k">Systems</span><span class="v" id="meta-systems">—</span></span>
       </div>
     </section>
@@ -677,6 +762,7 @@
 
     <div class="turn-panel" id="turn-panel">
       <h3>Campaign turn</h3>
+      <p class="auto-advance-blocked" id="auto-advance-blocked" hidden role="status"></p>
       <div class="phase-track" id="phase-track">
         <div class="phase-step" data-phase="Logistics">Logistics</div>
         <div class="phase-step" data-phase="Movement">Movement</div>
@@ -700,6 +786,17 @@
         <button type="button" id="btn-backup">Download backup</button>
         <button type="button" id="btn-reset">Reset campaign</button>
       </div>
+      <div class="deadline-editor" data-role="campaign_admin">
+        <label for="phase-ends-at">Phase ends at</label>
+        <input type="datetime-local" id="phase-ends-at" />
+        <button type="button" id="btn-set-deadline">Set deadline</button>
+        <button type="button" id="btn-clear-deadline">Clear deadline</button>
+        <label class="deadline-toggle" for="auto-advance-done">
+          <input type="checkbox" id="auto-advance-done" checked />
+          Auto-advance when all players are done
+        </label>
+        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Open battles are not voided.</p>
+      </div>
       <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
       <div class="turn-log" id="turn-log"></div>
     </div>
@@ -709,26 +806,6 @@
         <div class="icon">🗺️</div>
         <h3>Sector Map</h3>
         <p>Interactive Port Maw map with control colours, force presence, and system details.</p>
-      </a>
-      <a class="card" href="player_admin.html">
-        <div class="icon">👥</div>
-        <h3>Players</h3>
-        <p>Add and edit players, allegiance, status, and starting systems.</p>
-      </a>
-      <a class="card" href="forces.html">
-        <div class="icon">⚔️</div>
-        <h3>Forces</h3>
-        <p>Army tokens on the map — strength, location, legion, and status.</p>
-      </a>
-      <a class="card" href="systems.html">
-        <div class="icon">🪐</div>
-        <h3>Systems</h3>
-        <p>Power levels, loyalty scores, controllers, and infrastructure.</p>
-      </a>
-      <a class="card" href="games.html">
-        <div class="icon">📜</div>
-        <h3>Battle Log</h3>
-        <p>Recorded games, results, victory points, and narrative notes.</p>
       </a>
       <a class="card" href="rules.html">
         <div class="icon">📖</div>
@@ -813,6 +890,64 @@
       if (traitorVal) traitorVal.textContent = traitor;
     }
 
+    let phaseDeadline = null;
+
+    function formatRemain(ms) {
+      const totalMinutes = Math.floor(ms / 60000);
+      if (totalMinutes < 1) return "less than a minute";
+      const days = Math.floor(totalMinutes / (60 * 24));
+      const hours = Math.floor((totalMinutes % (60 * 24)) / 60);
+      const minutes = totalMinutes % 60;
+      const parts = [];
+      if (days) parts.push(days + (days === 1 ? " day" : " days"));
+      if (hours) parts.push(hours + (hours === 1 ? " hour" : " hours"));
+      if (minutes) parts.push(minutes + (minutes === 1 ? " minute" : " minutes"));
+      return parts.join(" ");
+    }
+
+    function formatLocalDeadline(date) {
+      return date.toLocaleString(undefined, {
+        weekday: "short",
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit"
+      });
+    }
+
+    function localDeadlineInput(iso) {
+      if (!iso) return "";
+      const date = new Date(iso);
+      if (Number.isNaN(date.getTime())) return "";
+      const pad = (n) => String(n).padStart(2, "0");
+      return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) +
+        "T" + pad(date.getHours()) + ":" + pad(date.getMinutes());
+    }
+
+    function renderDeadline() {
+      const row = document.getElementById("phase-deadline");
+      const value = document.getElementById("phase-deadline-value");
+      if (!row || !value) return;
+      const date = phaseDeadline ? new Date(phaseDeadline) : null;
+      if (!date || Number.isNaN(date.getTime())) {
+        row.hidden = true;
+        row.classList.remove("is-past");
+        value.textContent = "";
+        return;
+      }
+      row.hidden = false;
+      const remain = date.getTime() - Date.now();
+      const when = formatLocalDeadline(date);
+      if (remain <= 0) {
+        row.classList.add("is-past");
+        value.textContent = "Phase deadline passed · " + when;
+        return;
+      }
+      row.classList.remove("is-past");
+      value.textContent = formatRemain(remain) + " · " + when;
+    }
+
     function updateHero(meta, systemCount) {
       const title = document.getElementById("hero-title");
       const lead = document.getElementById("hero-lead");
@@ -830,6 +965,23 @@
       document.getElementById("meta-turn").textContent = meta.turn ?? "—";
       document.getElementById("meta-phase").textContent = meta.phase ?? "—";
       document.getElementById("meta-systems").textContent = systemCount ?? "—";
+      phaseDeadline = meta.phase_ends_at || null;
+      const deadlineInput = document.getElementById("phase-ends-at");
+      if (deadlineInput && document.activeElement !== deadlineInput) {
+        deadlineInput.value = localDeadlineInput(phaseDeadline);
+      }
+      const toggle = document.getElementById("auto-advance-done");
+      if (toggle && document.activeElement !== toggle) {
+        toggle.checked = meta.auto_advance_when_done !== false;
+      }
+      const blocked = document.getElementById("auto-advance-blocked");
+      if (blocked) {
+        const note = meta.auto_advance_blocked;
+        const show = SH.role === "campaign_admin" && note && note.message;
+        blocked.hidden = !show;
+        blocked.textContent = show ? note.message : "";
+      }
+      renderDeadline();
       updatePhaseTrack(meta.phase);
       updateScores(meta);
       const log = document.getElementById("turn-log");
@@ -884,12 +1036,19 @@
         SH.list("systems"),
         SH.getMeta()
       ]);
-      document.getElementById("stats").innerHTML = `
-        <div class="stat"><div class="num">${players.length}</div><div class="label">Players</div></div>
-        <div class="stat"><div class="num">${systems.length}</div><div class="label">Systems</div></div>
-        <div class="stat"><div class="num">${forces.length}</div><div class="label">Forces</div></div>
-        <div class="stat"><div class="num" style="color:var(--traitor)">${games.length}</div><div class="label">Battles logged</div></div>
-      `;
+      const statCard = (href, num, label, numStyle) => {
+        const style = numStyle ? ` style="${numStyle}"` : "";
+        const inner = `<div class="num"${style}>${num}</div><div class="label">${label}</div>`;
+        if (!href) return `<div class="stat">${inner}</div>`;
+        return `<a class="stat" href="${href}">${inner}</a>`;
+      };
+      const playersHref = SH.role === "campaign_admin" ? "player_admin.html" : "";
+      document.getElementById("stats").innerHTML = [
+        statCard(playersHref, players.length, "Players"),
+        statCard("systems.html", systems.length, "Systems"),
+        statCard("forces.html", forces.length, "Forces"),
+        statCard("games.html", games.length, "Battles logged", "color:var(--traitor)")
+      ].join("");
       updateHero(meta, systems.length);
       renderRecent(games, players, forces, systems);
       const btn = document.getElementById("btn-advance");
@@ -1139,6 +1298,58 @@
       }
     });
 
+    document.getElementById("btn-set-deadline").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      const raw = document.getElementById("phase-ends-at").value;
+      if (!raw) {
+        log.textContent = "Choose a date and time first.";
+        return;
+      }
+      const when = new Date(raw);
+      if (Number.isNaN(when.getTime())) {
+        log.textContent = "Phase deadline must be a date and time.";
+        return;
+      }
+      try {
+        const saved = await SH.setPhaseDeadline(when.toISOString());
+        log.textContent = saved && saved.advanced
+          ? "That deadline had already passed, so the phase advanced."
+          : "Phase deadline set.";
+        await refreshDashboard();
+      } catch (err) {
+        log.textContent = err.message || "Could not set the phase deadline";
+      }
+    });
+
+    document.getElementById("btn-clear-deadline").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      try {
+        await SH.setPhaseDeadline(null);
+        log.textContent = "Phase deadline cleared.";
+        await refreshDashboard();
+      } catch (err) {
+        log.textContent = err.message || "Could not clear the phase deadline";
+      }
+    });
+
+    document.getElementById("auto-advance-done").addEventListener("change", async (event) => {
+      const log = document.getElementById("turn-log");
+      try {
+        const saved = await SH.setAutoAdvance(event.target.checked);
+        log.textContent = event.target.checked
+          ? (saved && saved.advanced
+            ? "Auto-advance is on, and the phase advanced because every counted player is out of actions."
+            : "Auto-advance when all players are done is on.")
+          : "Auto-advance when all players are done is off.";
+        await refreshDashboard();
+      } catch (err) {
+        event.target.checked = !event.target.checked;
+        log.textContent = err.message || "Could not update auto-advance";
+      }
+    });
+
+    setInterval(renderDeadline, 30000);
+
     document.getElementById("btn-set-phase").addEventListener("click", async () => {
       const log = document.getElementById("turn-log");
       const phase = document.getElementById("set-phase").value;
@@ -1155,13 +1366,8 @@
       try {
         await SH.probe();
         await SH.applyNavPermissions();
-        const isAdmin = SH.role === "campaign_admin";
         const join = document.getElementById("join-banner");
         if (join) join.hidden = SH.isLoggedIn();
-        // Hide players card for non-admins
-        document.querySelectorAll('a.card[href="player_admin.html"]').forEach((el) => {
-          el.style.display = isAdmin ? "" : "none";
-        });
         await refreshDashboard();
         await refreshWaitingPanel();
         const footer = document.getElementById("footer-note");

@@ -643,6 +643,7 @@
     } else {
       meta.phase = phases[i + 1];
     }
+    meta.phase_ends_at = null;
     localWrite("meta", meta);
     return { ok: true, meta, to: { turn: meta.turn, phase: meta.phase }, log: ["Local advance"] };
   }
@@ -665,6 +666,44 @@
     if (turn != null) meta.turn = turn;
     localWrite("meta", meta);
     return { ok: true, meta };
+  }
+
+  async function setPhaseDeadline(phaseEndsAt) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/phase-deadline", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ phase_ends_at: phaseEndsAt })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not set the phase deadline");
+      return data;
+    }
+    const meta = localRead("meta");
+    meta.phase_ends_at = phaseEndsAt || null;
+    localWrite("meta", meta);
+    return { ok: true, phase_ends_at: meta.phase_ends_at };
+  }
+
+  async function setAutoAdvance(enabled) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/auto-advance", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not update auto-advance");
+      return data;
+    }
+    const meta = localRead("meta");
+    meta.auto_advance_when_done = !!enabled;
+    localWrite("meta", meta);
+    return { ok: true, auto_advance_when_done: meta.auto_advance_when_done };
   }
 
   async function playerActions() {
@@ -935,6 +974,8 @@
     campaignStatus,
     advancePhase,
     setPhase,
+    setPhaseDeadline,
+    setAutoAdvance,
     actionsStatus,
     playerActions,
     doAction,

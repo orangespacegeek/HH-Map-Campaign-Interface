@@ -33,6 +33,12 @@
  *   GET  /api/feedback                 (campaign_admin)
  *   GET  /api/admin/backup             (campaign_admin) campaign JSON download
  *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET", keep_map?, keep_control? }
+ *   POST /api/campaign/phase-deadline  (campaign_admin) { phase_ends_at } — ISO time, or null to clear
+ *   POST /api/campaign/auto-advance    (campaign_admin) { enabled: boolean }
+ *   A past phase deadline, or every counted player being out of actions during
+ *   Logistics, advances one phase. Checked on startup and about every 30s
+ *   (AUTO_ADVANCE_INTERVAL_MS). phase_ends_at is one instant, cleared after a
+ *   successful advance, so a later weekly schedule can store the next instant.
  *   node server.js reset-campaign [--keep-map] [--keep-control] [--purge-accounts]
  *   --keep-control requires --keep-map.
  *
@@ -2890,11 +2896,17 @@ function advanceCampaign(meta, options = {}) {
   meta.turn = turn;
   meta.phase = phase;
   meta.last_advanced_at = new Date().toISOString();
+  if (meta.phase_ends_at) log.push("Cleared the phase deadline");
+  meta.phase_ends_at = null;
+  meta.auto_advance_blocked = null;
+  if (options.automatic) log.unshift(automaticAdvanceNote(options.reason));
   meta.phase_log = (meta.phase_log || []).slice(-20).concat([
     {
       at: meta.last_advanced_at,
       from: { turn: fromTurn, phase: fromPhase },
       to: { turn, phase },
+      automatic: !!options.automatic,
+      reason: options.automatic ? options.reason || null : null,
       notes: log
     }
   ]);
@@ -2909,6 +2921,11 @@ function advanceCampaign(meta, options = {}) {
   writeCollection("systems", systems);
   writeCollection("forces", forces);
   writeCollection("meta", meta);
+  announcePhaseAdvance(
+    { turn: fromTurn, phase: fromPhase },
+    { turn, phase },
+    options
+  );
 
   return {
     ok: true,
@@ -2918,6 +2935,120 @@ function advanceCampaign(meta, options = {}) {
     to: { turn, phase },
     victory
   };
+}
+
+const AUTO_ADVANCE_INTERVAL_MS = (() => {
+  const raw = Number(process.env.AUTO_ADVANCE_INTERVAL_MS);
+  if (Number.isFinite(raw) && raw >= 200) return Math.min(raw, 60000);
+  return 30000;
+})();
+let advanceLock = false;
+
+function withAdvanceLock(fn) {
+  if (advanceLock) {
+    return { ok: false, code: "advance_in_progress", error: "An advance is already in progress" };
+  }
+  advanceLock = true;
+  try {
+    return fn();
+  } finally {
+    advanceLock = false;
+  }
+}
+
+function automaticAdvanceNote(reason) {
+  if (reason === "deadline") return "Automatic advance: the phase deadline passed";
+  if (reason === "all_actions_done") return "Automatic advance: every counted player is out of actions";
+  return "Automatic advance";
+}
+
+function phaseAdvanceText(from, to, options) {
+  const where =
+    Number(from.turn) === Number(to.turn)
+      ? "from " + from.phase + " to " + to.phase + " (turn " + to.turn + ")"
+      : "from " + from.phase + " (turn " + from.turn + ") to " + to.phase + " (turn " + to.turn + ")";
+  let because = "";
+  if (options.automatic && options.reason === "deadline") because = " because the phase deadline passed";
+  if (options.automatic && options.reason === "all_actions_done") {
+    because = " because every counted player is out of actions";
+  }
+  return "The campaign advanced" + (options.automatic ? " automatically" : "") + " " + where + because + ".";
+}
+
+function announcePhaseAdvance(from, to, options) {
+  const text = phaseAdvanceText(from, to, options || {});
+  const notices = readCollection("players")
+    .filter((player) => player && player.player_id != null)
+    .map((player) => ({
+      player_id: player.player_id,
+      audience: "player",
+      kind: "phase_advanced",
+      text,
+      ref: {
+        type: "campaign",
+        turn: to.turn,
+        phase: to.phase,
+        automatic: !!(options && options.automatic),
+        reason: options && options.automatic ? options.reason || null : null
+      }
+    }));
+  writeNotices(notices);
+}
+
+function autoAdvanceReason(meta, now) {
+  if (!meta || meta.victor) return null;
+  const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
+  if (Number.isFinite(deadlineMs) && deadlineMs <= now) return "deadline";
+  if (meta.auto_advance_when_done === false) return null;
+  const phase = meta.phase || "Logistics";
+  if (phase !== "Logistics") return null;
+  const roster = playerActionRoster();
+  if (roster.ready_to_advance) return "all_actions_done";
+  return null;
+}
+
+function maybeAutoAdvance() {
+  return withAdvanceLock(() => {
+    const meta = readCollection("meta");
+    const fromTurn = Number(meta.turn) || 1;
+    const fromPhase = meta.phase || "Logistics";
+    const reason = autoAdvanceReason(meta, Date.now());
+    if (!reason) {
+      if (meta.auto_advance_blocked) {
+        meta.auto_advance_blocked = null;
+        writeCollection("meta", meta);
+      }
+      return { ok: true, advanced: false };
+    }
+    const again = readCollection("meta");
+    if ((Number(again.turn) || 1) !== fromTurn || (again.phase || "Logistics") !== fromPhase) {
+      return { ok: true, advanced: false, skipped: "stale" };
+    }
+    const result = advanceCampaign(again, { automatic: true, reason, force: false });
+    if (result && result.ok === false) {
+      if (result.code === "unresolved_battles") {
+        const count = (result.battles || []).length;
+        again.auto_advance_blocked = {
+          at: new Date().toISOString(),
+          reason,
+          battles: count,
+          message: "Auto-advance blocked: " + count + " open battles"
+        };
+        writeCollection("meta", again);
+      }
+      return { ok: false, advanced: false, result };
+    }
+    return { ok: true, advanced: true, result };
+  });
+}
+
+function runAutoAdvanceSafe() {
+  try {
+    return maybeAutoAdvance();
+  } catch (err) {
+    console.error("Auto-advance check failed", err);
+    return { ok: false, error: err && err.message };
+  }
 }
 
 async function handleCampaign(req, res, parts, method) {
@@ -2940,7 +3071,55 @@ async function handleCampaign(req, res, parts, method) {
       victor: meta.victor || null,
       victory_reason: meta.victory_reason || null,
       last_advanced_at: meta.last_advanced_at || null,
+      phase_ends_at: meta.phase_ends_at || null,
+      auto_advance_when_done: meta.auto_advance_when_done !== false,
+      auto_advance_blocked: meta.auto_advance_blocked || null,
       phases: PHASES
+    });
+  }
+
+  if (action === "phase-deadline" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    if (!Object.prototype.hasOwnProperty.call(body, "phase_ends_at")) {
+      return send(res, 400, { error: "phase_ends_at is required" });
+    }
+    const parsed = parsePhaseDeadline(body.phase_ends_at);
+    if (!parsed.ok) return send(res, 400, { error: parsed.error });
+    const meta = readCollection("meta");
+    meta.phase_ends_at = parsed.phase_ends_at;
+    writeCollection("meta", meta);
+    const check = runAutoAdvanceSafe();
+    const saved = readCollection("meta");
+    return send(res, 200, {
+      ok: true,
+      phase_ends_at: saved.phase_ends_at || null,
+      phase: saved.phase || null,
+      turn: saved.turn || null,
+      advanced: !!(check && check.advanced),
+      auto_advance_blocked: saved.auto_advance_blocked || null
+    });
+  }
+
+  if (action === "auto-advance" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    if (typeof body.enabled !== "boolean") {
+      return send(res, 400, { error: "enabled must be true or false" });
+    }
+    const meta = readCollection("meta");
+    meta.auto_advance_when_done = body.enabled;
+    writeCollection("meta", meta);
+    const check = body.enabled ? runAutoAdvanceSafe() : { advanced: false };
+    const saved = readCollection("meta");
+    return send(res, 200, {
+      ok: true,
+      auto_advance_when_done: saved.auto_advance_when_done !== false,
+      advanced: !!(check && check.advanced),
+      phase: saved.phase || null,
+      turn: saved.turn || null
     });
   }
 
@@ -2948,20 +3127,27 @@ async function handleCampaign(req, res, parts, method) {
     const gate = requireRole(auth, ["campaign_admin"]);
     if (!gate.ok) return send(res, gate.status, { error: gate.error });
     const body = (await readBody(req)) || {};
-    const meta = readCollection("meta");
-    if (meta.victor && !body.force) {
-      return send(res, 409, {
-        error: "Campaign already has a victor. Pass { force: true } to advance anyway.",
-        victor: meta.victor,
-        victory_reason: meta.victory_reason
-      });
-    }
-    const result = advanceCampaign(meta, { force: !!body.force });
+    const result = withAdvanceLock(() => {
+      const current = readCollection("meta");
+      if (current.victor && !body.force) {
+        return {
+          ok: false,
+          code: "victor",
+          status: 409,
+          error: "Campaign already has a victor. Pass { force: true } to advance anyway.",
+          victor: current.victor,
+          victory_reason: current.victory_reason
+        };
+      }
+      return advanceCampaign(current, { force: !!body.force });
+    });
     if (result && result.ok === false) {
-      return send(res, 409, {
+      return send(res, result.status || 409, {
         error: result.error,
         code: result.code,
-        battles: result.battles
+        battles: result.battles,
+        victor: result.victor,
+        victory_reason: result.victory_reason
       });
     }
     return send(res, 200, result);
@@ -3013,7 +3199,20 @@ async function handleCampaign(req, res, parts, method) {
     return send(res, 200, result);
   }
 
-  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase|reset" });
+  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase|phase-deadline|auto-advance|reset" });
+}
+
+function parsePhaseDeadline(value) {
+  if (value == null || value === "") return { ok: true, phase_ends_at: null };
+  if (typeof value !== "string") return { ok: false, error: "Phase deadline must be a date and time" };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, phase_ends_at: null };
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(trimmed)) {
+    return { ok: false, error: "Phase deadline must be a date and time" };
+  }
+  const ms = Date.parse(trimmed);
+  if (!Number.isFinite(ms)) return { ok: false, error: "Phase deadline must be a date and time" };
+  return { ok: true, phase_ends_at: new Date(ms).toISOString() };
 }
 
 /**
@@ -3157,6 +3356,7 @@ async function handleActions(req, res, parts, method) {
 
     force.dest_sys_id = destId;
     writeCollection("forces", forces);
+    runAutoAdvanceSafe();
     return send(res, 200, {
       ok: true,
       action: "move",
@@ -3230,6 +3430,7 @@ async function handleActions(req, res, parts, method) {
     force.strength = strength + 1;
     writeCollection("forces", forces);
     writeCollection("meta", meta);
+    runAutoAdvanceSafe();
     return send(res, 200, {
       ok: true,
       action: "reinforce",
@@ -3278,6 +3479,7 @@ async function handleActions(req, res, parts, method) {
     systems[idx] = { ...sys, sys_durability: dur + 1 };
     writeCollection("systems", systems);
     writeCollection("meta", meta);
+    runAutoAdvanceSafe();
     return send(res, 200, {
       ok: true,
       action: "fortify",
@@ -3349,6 +3551,7 @@ async function handleActions(req, res, parts, method) {
     forces.push(newForce);
     writeCollection("forces", forces);
     writeCollection("meta", meta);
+    runAutoAdvanceSafe();
     return send(res, 201, {
       ok: true,
       action: "generate",
@@ -3524,6 +3727,9 @@ function resetCampaign(options = {}) {
     loyal_score: 0,
     traitor_score: 0,
     last_advanced_at: now,
+    phase_ends_at: null,
+    auto_advance_when_done: true,
+    auto_advance_blocked: null,
     player_actions: {},
     phase_log: [
       {
@@ -4024,6 +4230,10 @@ const server = http.createServer(async (req, res) => {
 
 function startServer() {
   bootstrapAdmin();
+  // Catch a deadline that passed while this process was down, then keep checking.
+  // reset-campaign does not start this timer, so a CLI reset cannot advance first.
+  runAutoAdvanceSafe();
+  setInterval(runAutoAdvanceSafe, AUTO_ADVANCE_INTERVAL_MS);
   server.listen(PORT, HOST, () => {
     console.log(`Sunset Heresy server http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
     console.log(`Data directory: ${DATA}`);
