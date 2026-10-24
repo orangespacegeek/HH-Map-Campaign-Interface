@@ -356,8 +356,8 @@
       return extra;
     }
 
-    if (allegiance === "Blackshield") {
-      box.appendChild(actionNote("Blackshield players do not take allegiance actions on the map."));
+    if (allegiance !== "Loyalist" && allegiance !== "Traitor" && !isAdmin) {
+      box.appendChild(actionNote("The campaign admin still needs to assign your side."));
       return;
     }
 

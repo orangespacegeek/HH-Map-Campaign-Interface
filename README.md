@@ -67,7 +67,7 @@ The campaign admin only issues a code. The player creates their own login and pl
 1. Sign in as the campaign admin and open **Players**.
 2. Under **Player invites**, optionally add a note, an expiry in days, and a use limit (default is one use), then choose **Generate code**.
 3. Copy the code and send it to the player with the site URL.
-4. The player opens **Log in → Sign up** (`login.html?tab=signup`), enters the code, and fills in their own username, password, player name, display name, contact, and allegiance.
+4. The player opens **Log in → Sign up** (`login.html?tab=signup`), enters the code, and fills in their own username, password, player name, display name, contact, and allegiance (Loyalist or Traitor). Blackshields is a force type a player can field on that side, not a third allegiance.
 5. The server checks the code, rejects it if it is missing, used up, revoked, or expired, and stores the password with the same scrypt hash as other accounts. The username they choose is how they sign in after the code is consumed.
 6. Sign-up signs them in. Later they use **Sign in** with that username and password.
 

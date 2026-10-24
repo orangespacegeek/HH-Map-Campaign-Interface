@@ -115,6 +115,32 @@
     .badge.applied { background: #14532d; color: var(--success); }
     .badge.disputed { background: #7f1d1d; color: #fecaca; }
     .badge.void { background: #3f3f46; color: #d4d4d8; }
+    .badge.unable_to_schedule { background: #1e293b; color: #cbd5e1; }
+    .badge.no_show, .badge.no_report { background: #7f1d1d; color: #fecaca; }
+    .badge.awaiting-admin { background: #422006; color: var(--warn); }
+
+    .outcome { border: 0; margin: 0 0 0.85rem; padding: 0; }
+    .outcome legend {
+      font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.15rem;
+    }
+    .outcome-choice {
+      display: flex; gap: 0.7rem; align-items: flex-start;
+      margin-top: 0.45rem; padding: 0.75rem 0.8rem; min-height: 44px;
+      border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); cursor: pointer;
+    }
+    .outcome-choice input { width: 1.15rem; height: 1.15rem; margin-top: 0.15rem; flex: 0 0 auto; accent-color: var(--accent); }
+    .outcome-choice strong { display: block; font-size: 0.95rem; }
+    .outcome-choice .def { display: block; margin-top: 0.25rem; color: var(--muted); font-size: 0.78rem; line-height: 1.4; font-weight: 400; }
+    .outcome-choice:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+    .outcome-choice:has(input:checked) { border-color: var(--accent); }
+    .outcome-choice[hidden] { display: none; }
+    .outcome-note {
+      margin: 0.55rem 0 0; padding: 0.65rem 0.75rem; border-radius: 8px;
+      background: rgba(240, 192, 64, 0.12); border: 1px solid var(--accent);
+      font-size: 0.85rem; font-weight: 700; line-height: 1.35;
+    }
+    .outcome-note[hidden], #played-fields[hidden], #no-show-fields[hidden] { display: none; }
+    .outcome-link { display: inline-flex; align-items: center; min-height: 44px; color: var(--accent); font-weight: 600; font-size: 0.88rem; }
 
     .overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 60; opacity: 0; pointer-events: none; transition: opacity 0.2s; }
     .overlay.open { opacity: 1; pointer-events: auto; }
@@ -248,25 +274,52 @@
           </div>
         </div>
         <p class="hint" id="side-hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4;margin:-0.3rem 0 0.8rem">Forces are the ones in the chosen system. Your side lists your own forces. The other side lists opposing players in that system.</p>
-        <div class="form-row">
-          <div class="form-group">
-            <label for="f-att-vp">Attacker VP</label>
-            <input type="number" id="f-att-vp" min="0" value="0" />
+        <fieldset class="outcome">
+          <legend>Outcome</legend>
+          <label class="outcome-choice">
+            <input type="radio" name="outcome" value="played" checked />
+            <span><strong>Played</strong><span class="def">The game was played. Record who won and the victory points.</span></span>
+          </label>
+          <label class="outcome-choice">
+            <input type="radio" name="outcome" value="unable_to_schedule" />
+            <span><strong>Unable to schedule</strong><span class="def">The players are unable to mutually find the time to play this game. Neither player is penalized or gains a boon.</span></span>
+          </label>
+          <label class="outcome-choice">
+            <input type="radio" name="outcome" value="no_show" />
+            <span><strong>No show</strong><span class="def">One of the players did not respond to their opponent's attempts to schedule the game, or did not show up to, or attempt to reschedule, their scheduled game. The offending player's force loses the battle. The reporting player gains an additional logistics point next turn. This battle must be confirmed by the campaign admin.</span></span>
+          </label>
+          <label class="outcome-choice" id="outcome-no-report" hidden>
+            <input type="radio" name="outcome" value="no_report" />
+            <span><strong>No report</strong><span class="def">No report is made for the battle. Both players' forces suffer a loss. This must be confirmed by the campaign admin.</span></span>
+          </label>
+          <p class="outcome-note" id="no-show-admin" hidden>Requires campaign admin confirmation</p>
+          <a class="outcome-link" href="rules.html#battle-outcomes">Campaign rules</a>
+        </fieldset>
+        <div id="played-fields">
+          <div class="form-row">
+            <div class="form-group">
+              <label for="f-att-vp">Attacker VP</label>
+              <input type="number" id="f-att-vp" min="0" value="0" />
+            </div>
+            <div class="form-group">
+              <label for="f-def-vp">Defender VP</label>
+              <input type="number" id="f-def-vp" min="0" value="0" />
+            </div>
           </div>
           <div class="form-group">
-            <label for="f-def-vp">Defender VP</label>
-            <input type="number" id="f-def-vp" min="0" value="0" />
+            <label for="f-result">Result *</label>
+            <select id="f-result" required>
+              <option value="attacker_win">Attacker win</option>
+              <option value="defender_win">Defender win</option>
+              <option value="draw">Draw</option>
+              <option value="conceded">Conceded</option>
+              <option value="in_progress">In progress</option>
+            </select>
           </div>
         </div>
-        <div class="form-group">
-          <label for="f-result">Result *</label>
-          <select id="f-result" required>
-            <option value="attacker_win">Attacker win</option>
-            <option value="defender_win">Defender win</option>
-            <option value="draw">Draw</option>
-            <option value="conceded">Conceded</option>
-            <option value="in_progress">In progress</option>
-          </select>
+        <div class="form-group" id="no-show-fields" hidden>
+          <label for="f-no-show">Who no-showed</label>
+          <select id="f-no-show"></select>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -282,7 +335,7 @@
           <label for="f-notes">Notes</label>
           <textarea id="f-notes" rows="3"></textarea>
         </div>
-        <p class="hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4">A player can only log a battle they are in, with their own force on their side. The result is applied when the opponent confirms it. The campaign admin's save applies immediately. A loss (and both sides of a draw) drops Strength by 1. A win adds 1 to that system's loyal or traitor score. Each battle also lowers durability, then power once durability is 0.</p>
+        <p class="hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4">A player can only log a battle they are in, with their own force on their side. A played result or unable to schedule is applied when the opponent confirms it. A no show waits for the campaign admin. Players cannot select No report. The campaign admin can mark an open battle No report, and a Battles deadline flags an unreported battle the same way. It stays pending until the admin confirms it. Then both forces suffer a loss, and neither side gains victory points or control. The campaign admin's save applies other results immediately. A loss (and both sides of a draw) drops Strength by 1. A win adds 1 to that system's loyal or traitor score. A played battle also lowers durability, then power once durability is 0. Unable to schedule changes nothing.</p>
       </form>
     </div>
     <div class="drawer-footer">
@@ -358,7 +411,16 @@
       clearTimeout(showToast._t); showToast._t = setTimeout(() => toast.classList.remove("show"), 2200);
     }
     function resultLabel(r) {
-      return ({ attacker_win: "Attacker win", defender_win: "Defender win", draw: "Draw", conceded: "Conceded", in_progress: "In progress" })[r] || r;
+      return ({
+        attacker_win: "Attacker win",
+        defender_win: "Defender win",
+        draw: "Draw",
+        conceded: "Conceded",
+        in_progress: "In progress",
+        unable_to_schedule: "Unable to schedule",
+        no_show: "No show",
+        no_report: "No report"
+      })[r] || r;
     }
     function myPlayerId() {
       return SH.user && SH.user.player_id != null ? Number(SH.user.player_id) : null;
@@ -372,6 +434,7 @@
     }
     function canConfirmGame(g) {
       if (!g || g.result_state !== "pending" || !isDecisiveClient(g.result)) return false;
+      if (g.result === "no_show" || g.result === "no_report") return SH.role === "campaign_admin";
       if (SH.role === "campaign_admin") return true;
       const pid = myPlayerId();
       return canEditGame(g) && Number(g.proposed_by) !== pid;
@@ -381,7 +444,11 @@
       return canEditGame(g) && g.result_state !== "applied";
     }
     function isDecisiveClient(result) {
-      return result === "attacker_win" || result === "defender_win" || result === "draw" || result === "conceded";
+      return result === "attacker_win" || result === "defender_win" || result === "draw" || result === "conceded" || result === "unable_to_schedule" || result === "no_show" || result === "no_report";
+    }
+    function outcomeOf(result) {
+      if (result === "unable_to_schedule" || result === "no_show" || result === "no_report") return result;
+      return "played";
     }
     function whenLabel(iso) {
       if (!iso) return "";
@@ -452,15 +519,20 @@
             <span class="battle-no">Battle #${esc(g.game_id)}</span>
             <span class="title">${esc(g.mission || "Battle")} · ${esc(systemName(g.sys_id))}</span>
             <span class="badge ${g.result}">${resultLabel(g.result)}</span>
-            ${g.result_state === "pending" ? `<span class="badge pending">Awaiting confirm</span>` : ""}
+            ${g.result_state === "pending" && g.result === "no_report" ? `<span class="badge awaiting-admin">No report, pending admin confirmation</span>` : ""}
+            ${g.result_state === "pending" && g.result === "no_show" ? `<span class="badge awaiting-admin">Awaiting admin</span>` : ""}
+            ${g.result_state === "pending" && g.result !== "no_show" && g.result !== "no_report" ? `<span class="badge pending">Awaiting confirm</span>` : ""}
             ${g.result_state === "disputed" ? `<span class="badge disputed">Disputed</span>` : ""}
             ${g.result_state === "applied" ? `<span class="badge applied">Applied</span>` : ""}
             ${g.result_state === "void" ? `<span class="badge void">Void</span>` : ""}
-            <span class="score">${g.attacker_vp ?? "—"} – ${g.defender_vp ?? "—"}</span>
+            ${g.result === "unable_to_schedule" || g.result === "no_show" || g.result === "no_report" ? "" : `<span class="score">${g.attacker_vp ?? "—"} – ${g.defender_vp ?? "—"}</span>`}
           </div>
           <div class="meta">
             Turn ${g.turn} · ${g.played_on || "undated"} · ${g.game_system || "HH"} ${g.points ? g.points + " pts" : ""}
             · ${esc(playerName(g.attacker_id))}${g.attacker_force_id ? " (" + esc(forceName(g.attacker_force_id)) + ")" : ""} vs ${esc(playerName(g.defender_id))}${g.defender_force_id ? " (" + esc(forceName(g.defender_force_id)) + ")" : ""}
+            ${g.result === "no_show" && g.no_show_id ? "<br>No show: " + esc(playerName(g.no_show_id)) : ""}
+            ${g.result === "no_report" ? "<br>Both forces suffer a loss. No victory points or control change" : ""}
+            ${g.result === "unable_to_schedule" ? "<br>No victory points, strength, or control change" : ""}
             ${g.attacker_list || g.defender_list ? "<br>" + esc(g.attacker_list || "—") + " vs " + esc(g.defender_list || "—") : ""}
           </div>
           ${g.notes ? `<div class="notes">${esc(g.notes)}</div>` : ""}
@@ -550,6 +622,54 @@
         label: f.force_name + " · Str " + (f.strength ?? "—")
       })), pref.defender_force_id != null ? pref.defender_force_id : document.getElementById("f-def-force").value);
       fillingSides = false;
+      fillNoShow(pref.no_show_id);
+    }
+    function selectedOutcome() {
+      const picked = document.querySelector('input[name="outcome"]:checked');
+      return picked ? picked.value : "played";
+    }
+    function fillNoShow(selected) {
+      const sel = document.getElementById("f-no-show");
+      const attId = document.getElementById("f-att").value;
+      const defId = document.getElementById("f-def").value;
+      const me = myPlayerId();
+      const rows = [];
+      if (attId) rows.push({ value: attId, label: playerName(attId) + " (attacker)" });
+      if (defId) rows.push({ value: defId, label: playerName(defId) + " (defender)" });
+      const choices = SH.role === "player" && me != null
+        ? rows.filter((row) => Number(row.value) !== me)
+        : rows;
+      setOptions(sel, choices, selected != null ? selected : sel.value);
+    }
+    function syncNoReportChoice(g) {
+      const label = document.getElementById("outcome-no-report");
+      const input = label.querySelector("input");
+      const show = SH.role === "campaign_admin" || (g && g.result === "no_report");
+      label.hidden = !show;
+      input.disabled = SH.role !== "campaign_admin";
+      const locked = SH.role !== "campaign_admin" && g && g.result === "no_report" && g.result_state === "pending";
+      document.querySelectorAll('input[name="outcome"]').forEach((choice) => {
+        if (choice.value !== "no_report") choice.disabled = !!locked;
+      });
+      const saveBtn = document.getElementById("btn-save");
+      if (saveBtn) saveBtn.disabled = !!locked;
+    }
+    function syncOutcome() {
+      const outcome = selectedOutcome();
+      document.getElementById("played-fields").hidden = outcome !== "played";
+      document.getElementById("no-show-fields").hidden = outcome !== "no_show";
+      const note = document.getElementById("no-show-admin");
+      if (outcome === "no_show") {
+        note.hidden = false;
+        note.textContent = "Requires campaign admin confirmation";
+      } else if (outcome === "no_report") {
+        note.hidden = false;
+        note.textContent = "No report, pending admin confirmation";
+      } else {
+        note.hidden = true;
+      }
+      document.getElementById("f-result").required = outcome === "played";
+      if (outcome === "no_show") fillNoShow();
     }
 
     function openDrawer(g) {
@@ -573,9 +693,13 @@
       document.getElementById("f-gsys").value = g ? (g.game_system || "HH") : "HH";
       document.getElementById("f-mission").value = g ? (g.mission || "") : "";
       document.getElementById("f-points").value = g ? (g.points || "") : 3000;
-      document.getElementById("f-att-vp").value = g ? (g.attacker_vp ?? 0) : 0;
-      document.getElementById("f-def-vp").value = g ? (g.defender_vp ?? 0) : 0;
-      document.getElementById("f-result").value = g ? g.result : "attacker_win";
+      document.getElementById("f-att-vp").value = g && g.attacker_vp != null ? g.attacker_vp : 0;
+      document.getElementById("f-def-vp").value = g && g.defender_vp != null ? g.defender_vp : 0;
+      const outcome = g ? outcomeOf(g.result) : "played";
+      document.querySelectorAll('input[name="outcome"]').forEach((input) => {
+        input.checked = input.value === outcome;
+      });
+      document.getElementById("f-result").value = outcome === "played" && g ? g.result : "attacker_win";
       document.getElementById("f-att-list").value = g ? (g.attacker_list || "") : "";
       document.getElementById("f-def-list").value = g ? (g.defender_list || "") : "";
       document.getElementById("f-notes").value = g ? (g.notes || "") : "";
@@ -584,7 +708,10 @@
         defender_id: g.defender_id,
         attacker_force_id: g.attacker_force_id,
         defender_force_id: g.defender_force_id
-      } : { attacker_id: myPlayerId() });
+      } : { attacker_id: myPlayerId(), no_show_id: g && g.no_show_id });
+      syncNoReportChoice(g);
+      syncOutcome();
+      if (g && g.no_show_id) fillNoShow(g.no_show_id);
       document.getElementById("btn-delete").hidden = !g || !canDeleteGame(g);
       overlay.classList.add("open");
       drawer.classList.add("open");
@@ -599,7 +726,8 @@
     async function save() {
       if (!document.getElementById("form").reportValidity()) return;
       const idVal = document.getElementById("f-id").value;
-      const result = document.getElementById("f-result").value;
+      const outcome = selectedOutcome();
+      let result = document.getElementById("f-result").value;
       const attId = Number(document.getElementById("f-att").value);
       const defId = Number(document.getElementById("f-def").value);
       if (!attId || !defId) {
@@ -607,13 +735,33 @@
         return;
       }
       let winner = null;
-      if (result === "attacker_win") winner = attId;
+      let noShowId = null;
+      let attackerVp = Number(document.getElementById("f-att-vp").value);
+      let defenderVp = Number(document.getElementById("f-def-vp").value);
+      if (outcome === "unable_to_schedule") {
+        result = "unable_to_schedule";
+        attackerVp = null;
+        defenderVp = null;
+      } else if (outcome === "no_report") {
+        result = "no_report";
+        attackerVp = null;
+        defenderVp = null;
+        winner = null;
+      } else if (outcome === "no_show") {
+        result = "no_show";
+        noShowId = Number(document.getElementById("f-no-show").value);
+        if (!noShowId) {
+          showToast("Say which player did not show up");
+          return;
+        }
+        winner = noShowId === attId ? defId : attId;
+        attackerVp = 0;
+        defenderVp = 0;
+      } else if (result === "attacker_win") winner = attId;
       else if (result === "defender_win") winner = defId;
       else if (result === "conceded") {
-        const av = Number(document.getElementById("f-att-vp").value);
-        const dv = Number(document.getElementById("f-def-vp").value);
-        if (av > dv) winner = attId;
-        else if (dv > av) winner = defId;
+        if (attackerVp > defenderVp) winner = attId;
+        else if (defenderVp > attackerVp) winner = defId;
       }
 
       const payload = {
@@ -628,10 +776,11 @@
         defender_id: defId,
         attacker_force_id: document.getElementById("f-att-force").value ? Number(document.getElementById("f-att-force").value) : null,
         defender_force_id: document.getElementById("f-def-force").value ? Number(document.getElementById("f-def-force").value) : null,
-        attacker_vp: Number(document.getElementById("f-att-vp").value),
-        defender_vp: Number(document.getElementById("f-def-vp").value),
+        attacker_vp: attackerVp,
+        defender_vp: defenderVp,
         result,
         winner_id: winner,
+        no_show_id: noShowId,
         attacker_list: document.getElementById("f-att-list").value.trim() || null,
         defender_list: document.getElementById("f-def-list").value.trim() || null,
         notes: document.getElementById("f-notes").value.trim() || null
@@ -640,7 +789,9 @@
         const saved = await SH.save("games", payload);
         await reload();
         closeDrawer();
-        if (saved && saved.result_state === "pending") showToast("Saved. Waiting for the opponent to confirm.");
+        if (saved && saved.result === "no_report" && saved.result_state === "pending") showToast("Saved. No report, pending admin confirmation.");
+        else if (saved && saved.result === "no_show" && saved.result_state === "pending") showToast("Saved. Waiting for the campaign admin.");
+        else if (saved && saved.result_state === "pending") showToast("Saved. Waiting for the opponent to confirm.");
         else if (saved && saved.result_state === "applied") showToast("Battle applied");
         else showToast(idVal ? "Battle updated" : "Battle logged");
       } catch (err) {
@@ -663,6 +814,9 @@
     document.getElementById("f-sys").addEventListener("change", () => refreshSides());
     document.getElementById("f-att").addEventListener("change", () => refreshSides());
     document.getElementById("f-def").addEventListener("change", () => refreshSides());
+    document.querySelectorAll('input[name="outcome"]').forEach((input) => {
+      input.addEventListener("change", syncOutcome);
+    });
     document.getElementById("btn-add").addEventListener("click", () => openDrawer(null));
     document.getElementById("btn-close").addEventListener("click", closeDrawer);
     overlay.addEventListener("click", closeDrawer);
