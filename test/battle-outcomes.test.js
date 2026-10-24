@@ -173,7 +173,9 @@ test("unable to schedule closes the battle with no campaign effects", async () =
     assert.equal(confirmed.json.result, "unable_to_schedule");
     assert.equal(confirmed.json.resolution.system, null);
     assert.deepEqual(confirmed.json.resolution.forces, []);
-    assert.deepEqual(await snapshot(ctx, admin, forces), before);
+    const closed = await snapshot(ctx, admin, forces);
+    assert.equal(closed.durability, before.durability);
+    assert.deepEqual(closed, before);
 
     for (const player of [loyal, traitor]) {
       const inbox = await api(ctx, player.token, "GET", "/api/inbox");
@@ -274,6 +276,7 @@ test("a no show waits for the admin, rejects cleanly, and grants one action next
     assert.equal(after.loyalStrength, before.loyalStrength);
     assert.equal(after.traitorStrength, before.traitorStrength - 1);
     assert.equal(after.durability, before.durability - 1);
+    assert.equal(confirmed.json.resolution.system.durability_delta, -1);
     assert.equal(after.loyalScore, before.loyalScore + 1);
     assert.equal(after.traitorScore, before.traitorScore);
     assert.equal(after.controller, "Loyalist");
@@ -356,7 +359,10 @@ test("the rules and report form name both outcomes", () => {
   assert.match(rulesHtml, /No Report:<\/strong> no report is made for the battle\. Both players' forces suffer a loss\. This must be confirmed by the campaign admin\./);
   assert.match(games, /value="no_report"/);
   assert.match(games, /No report, pending admin confirmation/);
-  assert.match(games, /SH\.role !== "campaign_admin"/);
+  assert.match(games, /label\.hidden = SH\.role !== "campaign_admin"/);
+  assert.doesNotMatch(games, /campaign_admin" \|\| \(g && g\.result === "no_report"\)/);
+  assert.match(rulesMd, /Unable to schedule and No report do not change durability\. A confirmed No show lowers durability the same way as any other win\. \(added as part of web app build\)/);
+  assert.match(rulesHtml, /Unable to schedule and No report do not change durability\. A No show lowers durability the same way as a win\./);
 });
 
 test("a no report is admin-only, both forces lose, and rejection reverts", async () => {
@@ -381,6 +387,14 @@ test("a no report is admin-only, both forces lose, and rejection reverts", async
     assert.equal(opened.status, 201, JSON.stringify(opened.json));
     assert.equal(opened.json.result_state, "open");
 
+    for (const player of [loyal, traitor]) {
+      const edit = await api(ctx, player.token, "PUT", "/api/games/" + opened.json.game_id, battleBody(loyal, traitor, forces, {
+        result: "no_report"
+      }));
+      assert.equal(edit.status, 403, JSON.stringify(edit.json));
+      assert.match(edit.json.error, /campaign admin/);
+    }
+
     const marked = await api(ctx, admin, "PUT", "/api/games/" + opened.json.game_id, battleBody(loyal, traitor, forces, {
       result: "no_report"
     }));
@@ -399,6 +413,10 @@ test("a no report is admin-only, both forces lose, and rejection reverts", async
     const opponent = await api(ctx, traitor.token, "POST", "/api/games/" + opened.json.game_id + "/confirm", {});
     assert.equal(opponent.status, 403, JSON.stringify(opponent.json));
     assert.match(opponent.json.error, /campaign admin/);
+    for (const player of [loyal, traitor]) {
+      const playerReject = await api(ctx, player.token, "POST", "/api/games/" + opened.json.game_id + "/reject", {});
+      assert.equal(playerReject.status, 403, JSON.stringify(playerReject.json));
+    }
     const dispute = await api(ctx, traitor.token, "POST", "/api/games/" + opened.json.game_id + "/dispute", {});
     assert.equal(dispute.status, 409, JSON.stringify(dispute.json));
     const playerEdit = await api(ctx, loyal.token, "PUT", "/api/games/" + opened.json.game_id, battleBody(loyal, traitor, forces, {
@@ -462,7 +480,9 @@ test("a no report is admin-only, both forces lose, and rejection reverts", async
     const after = await snapshot(ctx, admin, forces);
     assert.equal(after.loyalStrength, before.loyalStrength - 1);
     assert.equal(after.traitorStrength, before.traitorStrength - 1);
-    assert.equal(after.durability, before.durability - 1);
+    assert.equal(after.durability, before.durability);
+    assert.equal(confirmed.json.resolution.system.durability_delta, 0);
+    assert.equal(confirmed.json.resolution.system.power_delta, 0);
     assert.equal(after.loyalScore, before.loyalScore);
     assert.equal(after.traitorScore, before.traitorScore);
     assert.equal(after.controller, before.controller);

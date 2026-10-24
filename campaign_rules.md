@@ -51,6 +51,8 @@ System control is determined by sys_loyal minus sys_traitor. A positive result m
 
 Each System starts with an admin-assigned durability level (sys_durability) (default is 5, maximum of 10). Each battle causes the sys_durability to decrease by 1.
 
+Unable to schedule and No report do not change durability. A confirmed No show lowers durability the same way as any other win. (added as part of web app build)
+
 Once System Durability reaches 0, each successive battle reduces the system's Power Level by 1.
 
 *Campaign Turn Scoring*

@@ -1794,16 +1794,20 @@ function applyResolution(game, state, games) {
     prev_controller: sys ? sys.sys_controller || null : null
   };
   if (sys) {
-    const dur = systemDurability(sys);
-    if (dur > 0) {
-      systemEffect.durability_delta = -1;
-      sys.sys_durability = dur - 1;
-    } else {
-      sys.sys_durability = 0;
-      const power = Number(sys.sys_power) || 0;
-      if (power > 0) {
-        systemEffect.power_delta = -1;
-        sys.sys_power = power - 1;
+    // No report punishes the forces only. Durability and power stay put,
+    // and there is no winning side to move the system score.
+    if (game.result !== "no_report") {
+      const dur = systemDurability(sys);
+      if (dur > 0) {
+        systemEffect.durability_delta = -1;
+        sys.sys_durability = dur - 1;
+      } else {
+        sys.sys_durability = 0;
+        const power = Number(sys.sys_power) || 0;
+        if (power > 0) {
+          systemEffect.power_delta = -1;
+          sys.sys_power = power - 1;
+        }
       }
     }
     const alleg = winnerAllegiance(game, state);

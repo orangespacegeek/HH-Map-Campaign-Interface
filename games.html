@@ -335,7 +335,7 @@
           <label for="f-notes">Notes</label>
           <textarea id="f-notes" rows="3"></textarea>
         </div>
-        <p class="hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4">A player can only log a battle they are in, with their own force on their side. A played result or unable to schedule is applied when the opponent confirms it. A no show waits for the campaign admin. Players cannot select No report. The campaign admin can mark an open battle No report, and a Battles deadline flags an unreported battle the same way. It stays pending until the admin confirms it. Then both forces suffer a loss, and neither side gains victory points or control. The campaign admin's save applies other results immediately. A loss (and both sides of a draw) drops Strength by 1. A win adds 1 to that system's loyal or traitor score. A played battle also lowers durability, then power once durability is 0. Unable to schedule changes nothing.</p>
+        <p class="hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4">A player can only log a battle they are in, with their own force on their side. A played result or unable to schedule is applied when the opponent confirms it. A no show waits for the campaign admin. No report is not a player option. The campaign admin can mark an open battle No report, and a Battles deadline flags an unreported battle the same way. It stays pending until the admin confirms it. Then both forces lose 1 Strength, with no victory points, control change, or durability change. The campaign admin's save applies other results immediately. A loss (and both sides of a draw) drops Strength by 1. A win adds 1 to that system's loyal or traitor score. A played battle or a no show also lowers durability, then power once durability is 0. Unable to schedule changes nothing.</p>
       </form>
     </div>
     <div class="drawer-footer">
@@ -531,7 +531,7 @@
             Turn ${g.turn} · ${g.played_on || "undated"} · ${g.game_system || "HH"} ${g.points ? g.points + " pts" : ""}
             · ${esc(playerName(g.attacker_id))}${g.attacker_force_id ? " (" + esc(forceName(g.attacker_force_id)) + ")" : ""} vs ${esc(playerName(g.defender_id))}${g.defender_force_id ? " (" + esc(forceName(g.defender_force_id)) + ")" : ""}
             ${g.result === "no_show" && g.no_show_id ? "<br>No show: " + esc(playerName(g.no_show_id)) : ""}
-            ${g.result === "no_report" ? "<br>Both forces suffer a loss. No victory points or control change" : ""}
+            ${g.result === "no_report" ? "<br>Both forces suffer a loss. No victory points, control change, or durability change" : ""}
             ${g.result === "unable_to_schedule" ? "<br>No victory points, strength, or control change" : ""}
             ${g.attacker_list || g.defender_list ? "<br>" + esc(g.attacker_list || "—") + " vs " + esc(g.defender_list || "—") : ""}
           </div>
@@ -644,8 +644,7 @@
     function syncNoReportChoice(g) {
       const label = document.getElementById("outcome-no-report");
       const input = label.querySelector("input");
-      const show = SH.role === "campaign_admin" || (g && g.result === "no_report");
-      label.hidden = !show;
+      label.hidden = SH.role !== "campaign_admin";
       input.disabled = SH.role !== "campaign_admin";
       const locked = SH.role !== "campaign_admin" && g && g.result === "no_report" && g.result_state === "pending";
       document.querySelectorAll('input[name="outcome"]').forEach((choice) => {
