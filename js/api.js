@@ -481,6 +481,10 @@
     return postGameAction(id, "void");
   }
 
+  async function rejectGame(id) {
+    return postGameAction(id, "reject");
+  }
+
   async function postGameAction(id, action, body) {
     await probe();
     if (mode !== "server") throw new Error("This needs the live server");
@@ -964,6 +968,7 @@
     confirmGame,
     disputeGame,
     voidGame,
+    rejectGame,
     inbox,
     markInboxRead,
     refreshWaitingBadge,

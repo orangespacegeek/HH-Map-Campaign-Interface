@@ -1422,7 +1422,15 @@ function applyPendingMoves(forces) {
   });
 }
 
-const DECISIVE_RESULTS = ["attacker_win", "defender_win", "draw", "conceded"];
+const DECISIVE_RESULTS = [
+  "attacker_win",
+  "defender_win",
+  "draw",
+  "conceded",
+  "unable_to_schedule",
+  "no_show"
+];
+const GAME_RESULTS = DECISIVE_RESULTS.concat(["in_progress"]);
 
 function isDecisive(result) {
   return DECISIVE_RESULTS.includes(result);
@@ -1461,6 +1469,7 @@ function sanitizeGameBody(body) {
   delete body.dispute_note;
   delete body.applied_at;
   delete body.assigned;
+  delete body.action_bonus;
 }
 
 function parsePositiveInteger(value) {
@@ -1507,15 +1516,29 @@ function victoryPointError(body) {
 
 function normalizeGameResult(body) {
   if (!body.result) body.result = "in_progress";
-  if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
-  else if (body.result === "defender_win") body.winner_id = Number(body.defender_id);
-  else if (body.result === "draw" || body.result === "in_progress") body.winner_id = null;
-  else if (body.result === "conceded" && body.winner_id != null && body.winner_id !== "") {
-    body.winner_id = Number(body.winner_id);
-  }
-  ["attacker_id", "defender_id", "attacker_force_id", "defender_force_id", "sys_id", "turn"].forEach((key) => {
+  ["attacker_id", "defender_id", "attacker_force_id", "defender_force_id", "sys_id", "turn", "no_show_id"].forEach((key) => {
     if (body[key] != null && body[key] !== "") body[key] = Number(body[key]);
   });
+  if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
+  else if (body.result === "defender_win") body.winner_id = Number(body.defender_id);
+  else if (body.result === "draw" || body.result === "in_progress" || body.result === "unable_to_schedule") {
+    body.winner_id = null;
+  } else if (body.result === "conceded" && body.winner_id != null && body.winner_id !== "") {
+    body.winner_id = Number(body.winner_id);
+  } else if (body.result === "no_show") {
+    const offender = Number(body.no_show_id);
+    if (offender && offender === Number(body.attacker_id)) body.winner_id = Number(body.defender_id);
+    else if (offender && offender === Number(body.defender_id)) body.winner_id = Number(body.attacker_id);
+    else body.winner_id = null;
+    if (body.attacker_vp == null) body.attacker_vp = 0;
+    if (body.defender_vp == null) body.defender_vp = 0;
+  }
+  if (body.result === "unable_to_schedule") {
+    body.attacker_vp = null;
+    body.defender_vp = null;
+    body.no_show_id = null;
+  }
+  if (body.result !== "no_show") body.no_show_id = null;
 }
 
 function validateGameWrite(body, auth, existing) {
@@ -1537,8 +1560,26 @@ function validateGameWrite(body, auth, existing) {
   if (!attackerId || !defenderId) return { status: 400, error: "attacker_id and defender_id are required" };
   if (attackerId === defenderId) return { status: 400, error: "Attacker and defender must be different players" };
   if (!Number(body.sys_id)) return { status: 400, error: "sys_id is required" };
-  if (!["attacker_win", "defender_win", "draw", "conceded", "in_progress"].includes(body.result)) {
+  if (!GAME_RESULTS.includes(body.result)) {
     return { status: 400, error: "result is not valid" };
+  }
+  if (body.result === "no_show") {
+    const offender = Number(body.no_show_id);
+    if (offender !== attackerId && offender !== defenderId) {
+      return { status: 400, error: "Say which player did not show up" };
+    }
+    if (!isAdmin && offender === Number(auth.account.player_id)) {
+      return { status: 400, error: "You can only report the other player as a no show" };
+    }
+  }
+  if (
+    !isAdmin &&
+    existing &&
+    existing.result === "no_show" &&
+    existing.result_state === "pending" &&
+    Number(existing.proposed_by) !== Number(auth.account.player_id)
+  ) {
+    return { status: 403, error: "A no show is waiting for the campaign admin" };
   }
   if (body.result === "conceded") {
     const winner = Number(body.winner_id);
@@ -1621,6 +1662,7 @@ function sameProposal(previous, game) {
   return (
     previous.result === game.result &&
     String(previous.winner_id ?? "") === String(game.winner_id ?? "") &&
+    String(previous.no_show_id ?? "") === String(game.no_show_id ?? "") &&
     Number(previous.attacker_force_id) === Number(game.attacker_force_id) &&
     Number(previous.defender_force_id) === Number(game.defender_force_id) &&
     Number(previous.sys_id) === Number(game.sys_id)
@@ -1672,7 +1714,7 @@ function winnerAllegiance(game, state) {
   } else if (game.result === "defender_win") {
     winnerPlayerId = game.defender_id;
     winnerForceId = game.defender_force_id;
-  } else if (game.result === "conceded") {
+  } else if (game.result === "conceded" || game.result === "no_show") {
     winnerPlayerId = game.winner_id;
     if (Number(winnerPlayerId) === Number(game.attacker_id)) winnerForceId = game.attacker_force_id;
     else if (Number(winnerPlayerId) === Number(game.defender_id)) winnerForceId = game.defender_force_id;
@@ -1690,7 +1732,7 @@ function loserForceIds(game) {
   }
   if (game.result === "attacker_win") return [game.defender_force_id].filter((id) => id != null && id !== "");
   if (game.result === "defender_win") return [game.attacker_force_id].filter((id) => id != null && id !== "");
-  if (game.result === "conceded") {
+  if (game.result === "conceded" || game.result === "no_show") {
     if (Number(game.winner_id) === Number(game.attacker_id)) {
       return [game.defender_force_id].filter((id) => id != null && id !== "");
     }
@@ -1711,6 +1753,18 @@ function loserForceIds(game) {
 function applyResolution(game, state, games) {
   if (!game || !isDecisive(game.result) || game.result_state !== "applied") {
     game.resolution = null;
+    return;
+  }
+  // Unable to schedule closes the battle so it no longer blocks the advance.
+  // It is not a fight: no VP, strength, durability, power, or control change,
+  // and neither force counts as having fought.
+  if (game.result === "unable_to_schedule") {
+    game.resolution = {
+      system: null,
+      forces: [],
+      result: game.result,
+      at: new Date().toISOString()
+    };
     return;
   }
   const sys = state.systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
@@ -1857,6 +1911,52 @@ function settleGame(game, previous, state, games, actor) {
     game.result_state = "pending";
     game.resolution = null;
   }
+  syncNoShowBonus(previous, game);
+}
+
+function addActionBonus(meta, playerId, turn, delta) {
+  if (!meta.action_bonuses || typeof meta.action_bonuses !== "object" || Array.isArray(meta.action_bonuses)) {
+    meta.action_bonuses = {};
+  }
+  const key = String(playerId);
+  const bag = meta.action_bonuses[key] && typeof meta.action_bonuses[key] === "object" ? { ...meta.action_bonuses[key] } : {};
+  const turnKey = String(turn);
+  const next = (Number(bag[turnKey]) || 0) + delta;
+  if (next > 0) bag[turnKey] = next;
+  else delete bag[turnKey];
+  if (Object.keys(bag).length) meta.action_bonuses[key] = bag;
+  else delete meta.action_bonuses[key];
+}
+
+/** A confirmed no show grants the winner +1 action on the battle's next turn. */
+function syncNoShowBonus(previous, game) {
+  const meta = readCollection("meta") || {};
+  let changed = false;
+  const prevBonus = previous && previous.action_bonus;
+  const keep =
+    prevBonus &&
+    game.result === "no_show" &&
+    game.result_state === "applied" &&
+    previous.result_state === "applied" &&
+    sameProposal(previous, game);
+  if (prevBonus && !keep) {
+    addActionBonus(meta, prevBonus.player_id, prevBonus.turn, -1);
+    changed = true;
+  }
+  if (game.result === "no_show" && game.result_state === "applied" && !keep) {
+    const playerId = Number(game.winner_id);
+    const turn = (Number(game.turn) || 1) + 1;
+    if (playerId) {
+      addActionBonus(meta, playerId, turn, 1);
+      game.action_bonus = { player_id: playerId, turn, extra: 1 };
+      changed = true;
+    }
+  } else if (keep) {
+    game.action_bonus = previous.action_bonus;
+  } else if (game.result !== "no_show" || game.result_state !== "applied") {
+    game.action_bonus = null;
+  }
+  if (changed) writeCollection("meta", meta);
 }
 
 function activeSideForces(forces, sysId, allegiance) {
@@ -2113,6 +2213,12 @@ async function confirmBattle(req, res, idPart) {
   if (!isDecisive(existing.result) || !canApply) {
     return send(res, 409, { error: "This battle has no result waiting to be applied" });
   }
+  if (existing.result === "no_show" && !isAdmin) {
+    if (Number(existing.proposed_by) === playerId) {
+      return send(res, 403, { error: "Waiting for the campaign admin to confirm this no show" });
+    }
+    return send(res, 403, { error: "A no show must be confirmed by the campaign admin, not the opponent" });
+  }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "Waiting for your opponent to confirm this result" });
   }
@@ -2159,7 +2265,9 @@ function resultPhrase(result) {
       attacker_win: "an attacker win",
       defender_win: "a defender win",
       draw: "a draw",
-      conceded: "a concession"
+      conceded: "a concession",
+      unable_to_schedule: "unable to schedule",
+      no_show: "a no show"
     }[result] || "a result"
   );
 }
@@ -2168,7 +2276,7 @@ function winnerPlayerId(game) {
   if (!game) return null;
   if (game.result === "attacker_win") return Number(game.attacker_id) || null;
   if (game.result === "defender_win") return Number(game.defender_id) || null;
-  if (game.result === "conceded" && game.winner_id != null && game.winner_id !== "") {
+  if ((game.result === "conceded" || game.result === "no_show") && game.winner_id != null && game.winner_id !== "") {
     return Number(game.winner_id) || null;
   }
   return null;
@@ -2225,8 +2333,34 @@ function announceBattleChange(previous, game, actor) {
     !sameProposal(previous, game) ||
     Number(previous.proposed_by) !== Number(game.proposed_by) ||
     prevState !== "pending";
+  const special = game.result === "unable_to_schedule" || game.result === "no_show";
 
-  if (game.result_state === "pending" && proposalChanged && actor.role !== "campaign_admin") {
+  if (special && game.result_state === "pending" && proposalChanged) {
+    const players = [game.attacker_id, game.defender_id].filter(Boolean);
+    const offender = game.result === "no_show" ? playerLabel(game.no_show_id) : "";
+    const reporter = playerLabel(game.proposed_by);
+    const text = game.result === "no_show"
+      ? reporter + " reported " + offender + " as a no show for " + title + ". It is waiting for the campaign admin."
+      : reporter + " reported " + title + " as unable to schedule. Neither player is penalized.";
+    players.forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_submitted",
+        text,
+        ref
+      });
+    });
+    if (game.result === "no_show") {
+      notices.push({
+        player_id: null,
+        audience: "campaign_admin",
+        kind: "battle_result_submitted",
+        text,
+        ref
+      });
+    }
+  } else if (game.result_state === "pending" && proposalChanged && actor.role !== "campaign_admin") {
     const opponent = otherParticipant(game, game.proposed_by);
     if (opponent) {
       notices.push({
@@ -2239,7 +2373,20 @@ function announceBattleChange(previous, game, actor) {
     }
   }
 
-  if (game.result_state === "applied" && prevState !== "applied") {
+  if (special && game.result_state === "applied" && prevState !== "applied") {
+    const text = game.result === "no_show"
+      ? "The campaign admin confirmed the no show for " + title + ". " + playerLabel(game.no_show_id) + "'s force loses, and " + playerLabel(game.winner_id) + " gains an extra logistics action next turn."
+      : "Unable to schedule was confirmed for " + title + ". The battle is closed with no penalties.";
+    [game.attacker_id, game.defender_id].filter(Boolean).forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_applied",
+        text,
+        ref
+      });
+    });
+  } else if (game.result_state === "applied" && prevState !== "applied") {
     const adminDidIt = actor.role === "campaign_admin";
     const who = adminDidIt ? "The campaign admin" : playerLabel(actor.player_id);
     const targets = new Set();
@@ -2281,6 +2428,9 @@ async function disputeBattle(req, res, idPart) {
   if (!isAdmin && !isParticipant(existing, playerId)) {
     return send(res, 403, { error: "You can only dispute a battle you are taking part in" });
   }
+  if (existing.result === "no_show") {
+    return send(res, 409, { error: "A no show is confirmed or rejected by the campaign admin" });
+  }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "You can't dispute your own result" });
   }
@@ -2321,6 +2471,52 @@ async function disputeBattle(req, res, idPart) {
       ref
     });
   }
+  writeNotices(notices);
+  return send(res, 200, game);
+}
+
+async function rejectNoShow(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  if (existing.result !== "no_show" || existing.result_state !== "pending") {
+    return send(res, 409, { error: "Only a no show waiting for admin confirmation can be rejected" });
+  }
+  const game = cloneData(existing);
+  if (game.resolution) {
+    const state = battleState();
+    reverseResolution(game, state, list);
+    saveBattleState(state);
+  }
+  game.result = "in_progress";
+  game.winner_id = null;
+  game.no_show_id = null;
+  game.result_state = "open";
+  game.proposed_by = null;
+  game.proposed_at = null;
+  game.disputed_by = null;
+  game.disputed_at = null;
+  game.dispute_note = null;
+  game.resolution = null;
+  game.action_bonus = null;
+  game.attacker_vp = null;
+  game.defender_vp = null;
+  list[idx] = game;
+  writeCollection("games", list);
+  const title = battlePlace(game);
+  const ref = { type: "game", game_id: game.game_id };
+  const text = "The campaign admin rejected the no show for " + title + ". The battle is open again and nothing was applied.";
+  const notices = [existing.attacker_id, existing.defender_id].filter(Boolean).map((pid) => ({
+    player_id: Number(pid),
+    audience: "player",
+    kind: "battle_result_rejected",
+    text,
+    ref
+  }));
   writeNotices(notices);
   return send(res, 200, game);
 }
@@ -2413,7 +2609,9 @@ function describeWaitingGame(game) {
     disputed_by_name: pname(game.disputed_by),
     disputed_at: game.disputed_at || null,
     dispute_note: game.dispute_note || null,
-    notes: game.notes || null
+    notes: game.notes || null,
+    no_show_id: game.no_show_id == null || game.no_show_id === "" ? null : Number(game.no_show_id),
+    no_show_name: game.no_show_id == null || game.no_show_id === "" ? null : pname(game.no_show_id)
   };
 }
 
@@ -2432,7 +2630,9 @@ function inboxFor(account) {
       const card = describeWaitingGame(game);
       const proposedBy = game.proposed_by == null ? null : Number(game.proposed_by);
       const involved = pid != null && isParticipant(game, pid);
-      if (state === "pending" && involved && proposedBy !== pid) {
+      if (game.result === "no_show" && state === "pending") {
+        if (isAdmin) actions.push({ ...card, duty: "no_show" });
+      } else if (state === "pending" && involved && proposedBy !== pid) {
         actions.push({ ...card, duty: "confirm" });
       } else if (isAdmin && (state === "pending" || state === "disputed")) {
         actions.push({ ...card, duty: "admin" });
@@ -2544,10 +2744,24 @@ function ensurePlayerActions(meta, playerId, turn) {
   return entry;
 }
 
+function actionBonus(meta, playerId, turn) {
+  const all = meta && meta.action_bonuses;
+  if (!all || typeof all !== "object") return 0;
+  const bag = all[String(playerId)];
+  if (!bag || typeof bag !== "object") return 0;
+  const extra = Number(bag[String(turn)]);
+  if (!Number.isFinite(extra) || extra <= 0) return 0;
+  return extra;
+}
+
+function actionsForTurn(meta, playerId, turn) {
+  return ACTIONS_PER_TURN + actionBonus(meta, playerId, turn == null ? Number(meta && meta.turn) || 1 : turn);
+}
+
 function actionsRemaining(meta, playerId) {
   const turn = Number(meta.turn) || 1;
   const entry = ensurePlayerActions(meta, playerId, turn);
-  return Math.max(0, ACTIONS_PER_TURN - (Number(entry.used) || 0));
+  return Math.max(0, actionsForTurn(meta, playerId, turn) - (Number(entry.used) || 0));
 }
 
 function actionsUsedThisTurn(meta, playerId) {
@@ -2585,7 +2799,8 @@ function playerActionRoster() {
     .filter((player) => String(player.status || "active").toLowerCase() === "active" && sideOf(player))
     .map((player) => {
       const used = actionsUsedThisTurn(meta, player.player_id);
-      const remaining = Math.max(0, ACTIONS_PER_TURN - used);
+      const cap = actionsForTurn(meta, player.player_id, turn);
+      const remaining = Math.max(0, cap - used);
       const activeForces = forces.filter(
         (force) => Number(force.player_id) === Number(player.player_id) && force.status === "active"
       ).length;
@@ -2593,9 +2808,9 @@ function playerActionRoster() {
         player_id: player.player_id,
         display_name: rosterName(player),
         allegiance: player.allegiance,
-        actions_used: Math.min(used, ACTIONS_PER_TURN),
+        actions_used: Math.min(used, cap),
         actions_remaining: remaining,
-        actions_per_turn: ACTIONS_PER_TURN,
+        actions_per_turn: cap,
         active_forces: activeForces,
         finished: remaining === 0
       };
@@ -2618,15 +2833,16 @@ function playerActionRoster() {
 function spendAction(meta, playerId, note) {
   const turn = Number(meta.turn) || 1;
   const entry = ensurePlayerActions(meta, playerId, turn);
-  if ((Number(entry.used) || 0) >= ACTIONS_PER_TURN) {
-    return { ok: false, error: "No actions remaining this turn (2 per turn)" };
+  const cap = actionsForTurn(meta, playerId, turn);
+  if ((Number(entry.used) || 0) >= cap) {
+    return { ok: false, error: "No actions remaining this turn (" + cap + " per turn)" };
   }
   entry.used = (Number(entry.used) || 0) + 1;
   entry.log = (entry.log || []).slice(-30);
   entry.log.push({
     at: new Date().toISOString(),
     note: note || "action",
-    remaining: ACTIONS_PER_TURN - entry.used
+    remaining: cap - entry.used
   });
   return { ok: true, entry };
 }
@@ -2641,7 +2857,7 @@ function refundAction(meta, playerId, note) {
   entry.log.push({
     at: new Date().toISOString(),
     note: note || "refund",
-    remaining: ACTIONS_PER_TURN - entry.used
+    remaining: actionsForTurn(meta, playerId, turn) - entry.used
   });
   return { ok: true, refunded: true, entry };
 }
@@ -3242,9 +3458,11 @@ async function handleActions(req, res, parts, method) {
     };
     if (auth && auth.account && auth.account.role === "player" && auth.account.player_id) {
       const entry = ensurePlayerActions(meta, auth.account.player_id, meta.turn);
+      const cap = actionsForTurn(meta, auth.account.player_id, meta.turn);
       payload.player_id = auth.account.player_id;
+      payload.actions_per_turn = cap;
       payload.actions_used = Number(entry.used) || 0;
-      payload.actions_remaining = Math.max(0, ACTIONS_PER_TURN - payload.actions_used);
+      payload.actions_remaining = Math.max(0, cap - payload.actions_used);
       payload.log = entry.log || [];
     } else if (auth && auth.account && auth.account.role === "campaign_admin") {
       payload.actions_used = 0;
@@ -3928,6 +4146,9 @@ async function handleApi(req, res, pathname) {
   }
   if (parts[0] === "games" && method === "POST" && parts[2] === "void") {
     return voidBattle(req, res, parts[1]);
+  }
+  if (parts[0] === "games" && method === "POST" && parts[2] === "reject") {
+    return rejectNoShow(req, res, parts[1]);
   }
   if (parts[0] === "inbox") return handleInbox(req, res, parts, method);
 

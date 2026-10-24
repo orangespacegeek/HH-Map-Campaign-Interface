@@ -872,7 +872,9 @@
         defender_win: "Defender win",
         draw: "Draw",
         conceded: "Conceded",
-        in_progress: "In progress"
+        in_progress: "In progress",
+        unable_to_schedule: "Unable to schedule",
+        no_show: "No show"
       })[r] || r || "Result";
     }
 
@@ -1013,9 +1015,12 @@
       ul.innerHTML = recent.map((g) => {
         const attF = fname(g.attacker_force_id);
         const defF = fname(g.defender_force_id);
+        const scoreBit = g.result === "unable_to_schedule" || g.result === "no_show"
+          ? resultLabel(g.result)
+          : (g.attacker_vp ?? "—") + " – " + (g.defender_vp ?? "—");
         const bits = [
           escDash(pname(g.attacker_id)) + (attF ? " (" + escDash(attF) + ")" : ""),
-          (g.attacker_vp ?? "—") + " – " + (g.defender_vp ?? "—"),
+          escDash(scoreBit),
           escDash(pname(g.defender_id)) + (defF ? " (" + escDash(defF) + ")" : "")
         ];
         return `<li><strong class="battle-no">Battle #${escDash(g.game_id)}</strong> · ${escDash(g.mission || "Battle")} at ${escDash(sname(g.sys_id))} · Turn ${escDash(g.turn)} <span class="badge win">${escDash(resultLabel(g.result))}</span><div class="meta">${bits.join(" · ")}</div></li>`;
@@ -1097,9 +1102,12 @@
         return rank(a) - rank(b) || String(a.display_name).localeCompare(String(b.display_name));
       });
       document.getElementById("action-roster-list").innerHTML = rows.map((row) => {
+        const left = row.actions_per_turn > 2
+            ? row.actions_remaining + " of " + row.actions_per_turn + " actions"
+            : row.actions_remaining + (row.actions_remaining === 1 ? " action" : " actions") + " left";
         const state = row.actions_remaining === 0
             ? '<span class="badge done">Done</span><span class="left">0 actions left</span>'
-            : '<span class="left">' + row.actions_remaining + (row.actions_remaining === 1 ? " action" : " actions") + " left</span>";
+            : '<span class="left">' + left + "</span>";
         const forces = row.active_forces === 0 ? " · no forces" : "";
         return '<li class="action-roster-row' + (row.finished ? " is-done" : "") + '">' +
           '<div class="action-roster-name">' + escDash(row.display_name) +
@@ -1140,7 +1148,9 @@
           defender_win: "Defender win",
           draw: "Draw",
           conceded: "Conceded",
-          in_progress: "In progress"
+          in_progress: "In progress",
+          unable_to_schedule: "Unable to schedule",
+          no_show: "No show"
         })[r] || r || "Result";
       }
       function battleNo(item) {
@@ -1153,7 +1163,9 @@
         return `<a class="wait-item" href="${href}"><strong class="battle-no">${escDash(battleNo(item))}</strong> · ${escDash(verb)}<div class="meta">${escDash(item.system_name)} · ${sides}</div><div class="meta">${escDash(resultLabelDash(item.result))}</div></a>`;
       }
       actions.slice(0, 4).forEach((item) => {
-        const verb = item.duty === "admin"
+        const verb = item.duty === "no_show"
+          ? "No show to confirm"
+          : item.duty === "admin"
           ? (item.result_state === "disputed" ? "Disputed result to resolve" : "Pending result to resolve")
           : "Confirm or dispute";
         if (item.result_state === "disputed") {
