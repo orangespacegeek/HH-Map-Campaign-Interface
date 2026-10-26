@@ -120,27 +120,41 @@
     return h;
   }
 
+  // One in-flight probe. The map starts loadCampaign() and applyNavPermissions()
+  // together; marking probed before refreshMe() made the second caller paint
+  // the signed-out "Log in" link and never come back.
+  let probePromise = null;
+
   async function probe() {
     if (probed) return mode;
-    probed = true;
+    if (!probePromise) probePromise = runProbe();
+    return probePromise;
+  }
+
+  async function runProbe() {
     try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), 1500);
-      const res = await fetch(apiBase() + "/api/public/meta", {
-        signal: ctrl.signal,
-        cache: "no-store",
-        credentials: "include"
-      });
-      clearTimeout(t);
-      if (res.ok) {
-        mode = "server";
-        await refreshMe();
-        return mode;
-      }
-    } catch (_) {}
-    mode = "local";
-    meCache = { authenticated: true, role: "campaign_admin", label: "Local test admin" };
-    return mode;
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 1500);
+        const res = await fetch(apiBase() + "/api/public/meta", {
+          signal: ctrl.signal,
+          cache: "no-store",
+          credentials: "include"
+        });
+        clearTimeout(t);
+        if (res.ok) {
+          mode = "server";
+          await refreshMe();
+          return mode;
+        }
+      } catch (_) {}
+      mode = "local";
+      meCache = { authenticated: true, role: "campaign_admin", label: "Local test admin" };
+      return mode;
+    } finally {
+      probed = true;
+      probePromise = null;
+    }
   }
 
   async function refreshMe() {

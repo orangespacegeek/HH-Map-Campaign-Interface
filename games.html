@@ -261,7 +261,7 @@
         <div class="form-row">
           <div class="form-group">
             <label for="f-mission">Mission</label>
-            <input id="f-mission" placeholder="Onslaught" />
+            <input id="f-mission" maxlength="80" placeholder="Onslaught" />
           </div>
           <div class="form-group">
             <label for="f-points">Points</label>
@@ -348,7 +348,7 @@
         </div>
         <div class="form-group">
           <label for="f-notes">Notes</label>
-          <textarea id="f-notes" rows="3"></textarea>
+          <textarea id="f-notes" rows="3" maxlength="500"></textarea>
         </div>
         <p class="hint" style="font-size:0.75rem;color:var(--muted);line-height:1.4">A player can only log a battle they are in, with their own force on their side. A played result or unable to schedule is applied when the opponent confirms it. A no show waits for the campaign admin. No report is not a player option. The campaign admin can mark an open battle No report, and a Battles deadline flags an unreported battle the same way. It stays pending until the admin confirms it. Then both forces lose 1 Strength, with no victory points, control change, or durability change. The campaign admin's save applies other results immediately. A loss (and both sides of a draw) drops Strength by 1. A win adds 1 to that system's loyal or traitor score. A played battle or a no show also lowers durability, then power once durability is 0. Unable to schedule changes nothing.</p>
       </form>
@@ -922,7 +922,12 @@
       const btn = e.target.closest("[data-edit]");
       if (!btn) return;
       const g = games.find(x => x.game_id === Number(btn.dataset.edit));
-      if (g) openDrawer(g);
+      if (!g) return;
+      if (!canEditGame(g)) {
+        showToast("Not your battle");
+        return;
+      }
+      openDrawer(g);
     });
     document.getElementById("search").addEventListener("input", e => { searchQ = e.target.value.trim(); render(); });
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });

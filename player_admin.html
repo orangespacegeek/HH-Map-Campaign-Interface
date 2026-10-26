@@ -1045,6 +1045,10 @@
     }
 
     function openDrawer(player) {
+      if (!SH.canEditPlayers()) {
+        showToast("Campaign admin only");
+        return;
+      }
       editingId = player ? player.player_id : null;
       drawerTitle.textContent = player ? `Edit Player #${player.player_id}` : "Add Player";
       document.getElementById("f-id").value = player ? player.player_id : "";
