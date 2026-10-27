@@ -108,6 +108,7 @@ function pairKey(game) {
 }
 
 async function toBattles(ctx, admin) {
+  assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
   assert.equal((await api(ctx, admin, "POST", "/api/campaign/advance", {})).status, 200);
   const battles = await api(ctx, admin, "POST", "/api/campaign/advance", {});
   assert.equal(battles.status, 200, JSON.stringify(battles.json));
@@ -290,6 +291,7 @@ test("player ids are never reused and removed players do not leave their forces 
     const forces = (await api(ctx, admin, "GET", "/api/forces")).json;
     const secondForces = forces.filter((f) => f.player_id === second.player_id);
     assert.equal(secondForces.length, 2);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
     const battle = await api(ctx, admin, "POST", "/api/games", {
       attacker_id: first.player_id,
       defender_id: second.player_id,
@@ -318,7 +320,9 @@ test("player ids are never reused and removed players do not leave their forces 
     assert.notEqual(third.player_id, second.player_id);
     assert.ok(third.player_id > second.player_id);
     const inherited = (await api(ctx, admin, "GET", "/api/forces")).json.filter((f) => f.player_id === third.player_id);
-    assert.equal(inherited.length, 0);
+    assert.equal(inherited.length, 2);
+    assert.ok(inherited.every((force) => force.status === "active"));
+    assert.ok(inherited.every((force) => !retired.some((old) => old.force_id === force.force_id)));
 
     const stamped = await api(ctx, admin, "POST", "/api/games", {
       attacker_id: 80,

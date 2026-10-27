@@ -100,6 +100,7 @@ test("free-text fields are trimmed and rejected when over the cap", async () => 
     const token = signup.json.token;
     const playerId = signup.json.player_id;
     assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
 
     const forces = (await api(ctx, token, "GET", "/api/forces")).json;
     const mine = forces.find((f) => f.player_id === playerId);

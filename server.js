@@ -33,10 +33,13 @@
  *   GET  /api/feedback                 (campaign_admin)
  *   GET  /api/admin/backup             (campaign_admin) campaign JSON download
  *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET", keep_map?, keep_control? }
+ *   POST /api/campaign/begin           (campaign_admin) leave Muster for Turn 1 Logistics
+ *   GET  /api/campaign/muster          (campaign_admin) sides, forces, and balance counts
  *   POST /api/campaign/phase-deadline  (campaign_admin) { phase_ends_at } — ISO time, or null to clear
- *   POST /api/campaign/auto-advance    (campaign_admin) { enabled: boolean }
+ *   POST /api/campaign/auto-advance    (campaign_admin) { enabled?: boolean, muster?: boolean }
  *   A past phase deadline, or every counted player being out of actions during
- *   Logistics, advances one phase. Checked on startup and about every 30s
+ *   Logistics, advances one phase. Muster does not auto-advance unless the
+ *   admin sets muster. Checked on startup and about every 30s
  *   (AUTO_ADVANCE_INTERVAL_MS). phase_ends_at is one instant, cleared after a
  *   successful advance, so a later weekly schedule can store the next instant.
  *   node server.js reset-campaign [--keep-map] [--keep-control] [--purge-accounts]
@@ -1419,6 +1422,9 @@ async function handleAuth(req, res, parts, method) {
       provider: "invite",
       created_at: new Date().toISOString().slice(0, 10)
     };
+    const forceSpecs = parseStartingForceSpecs(body, readCollection("systems"));
+    if (!forceSpecs.ok) return send(res, 400, { error: forceSpecs.error });
+
     players.push(player);
     accounts.push(account);
     invite.uses = (Number(invite.uses) || 0) + 1;
@@ -1434,6 +1440,12 @@ async function handleAuth(req, res, parts, method) {
     writeCollection("players", players);
     writeCollection("accounts", accounts);
     writeCollection("invites", invites);
+    const systems = readCollection("systems");
+    const existingForces = readCollection("forces");
+    const filled = appendStartingForces([player], existingForces, systems, {
+      [player.player_id]: forceSpecs.forces
+    });
+    if (filled.added) writeCollection("forces", filled.forces);
 
     const { token, expires } = createSession(account.account_id);
     return send(res, 201, { ok: true, token, expires_at: expires.toISOString(), ...mePayload(account) }, {
@@ -1444,7 +1456,7 @@ async function handleAuth(req, res, parts, method) {
   return send(res, 404, { error: "Unknown auth action" });
 }
 
-const PHASES = ["Logistics", "Movement", "Battles"];
+const PHASES = ["Muster", "Logistics", "Movement", "Battles"];
 
 function normalizeController(sys) {
   if (sys.sys_controller) return sys.sys_controller;
@@ -1647,7 +1659,15 @@ function normalizeGameResult(body) {
   if (body.result !== "no_show") body.no_show_id = null;
 }
 
+function musterBattleError() {
+  const meta = readCollection("meta");
+  if ((meta.phase || "Logistics") !== "Muster") return null;
+  return { status: 409, error: "Battles are not available during Muster" };
+}
+
 function validateGameWrite(body, auth, existing) {
+  const blocked = musterBattleError();
+  if (blocked) return blocked;
   const textError = textLimitError(body, GAME_TEXT_LIMITS);
   if (textError) return { status: 400, error: textError };
   const isAdmin = auth.account.role === "campaign_admin";
@@ -2290,6 +2310,8 @@ async function updateBattle(res, auth, existing, list, idx, body) {
 }
 
 function replaceBattles(res, body) {
+  const blocked = musterBattleError();
+  if (blocked) return send(res, blocked.status, { error: blocked.error });
   for (const raw of body) {
     if (!raw || typeof raw !== "object") return send(res, 400, { error: "Expected game objects" });
     const textError = textLimitError(raw, GAME_TEXT_LIMITS);
@@ -2340,6 +2362,8 @@ async function confirmBattle(req, res, idPart) {
   if (!isAdmin && !isParticipant(existing, playerId)) {
     return send(res, 403, { error: "You can only confirm a battle you are taking part in" });
   }
+  const blocked = musterBattleError();
+  if (blocked) return send(res, blocked.status, { error: blocked.error });
   if (existing.result_state === "applied" && existing.resolution) return send(res, 200, existing);
   const canApply =
     existing.result_state === "pending" || (isAdmin && existing.result_state === "disputed");
@@ -2558,6 +2582,8 @@ async function disputeBattle(req, res, idPart) {
   const auth = getSession(req);
   const gate = requireRole(auth, ["player", "campaign_admin"]);
   if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const blocked = musterBattleError();
+  if (blocked) return send(res, blocked.status, { error: blocked.error });
   const body = (await readBody(req)) || {};
   const noteRaw = String(body.note == null ? "" : body.note).trim();
   if (noteRaw.length > 300) {
@@ -2627,6 +2653,8 @@ async function rejectNoShow(req, res, idPart) {
   const auth = getSession(req);
   const gate = requireRole(auth, ["campaign_admin"]);
   if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const blocked = musterBattleError();
+  if (blocked) return send(res, blocked.status, { error: blocked.error });
   const list = readCollection("games");
   const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
   if (idx < 0) return send(res, 404, { error: "Not found" });
@@ -2675,6 +2703,8 @@ async function voidBattle(req, res, idPart) {
   const auth = getSession(req);
   const gate = requireRole(auth, ["campaign_admin"]);
   if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const blocked = musterBattleError();
+  if (blocked) return send(res, blocked.status, { error: blocked.error });
   const list = readCollection("games");
   const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
   if (idx < 0) return send(res, 404, { error: "Not found" });
@@ -3224,6 +3254,12 @@ function advanceCampaign(meta, options = {}) {
       phase = "Battles";
       log.push("Applied pending moves; advanced to Battles phase");
       if (assigned) log.push(`Assigned ${assigned} battle${assigned === 1 ? "" : "s"} between opposing forces`);
+    } else if (phase === "Muster") {
+      return {
+        ok: false,
+        status: 409,
+        error: "Use Begin campaign to leave Muster"
+      };
     } else {
       // End of Battles → void anything still unresolved, then score, recover, new turn.
       // Unresolved battles are not carried into the next turn. A normal advance
@@ -3365,10 +3401,15 @@ function announcePhaseAdvance(from, to, options) {
 
 function autoAdvanceReason(meta, now) {
   if (!meta || meta.victor) return null;
-  const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
-  if (Number.isFinite(deadlineMs) && deadlineMs <= now) return "deadline";
-  if (meta.auto_advance_when_done === false) return null;
   const phase = meta.phase || "Logistics";
+  const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
+  const deadlinePassed = Number.isFinite(deadlineMs) && deadlineMs <= now;
+  if (phase === "Muster") {
+    if (meta.auto_advance_muster === true && deadlinePassed) return "deadline";
+    return null;
+  }
+  if (deadlinePassed) return "deadline";
+  if (meta.auto_advance_when_done === false) return null;
   if (phase !== "Logistics") return null;
   const roster = playerActionRoster();
   if (roster.ready_to_advance) return "all_actions_done";
@@ -3469,7 +3510,9 @@ function maybeAutoAdvance() {
       return { ok: true, advanced: false, skipped: "stale" };
     }
     if (reason === "deadline" && fromPhase === "Battles") flagUnreportedBattles(fromTurn);
-    const result = advanceCampaign(again, { automatic: true, reason, force: false });
+    const result = fromPhase === "Muster"
+      ? beginCampaign(again, { automatic: true, reason })
+      : advanceCampaign(again, { automatic: true, reason, force: false });
     if (result && result.ok === false) {
       if (result.code === "unresolved_battles") {
         again.auto_advance_blocked = blockedAdvanceRecord(result, reason);
@@ -3512,9 +3555,27 @@ async function handleCampaign(req, res, parts, method) {
       last_advanced_at: meta.last_advanced_at || null,
       phase_ends_at: meta.phase_ends_at || null,
       auto_advance_when_done: meta.auto_advance_when_done !== false,
+      auto_advance_muster: meta.auto_advance_muster === true,
       auto_advance_blocked: meta.auto_advance_blocked || null,
+      roster_locked: meta.roster_locked === true,
       phases: PHASES
     });
+  }
+
+  if (action === "muster" && method === "GET") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    return send(res, 200, musterRoster());
+  }
+
+  if (action === "begin" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const result = withAdvanceLock(() => beginCampaign(readCollection("meta")));
+    if (result && result.ok === false) {
+      return send(res, result.status || 409, { error: result.error, code: result.code });
+    }
+    return send(res, 200, result);
   }
 
   if (action === "phase-deadline" && method === "POST") {
@@ -3545,17 +3606,28 @@ async function handleCampaign(req, res, parts, method) {
     const gate = requireRole(auth, ["campaign_admin"]);
     if (!gate.ok) return send(res, gate.status, { error: gate.error });
     const body = (await readBody(req)) || {};
-    if (typeof body.enabled !== "boolean") {
+    const hasEnabled = Object.prototype.hasOwnProperty.call(body, "enabled");
+    const hasMuster = Object.prototype.hasOwnProperty.call(body, "muster");
+    if (hasEnabled && typeof body.enabled !== "boolean") {
+      return send(res, 400, { error: "enabled must be true or false" });
+    }
+    if (hasMuster && typeof body.muster !== "boolean") {
+      return send(res, 400, { error: "muster must be true or false" });
+    }
+    if (!hasEnabled && !hasMuster) {
       return send(res, 400, { error: "enabled must be true or false" });
     }
     const meta = readCollection("meta");
-    meta.auto_advance_when_done = body.enabled;
+    if (hasEnabled) meta.auto_advance_when_done = body.enabled;
+    if (hasMuster) meta.auto_advance_muster = body.muster;
     writeCollection("meta", meta);
-    const check = body.enabled ? runAutoAdvanceSafe() : { advanced: false };
+    const shouldCheck = (hasEnabled && body.enabled) || (hasMuster && body.muster);
+    const check = shouldCheck ? runAutoAdvanceSafe() : { advanced: false };
     const saved = readCollection("meta");
     return send(res, 200, {
       ok: true,
       auto_advance_when_done: saved.auto_advance_when_done !== false,
+      auto_advance_muster: saved.auto_advance_muster === true,
       advanced: !!(check && check.advanced),
       phase: saved.phase || null,
       turn: saved.turn || null
@@ -3638,7 +3710,7 @@ async function handleCampaign(req, res, parts, method) {
     return send(res, 200, result);
   }
 
-  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase|phase-deadline|auto-advance|reset" });
+  return send(res, 404, { error: "Unknown campaign action. Use advance|begin|muster|status|set-phase|phase-deadline|auto-advance|reset" });
 }
 
 function parsePhaseDeadline(value) {
@@ -3713,6 +3785,9 @@ async function handleActions(req, res, parts, method) {
   const meta = readCollection("meta");
   const phase = meta.phase || "Logistics";
   const turn = Number(meta.turn) || 1;
+  if (phase === "Muster" && ["move", "hold", "reinforce", "fortify", "generate"].includes(action)) {
+    return send(res, 409, { error: "Campaign actions are not available during Muster" });
+  }
 
   // Resolve acting player_id (admin may act for a player via body.player_id)
   let playerId = auth.account.player_id;
@@ -4070,6 +4145,92 @@ function defaultHomeSystem(player, systems, allegianceIndex) {
   return systems[0] ? Number(systems[0].sys_id) : 1;
 }
 
+/**
+ * Names and homes chosen at sign-up. Missing entries fall back to
+ * "Name I / II" and the player's starting system, or a system their side controls.
+ */
+function parseStartingForceSpecs(body, systems) {
+  const raw = body.starting_forces;
+  if (raw == null) return { ok: true, forces: [{}, {}] };
+  if (!Array.isArray(raw)) return { ok: false, error: "Starting forces must be a list of two forces" };
+  if (raw.length > 2) return { ok: false, error: "A player starts with two forces" };
+  const forces = [];
+  for (let i = 0; i < 2; i++) {
+    const row = raw[i] && typeof raw[i] === "object" ? raw[i] : {};
+    const forceName = row.force_name == null ? "" : String(row.force_name).trim();
+    if (forceName.length > 100) return { ok: false, error: "Force name must be at most 100 characters" };
+    let sysId = null;
+    if (row.sys_id != null && row.sys_id !== "") {
+      sysId = Number(row.sys_id);
+      if (!sysId || !systems.some((system) => Number(system.sys_id) === sysId)) {
+        return { ok: false, error: "Home system is not valid" };
+      }
+    }
+    forces.push({ force_name: forceName || null, sys_id: sysId });
+  }
+  return { ok: true, forces };
+}
+
+function makeStartingForce(player, home, name, forceId) {
+  return {
+    force_id: forceId,
+    player_id: player.player_id,
+    force_name: name,
+    game_system: "HH",
+    force_type: "Legion",
+    allegiance: sideOf(player) || "",
+    legion: "",
+    subfaction: "",
+    allies: "",
+    organisation: "",
+    warlord_name: "",
+    primarch_present: false,
+    titan_support: false,
+    points: 3000,
+    home_sys_id: home,
+    sys_id: home,
+    dest_sys_id: null,
+    strength: 3,
+    status: "active",
+    notes: "Starting force",
+    fought_this_turn: false
+  };
+}
+
+/**
+ * Fill each Loyalist or Traitor up to two forces. Destroyed forces count, so a
+ * casualty is not replaced. Removed forces do not count. Existing names and
+ * homes are left in place. specsByPlayer is optional sign-up choices.
+ */
+function appendStartingForces(players, forces, systems, specsByPlayer) {
+  const out = forces.slice();
+  let next = nextId(out, "force_id");
+  const allegianceCount = {};
+  let added = 0;
+  const helped = new Set();
+  players.forEach((player) => {
+    const side = sideOf(player);
+    const key = side || "unassigned";
+    const index = allegianceCount[key] || 0;
+    allegianceCount[key] = index + 1;
+    if (!side) return;
+    const have = out.filter(
+      (force) => Number(force.player_id) === Number(player.player_id) && force.status !== "removed"
+    );
+    if (have.length >= 2) return;
+    const specs = (specsByPlayer && specsByPlayer[player.player_id]) || [];
+    for (let n = have.length; n < 2; n++) {
+      const spec = specs[n] || {};
+      const home = spec.sys_id || defaultHomeSystem(player, systems, index);
+      const fallback = (player.display_name || player.player_name || "Force") + (n === 0 ? " I" : " II");
+      out.push(makeStartingForce(player, home, spec.force_name || fallback, next++));
+      added += 1;
+      helped.add(Number(player.player_id));
+    }
+  });
+  return { forces: out, added, players: helped.size };
+}
+
 function buildStartingForces(players, existingForces, systems) {
   const out = [];
   let next = 1;
@@ -4169,20 +4330,22 @@ function resetCampaign(options = {}) {
     campaign_name: previous.campaign_name || "Sunset Heresy",
     subsector: previous.subsector || "",
     turn: 1,
-    phase: "Logistics",
+    phase: "Muster",
+    roster_locked: false,
     loyal_score: 0,
     traitor_score: 0,
     last_advanced_at: now,
     phase_ends_at: null,
     auto_advance_when_done: true,
+    auto_advance_muster: false,
     auto_advance_blocked: null,
     player_actions: {},
     phase_log: [
       {
         at: now,
         from: { turn: previous.turn || null, phase: previous.phase || null },
-        to: { turn: 1, phase: "Logistics" },
-        notes: ["Campaign reset to turn 1, Logistics, with two starting forces per player. " + mapNote]
+        to: { turn: 1, phase: "Muster" },
+        notes: ["Campaign reset to Muster, with two starting forces per player. " + mapNote]
       }
     ],
     victor: null,
@@ -4206,7 +4369,7 @@ function resetCampaign(options = {}) {
   return {
     ok: true,
     turn: 1,
-    phase: "Logistics",
+    phase: "Muster",
     players: players.length,
     forces: forces.length,
     games_cleared: games.length,
@@ -4220,6 +4383,143 @@ function resetCampaign(options = {}) {
       : accounts.length,
     accounts_removed: accountsRemoved
   };
+}
+
+function beginCampaign(meta, options = {}) {
+  if ((meta.phase || "Logistics") !== "Muster") {
+    return { ok: false, status: 409, code: "already_begun", error: "The campaign has already begun" };
+  }
+  const players = readCollection("players");
+  const systems = recomputeControllers(readCollection("systems"));
+  const existing = readCollection("forces");
+  const filled = appendStartingForces(players, existing, systems);
+  if (filled.added) writeCollection("forces", filled.forces);
+  const fromTurn = Number(meta.turn) || 1;
+  const now = new Date().toISOString();
+  const notes = ["Began the campaign. Roster locked. Turn 1, Logistics."];
+  if (filled.added) {
+    notes.push("Gave starting forces to players who had fewer than two.");
+  }
+  meta.turn = 1;
+  meta.phase = "Logistics";
+  meta.roster_locked = true;
+  meta.phase_ends_at = null;
+  meta.auto_advance_blocked = null;
+  meta.last_advanced_at = now;
+  meta.player_actions = {};
+  if (options.automatic) notes.unshift(automaticAdvanceNote(options.reason));
+  meta.phase_log = (meta.phase_log || []).slice(-20).concat([
+    {
+      at: now,
+      from: { turn: fromTurn, phase: "Muster" },
+      to: { turn: 1, phase: "Logistics" },
+      automatic: !!options.automatic,
+      reason: options.automatic ? options.reason || null : null,
+      notes
+    }
+  ]);
+  writeCollection("meta", meta);
+  announcePhaseAdvance(
+    { turn: fromTurn, phase: "Muster" },
+    { turn: 1, phase: "Logistics" },
+    options || {}
+  );
+  return {
+    ok: true,
+    meta,
+    log: notes,
+    from: { turn: fromTurn, phase: "Muster" },
+    to: { turn: 1, phase: "Logistics" }
+  };
+}
+
+function musterRoster() {
+  const meta = readCollection("meta");
+  const players = readCollection("players");
+  const forces = readCollection("forces");
+  const systems = readCollection("systems");
+  function systemName(id) {
+    const system = systems.find((row) => Number(row.sys_id) === Number(id));
+    return system ? system.sys_name : null;
+  }
+  let loyalists = 0;
+  let traitors = 0;
+  const rows = players.map((player) => {
+    const side = sideOf(player);
+    const active = player.status !== "inactive";
+    if (active && side === "Loyalist") loyalists += 1;
+    if (active && side === "Traitor") traitors += 1;
+    const owned = forces.filter(
+      (force) => Number(force.player_id) === Number(player.player_id) && force.status !== "removed"
+    );
+    return {
+      player_id: player.player_id,
+      display_name: player.display_name || player.player_name,
+      player_name: player.player_name,
+      allegiance: side || player.allegiance || NEEDS_SIDE,
+      status: player.status || "active",
+      forces: owned.map((force) => ({
+        force_id: force.force_id,
+        force_name: force.force_name,
+        sys_id: force.sys_id,
+        home_sys_id: force.home_sys_id,
+        system_name: systemName(force.sys_id),
+        home_system_name: systemName(force.home_sys_id),
+        strength: force.strength,
+        status: force.status
+      }))
+    };
+  });
+  return {
+    phase: meta.phase || "Logistics",
+    turn: Number(meta.turn) || 1,
+    roster_locked: meta.roster_locked === true,
+    loyalists,
+    traitors,
+    players: rows
+  };
+}
+
+/**
+ * Idempotent load migration. Sign-up used to create no forces, so a Loyalist
+ * or Traitor with fewer than two (destroyed forces still count) receives the
+ * rest. A backup is written only when a force is added.
+ */
+function migrateStartingForces() {
+  ensureDataDir();
+  const players = readExistingCollection("players");
+  if (!Array.isArray(players) || !players.length) return { changed: false };
+  const forces = readExistingCollection("forces");
+  const existing = Array.isArray(forces) ? forces : [];
+  let systems = readExistingCollection("systems");
+  if (!Array.isArray(systems) || !systems.length) systems = readCollection("systems");
+  const filled = appendStartingForces(players, existing, systems);
+  if (!filled.added) return { changed: false };
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = path.join(DATA, "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const backupFile = path.join(dir, "pre-muster-forces-" + stamp + ".json");
+  atomicWrite(
+    backupFile,
+    JSON.stringify(
+      {
+        taken_at: new Date().toISOString(),
+        reason: "Before giving starting forces to players who had fewer than two",
+        players,
+        forces: existing
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  writeCollection("forces", filled.forces);
+  console.log(
+    "Muster migration: gave starting forces to " +
+      filled.players +
+      " players who had fewer than two. Backup: " +
+      backupFile
+  );
+  return { changed: true, added: filled.added, backup: backupFile };
 }
 
 function feedbackWebhookUrl() {
@@ -4590,7 +4890,8 @@ async function handleApi(req, res, pathname) {
         writeCollection(collection, list);
         return send(res, 200, list[idx]);
       } else if (isPlayer && Number(existing.player_id) === Number(auth.account.player_id)) {
-        // Flavour / list fields only — campaign position & strength go through /api/actions
+        // Flavour / list fields only — campaign position & strength go through /api/actions.
+        // During Muster the player may still name a force and choose its home system.
         const allowed = [
           "force_name", "notes", "warlord_name", "points", "game_system",
           "force_type", "legion", "subfaction", "organisation", "allies"
@@ -4599,6 +4900,22 @@ async function handleApi(req, res, pathname) {
         allowed.forEach((k) => {
           if (body[k] !== undefined) safe[k] = body[k];
         });
+        if (body.sys_id !== undefined || body.home_sys_id !== undefined) {
+          const metaNow = readCollection("meta");
+          if ((metaNow.phase || "Logistics") !== "Muster" || metaNow.roster_locked === true) {
+            return send(res, 409, { error: "Home systems can only be chosen during Muster" });
+          }
+          const home = Number(
+            body.home_sys_id != null && body.home_sys_id !== "" ? body.home_sys_id : body.sys_id
+          );
+          const systems = readCollection("systems");
+          if (!home || !systems.some((system) => Number(system.sys_id) === home)) {
+            return send(res, 400, { error: "Home system is not valid" });
+          }
+          safe.sys_id = home;
+          safe.home_sys_id = home;
+          safe.dest_sys_id = null;
+        }
         safe.player_id = existing.player_id;
         const assigned = forceWithOwnerSide(safe);
         if (!assigned.ok) return send(res, 400, { error: assigned.error });
@@ -4638,6 +4955,10 @@ async function handleApi(req, res, pathname) {
         return send(res, 403, { error: "A confirmed battle can only be deleted by the campaign admin" });
       }
     }
+    if (collection === "games") {
+      const blocked = musterBattleError();
+      if (blocked) return send(res, blocked.status, { error: blocked.error });
+    }
     if (collection === "games" && existing.resolution) {
       const state = battleState();
       reverseResolution(existing, state, list);
@@ -4673,6 +4994,7 @@ function logRequest(req, res, pathname, started) {
 ensureDataDir();
 seedBaselineSystems();
 migrateBlackshieldAllegiance();
+migrateStartingForces();
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();

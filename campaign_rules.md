@@ -1,5 +1,9 @@
 **Campaign Turn**
 
+**Muster**
+
+Before the first campaign turn, players join, choose Loyalist or Traitor, name their two starting forces, and pick a home system for each force. No battles are fought and no campaign actions are spent. The campaign admin begins the campaign, which locks that roster and starts Turn 1 in Logistics. A player who joins after Muster still receives two starting forces. (added as part of web app build)
+
 A player gets 2 Actions per Campaign Turn
 
 Turn order - Logistics &gt; Movement &gt; Battles

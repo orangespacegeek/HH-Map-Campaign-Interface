@@ -109,6 +109,7 @@ test("admin sees who has spent this turn's action budget", async () => {
     const loyal = await signup(ctx, admin, "act_loyal", "Loyalist", 2);
     const traitor = await signup(ctx, admin, "act_traitor", "Traitor", 4);
     assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
 
     const denied = await api(ctx, loyal.token, "GET", "/api/actions/players");
     assert.equal(denied.status, 403);
@@ -156,7 +157,7 @@ test("admin sees who has spent this turn's action budget", async () => {
     const empty = await signup(ctx, admin, "act_empty", "Loyalist", 3);
     const withEmpty = await api(ctx, admin, "GET", "/api/actions/players");
     const emptyRow = row(withEmpty.json, empty.player_id);
-    assert.equal(emptyRow.active_forces, 0);
+    assert.equal(emptyRow.active_forces, 2);
     assert.equal(emptyRow.actions_remaining, 2);
     assert.equal(emptyRow.finished, false);
     assert.equal(emptyRow.can_act, undefined);
