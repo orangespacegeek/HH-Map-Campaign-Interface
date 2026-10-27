@@ -107,6 +107,7 @@ test("players cannot read or change another player's private records", async () 
     const traitor = await signup(ctx, admin, "own_traitor", "Traitor", 4);
     const bystander = await signup(ctx, admin, "own_bystander", "Loyalist", 3);
     assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
 
     const adminForces = (await api(ctx, admin, "GET", "/api/forces")).json;
     const loyalForce = adminForces.find((f) => f.player_id === loyal.player_id);

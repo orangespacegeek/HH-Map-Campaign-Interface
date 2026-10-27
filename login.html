@@ -64,8 +64,8 @@
     .form-group select,
     .form-group textarea {
       width: 100%; background: var(--panel-2); border: 1px solid var(--border);
-      color: var(--text); padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 0.95rem;
-      font-family: inherit;
+      color: var(--text); padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 16px;
+      font-family: inherit; min-height: 44px;
     }
     .form-group textarea { min-height: 68px; resize: vertical; }
     .form-group input:focus,
@@ -218,6 +218,31 @@
           <select id="su-sys">
             <option value="">No preference</option>
           </select>
+          <div class="hint">Used when a force below has no home of its own.</div>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-force-1">First force</label>
+          <input id="su-force-1" maxlength="100" placeholder="Force name" />
+        </div>
+        <div class="form-group">
+          <label for="su-home-1">Home system</label>
+          <select id="su-home-1">
+            <option value="">Same as starting system</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-force-2">Second force</label>
+          <input id="su-force-2" maxlength="100" placeholder="Force name" />
+        </div>
+        <div class="form-group">
+          <label for="su-home-2">Home system</label>
+          <select id="su-home-2">
+            <option value="">Same as starting system</option>
+          </select>
         </div>
       </div>
       <div class="form-group">
@@ -314,6 +339,8 @@
       btn.disabled = true;
       try {
         const sys = document.getElementById("su-sys").value;
+        const home1 = document.getElementById("su-home-1").value;
+        const home2 = document.getElementById("su-home-2").value;
         const me = await SH.signup({
           invite_code: document.getElementById("su-code").value.trim(),
           login: document.getElementById("su-login").value.trim(),
@@ -323,7 +350,17 @@
           contact: document.getElementById("su-contact").value.trim(),
           allegiance: document.getElementById("su-allegiance").value,
           start_sys_id: sys ? Number(sys) : null,
-          notes: document.getElementById("su-notes").value.trim()
+          notes: document.getElementById("su-notes").value.trim(),
+          starting_forces: [
+            {
+              force_name: document.getElementById("su-force-1").value.trim(),
+              sys_id: home1 ? Number(home1) : null
+            },
+            {
+              force_name: document.getElementById("su-force-2").value.trim(),
+              sys_id: home2 ? Number(home2) : null
+            }
+          ]
         });
         showMsg("Account created. Signed in as " + (me.label || me.login) + ".", true);
         setTimeout(() => { location.href = "index.html"; }, 600);
@@ -365,12 +402,14 @@
       await SH.applyNavPermissions();
       try {
         const systems = await SH.list("systems");
-        const sel = document.getElementById("su-sys");
-        (systems || []).forEach((s) => {
-          const opt = document.createElement("option");
-          opt.value = s.sys_id;
-          opt.textContent = s.sys_name || ("System " + s.sys_id);
-          sel.appendChild(opt);
+        ["su-sys", "su-home-1", "su-home-2"].forEach((id) => {
+          const sel = document.getElementById(id);
+          (systems || []).forEach((s) => {
+            const opt = document.createElement("option");
+            opt.value = s.sys_id;
+            opt.textContent = s.sys_name || ("System " + s.sys_id);
+            sel.appendChild(opt);
+          });
         });
       } catch (_) {}
       const me = await SH.me();
