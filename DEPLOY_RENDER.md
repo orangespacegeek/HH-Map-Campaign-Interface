@@ -35,6 +35,10 @@ Either use the blueprint or create a web service by hand.
 
 Disks only keep files under the mount path. `DATA_DIR` must be that path. The rest of the container, including the git checkout, is replaced on every deploy.
 
+### Node.js
+
+Pin a patched Node.js version. `package.json` requires Node `>=22.23.4` for the eMudhra / Node.js advisory. On the Render service, set the Node version to at least 22.23.4, then redeploy with **Clear build cache & deploy**. In the build log, check that the printed Node version is 22.23.4 or newer.
+
 ## 3. Environment variables
 
 Set these on the service, not in a committed file.
