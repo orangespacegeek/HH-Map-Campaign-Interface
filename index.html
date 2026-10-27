@@ -1042,7 +1042,11 @@
           escDash(scoreBit),
           escDash(pname(g.defender_id)) + (defF ? " (" + escDash(defF) + ")" : "")
         ];
-        return `<li><strong class="battle-no">Battle #${escDash(g.game_id)}</strong> · ${escDash(g.mission || "Battle")} at ${escDash(sname(g.sys_id))} · Turn ${escDash(g.turn)} <span class="badge win">${escDash(resultLabel(g.result))}</span><div class="meta">${bits.join(" · ")}</div></li>`;
+        const rounds = Number(g.rounds_played);
+        const roundsBit = Number.isInteger(rounds) && rounds >= 1 && rounds <= 10
+          ? " · " + rounds + (rounds === 1 ? " game round" : " game rounds")
+          : "";
+        return `<li><strong class="battle-no">Battle #${escDash(g.game_id)}</strong> · ${escDash(g.mission || "Battle")} at ${escDash(sname(g.sys_id))} · Campaign turn ${escDash(g.turn)}${roundsBit} <span class="badge win">${escDash(resultLabel(g.result))}</span><div class="meta">${bits.join(" · ")}</div></li>`;
       }).join("");
     }
 

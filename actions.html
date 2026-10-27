@@ -237,7 +237,7 @@
           <span class="badge ${stateClass(item.result_state)}">${esc(stateLabel(item.result_state, item.result))}</span>
         </div>
         <div class="meta">
-          Turn ${esc(item.turn ?? "—")} · ${esc(score)}${item.result === "unable_to_schedule" || item.result === "no_show" || item.result === "no_report" ? "" : " VP"}<br>
+          Campaign turn ${esc(item.turn ?? "—")}${item.rounds_played ? " · " + esc(item.rounds_played) + (Number(item.rounds_played) === 1 ? " game round" : " game rounds") : ""} · ${esc(score)}${item.result === "unable_to_schedule" || item.result === "no_show" || item.result === "no_report" ? "" : " VP"}<br>
           Attacker <strong>${esc(item.attacker_name || "—")}</strong> · ${esc(item.attacker_force || "no force")}<br>
           Defender <strong>${esc(item.defender_name || "—")}</strong> · ${esc(item.defender_force || "no force")}<br>
           Submitted by ${submitted}

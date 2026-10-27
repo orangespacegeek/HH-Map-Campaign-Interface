@@ -1,6 +1,6 @@
 Name,code,type,required,foreign_key,example,notes
 Game ID,game_id,number,yes,PK,17,Unique battle id. Never use sys_id here.
-Campaign Turn,turn,number,yes,,3,Which campaign round this battle belongs to.
+Campaign Turn,turn,number,yes,,3,Which campaign turn this battle belongs to. Players cannot set a different turn. Not the number of tabletop rounds.
 Played On,played_on,date,no,,2026-08-22,Calendar date of the tabletop game.
 System,sys_id,number,yes,db_systems.sys_id,4,Where the battle was fought. Both force tokens should be in this system at the time of the game.
 Game System,game_system,"enum (HH, AT, AI, LI)",yes,,HH,Must match both forces game_system.
@@ -18,3 +18,4 @@ Attacker List,attacker_list,string,no,,The Ironfire 3000,Optional snapshot of th
 Defender List,defender_list,string,no,,Stone Gauntlet 3000,Same as above.
 Notes,notes,text,no,,Warlord duel: both survived. Traitor titan support delayed.,"Free text for narrative. Named-character outcomes (duels, death, relics) stay here until a db_characters sheet exists. Do not add structured kill/relic columns on this sheet."
 No-show player,no_show_id,number,no,db_players.player_id,2,Set only when result is no_show. Must be the attacker or the defender, and a player report can name only the opponent.
+Game rounds played,rounds_played,number,no,,4,"Optional. How many tabletop rounds were played, from 1 to 10. Empty when not recorded. Not the campaign turn."
