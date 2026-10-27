@@ -39,6 +39,9 @@ Resolution:
 - Losing Force: Force Strength reduced by 1. If the Losing Force's Strength reaches 0, it is destroyed.
 - Draws: Both forces count as Losing.
 - Winning Force: Increases their faction's score (sys_loyal or sys_traitor) for the system by +1.
+- Unable to schedule: the players are unable to mutually find the time to play this game. Neither player is penalized or gains a boon. (added as part of web app build)
+- No Show: one of the players did not respond to their opponent's attempts to schedule the game, or did not show up to, or attempt to reschedule, their scheduled game. The offending player's force loses the battle. The reporting player gains an additional logistics point next turn. This battle must be confirmed by the campaign admin. (added as part of web app build)
+- No Report: no report is made for the battle. Both players' forces suffer a loss. This must be confirmed by the campaign admin. (added as part of web app build)
 
 *System Control/Influence*
 
@@ -47,6 +50,8 @@ Systems start with an admin-assigned level of sys_loyal and sys_traitor (default
 System control is determined by sys_loyal minus sys_traitor. A positive result means Loyalists control the system; a negative result means Traitors control the system. A result of zero means the system is Contested.
 
 Each System starts with an admin-assigned durability level (sys_durability) (default is 5, maximum of 10). Each battle causes the sys_durability to decrease by 1.
+
+Unable to schedule and No report do not change durability. A confirmed No show lowers durability the same way as any other win. (added as part of web app build)
 
 Once System Durability reaches 0, each successive battle reduces the system's Power Level by 1.
 

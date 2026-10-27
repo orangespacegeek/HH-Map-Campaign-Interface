@@ -12,8 +12,9 @@ Attacker Force,attacker_force_id,number,yes,db_forces.force_id,12,The map token 
 Defender Force,defender_force_id,number,yes,db_forces.force_id,5,The map token that defended. Same rules as attacker_force_id.
 Attacker VP,attacker_vp,number,yes,,7,Victory points scored.
 Defender VP,defender_vp,number,yes,,5,Victory points scored.
-Result,result,"enum (attacker_win, defender_win, draw, conceded, in_progress)",yes,,attacker_win,Use in_progress for scheduled but unplayed games.
+Result,result,"enum (attacker_win, defender_win, draw, conceded, in_progress, unable_to_schedule, no_show, no_report)",yes,,attacker_win,"Use in_progress for scheduled but unplayed games. unable_to_schedule closes the battle with no VP, strength, durability, or control change after the opponent confirms. no_show names the opponent in no_show_id; the campaign admin confirms it; the reporter's force wins, durability drops as it does for a normal win, and that player gains +1 action on the next turn only. no_report is admin-only: a Battles deadline flags an unreported open battle, or the admin marks one. Confirm applies a strength loss to both forces and changes neither victory points, control, nor durability. Reject returns the battle to open."
 Winner,winner_id,number,no,db_players.player_id,1,"The winning player, not a warlord. Must match attacker_id or defender_id. Empty when result is draw or in_progress."
 Attacker List,attacker_list,string,no,,The Ironfire 3000,Optional snapshot of the list / rite used that day. Force record may change later.
 Defender List,defender_list,string,no,,Stone Gauntlet 3000,Same as above.
 Notes,notes,text,no,,Warlord duel: both survived. Traitor titan support delayed.,"Free text for narrative. Named-character outcomes (duels, death, relics) stay here until a db_characters sheet exists. Do not add structured kill/relic columns on this sheet."
+No-show player,no_show_id,number,no,db_players.player_id,2,Set only when result is no_show. Must be the attacker or the defender, and a player report can name only the opponent.

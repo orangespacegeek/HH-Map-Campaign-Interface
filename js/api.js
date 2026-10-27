@@ -495,6 +495,10 @@
     return postGameAction(id, "void");
   }
 
+  async function rejectGame(id) {
+    return postGameAction(id, "reject");
+  }
+
   async function postGameAction(id, action, body) {
     await probe();
     if (mode !== "server") throw new Error("This needs the live server");
@@ -657,6 +661,7 @@
     } else {
       meta.phase = phases[i + 1];
     }
+    meta.phase_ends_at = null;
     localWrite("meta", meta);
     return { ok: true, meta, to: { turn: meta.turn, phase: meta.phase }, log: ["Local advance"] };
   }
@@ -679,6 +684,57 @@
     if (turn != null) meta.turn = turn;
     localWrite("meta", meta);
     return { ok: true, meta };
+  }
+
+  async function setPhaseDeadline(phaseEndsAt) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/phase-deadline", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ phase_ends_at: phaseEndsAt })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not set the phase deadline");
+      return data;
+    }
+    const meta = localRead("meta");
+    meta.phase_ends_at = phaseEndsAt || null;
+    localWrite("meta", meta);
+    return { ok: true, phase_ends_at: meta.phase_ends_at };
+  }
+
+  async function setAutoAdvance(enabled) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/auto-advance", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ enabled: !!enabled })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not update auto-advance");
+      return data;
+    }
+    const meta = localRead("meta");
+    meta.auto_advance_when_done = !!enabled;
+    localWrite("meta", meta);
+    return { ok: true, auto_advance_when_done: meta.auto_advance_when_done };
+  }
+
+  async function playerActions() {
+    await probe();
+    if (mode !== "server") throw new Error("Player actions need the campaign server");
+    const res = await fetch(apiBase() + "/api/actions/players", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "API " + res.status);
+    return data;
   }
 
   async function actionsStatus() {
@@ -926,6 +982,7 @@
     confirmGame,
     disputeGame,
     voidGame,
+    rejectGame,
     inbox,
     markInboxRead,
     refreshWaitingBadge,
@@ -936,7 +993,10 @@
     campaignStatus,
     advancePhase,
     setPhase,
+    setPhaseDeadline,
+    setAutoAdvance,
     actionsStatus,
+    playerActions,
     doAction,
     moveForce: (forceId, destSysId, extra) =>
       doAction("move", { force_id: forceId, dest_sys_id: destSysId, ...(extra || {}) }),

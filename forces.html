@@ -107,6 +107,7 @@
     .badge.loyalist { background: var(--loyal-fill); color: var(--loyal); }
     .badge.traitor { background: var(--traitor-fill); color: var(--traitor); }
     .badge.blackshield { background: var(--blackshield-fill); color: var(--blackshield); }
+    .side-readout { margin: 0.35rem 0 0; font-size: 0.85rem; line-height: 1.4; color: var(--text); }
     .badge.active { background: #14532d; color: var(--success); }
     .badge.destroyed { background: #3f3f46; color: #a1a1aa; }
 
@@ -267,16 +268,26 @@
         </div>
         <div class="form-row">
           <div class="form-group">
-            <label for="f-allegiance">Allegiance *</label>
-            <select id="f-allegiance" required>
-              <option value="Loyalist">Loyalist</option>
-              <option value="Traitor">Traitor</option>
-              <option value="Blackshield">Blackshield</option>
-            </select>
+            <label for="f-side">Side</label>
+            <p id="f-side" class="side-readout">Side follows the owner.</p>
           </div>
           <div class="form-group">
             <label for="f-type">Force Type</label>
-            <input id="f-type" maxlength="40" placeholder="Legion" />
+            <input id="f-type" list="force-types" maxlength="40" placeholder="Legion, Blackshields, …" />
+            <datalist id="force-types">
+              <option value="Legion"></option>
+              <option value="Solar Auxilia"></option>
+              <option value="Mechanicum"></option>
+              <option value="Dark Mechanicum"></option>
+              <option value="Questoris"></option>
+              <option value="Legio Titanicus"></option>
+              <option value="Custodes"></option>
+              <option value="Silent Sisterhood"></option>
+              <option value="Militia"></option>
+              <option value="Blackshields"></option>
+              <option value="Daemons"></option>
+              <option value="Knights-Errant"></option>
+            </datalist>
           </div>
         </div>
         <div class="form-group">
@@ -350,6 +361,24 @@
 
     const playerSel = document.getElementById("f-player");
     const sysSel = document.getElementById("f-sys");
+
+    function syncSideReadout() {
+      const side = document.getElementById("f-side");
+      if (!side) return;
+      const owner = players.find((p) => Number(p.player_id) === Number(playerSel.value));
+      if (!owner) {
+        side.textContent = "Side follows the owner.";
+        return;
+      }
+      const name = owner.display_name || owner.player_name || "This player";
+      if (owner.allegiance === "Loyalist" || owner.allegiance === "Traitor") {
+        side.textContent = name + " is " + owner.allegiance + ". This force counts for that side, including a Blackshields army.";
+        return;
+      }
+      side.textContent = name + " still needs a side. The campaign admin must assign Loyalist or Traitor before this force can be saved.";
+    }
+
+    playerSel.addEventListener("change", syncSideReadout);
     SYSTEMS.forEach(s => {
       const o = document.createElement("option");
       o.value = s.id; o.textContent = s.name;
@@ -368,6 +397,7 @@
         playerSel.appendChild(o);
       });
       if (cur) playerSel.value = cur;
+      syncSideReadout();
       render();
       let badge = document.getElementById("mode-badge");
       if (!badge) {
@@ -469,7 +499,7 @@
       document.getElementById("f-name").value = force ? force.force_name : "";
       document.getElementById("f-player").value = force ? force.player_id : (players[0]?.player_id || "");
       document.getElementById("f-system").value = force ? force.game_system : "HH";
-      document.getElementById("f-allegiance").value = force ? force.allegiance : "Loyalist";
+      syncSideReadout();
       document.getElementById("f-type").value = force ? (force.force_type || "") : "";
       document.getElementById("f-legion").value = force ? (force.legion || "") : "";
       document.getElementById("f-warlord").value = force ? (force.warlord_name || "") : "";
@@ -508,7 +538,6 @@
         force_name: document.getElementById("f-name").value.trim(),
         game_system: document.getElementById("f-system").value,
         force_type: document.getElementById("f-type").value.trim() || null,
-        allegiance: document.getElementById("f-allegiance").value,
         legion: document.getElementById("f-legion").value.trim() || null,
         warlord_name: document.getElementById("f-warlord").value.trim() || null,
         strength: Number(document.getElementById("f-strength").value),

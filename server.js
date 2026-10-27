@@ -33,6 +33,12 @@
  *   GET  /api/feedback                 (campaign_admin)
  *   GET  /api/admin/backup             (campaign_admin) campaign JSON download
  *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET", keep_map?, keep_control? }
+ *   POST /api/campaign/phase-deadline  (campaign_admin) { phase_ends_at } — ISO time, or null to clear
+ *   POST /api/campaign/auto-advance    (campaign_admin) { enabled: boolean }
+ *   A past phase deadline, or every counted player being out of actions during
+ *   Logistics, advances one phase. Checked on startup and about every 30s
+ *   (AUTO_ADVANCE_INTERVAL_MS). phase_ends_at is one instant, cleared after a
+ *   successful advance, so a later weekly schedule can store the next instant.
  *   node server.js reset-campaign [--keep-map] [--keep-control] [--purge-accounts]
  *   --keep-control requires --keep-map.
  *
@@ -285,8 +291,144 @@ function randomInvite() {
 }
 
 const LOGIN_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{2,31}$/;
-const ALLEGIANCES = ["Loyalist", "Traitor", "Blackshield"];
+const ALLEGIANCES = ["Loyalist", "Traitor"];
+const NEEDS_SIDE = "needs side";
 const INVITE_MAX_USES_CAP = 25;
+
+function isBlackshieldMark(value) {
+  const text = String(value == null ? "" : value).trim().toLowerCase();
+  return text === "blackshield" || text === "blackshields";
+}
+
+function sideOf(player) {
+  if (!player) return null;
+  return ALLEGIANCES.includes(player.allegiance) ? player.allegiance : null;
+}
+
+function requirePlayerSide(value) {
+  const allegiance = String(value == null ? "" : value).trim();
+  if (!ALLEGIANCES.includes(allegiance)) {
+    return { ok: false, error: "Allegiance must be Loyalist or Traitor" };
+  }
+  return { ok: true, allegiance };
+}
+
+function otherSide(allegiance) {
+  if (allegiance === "Loyalist") return "Traitor";
+  if (allegiance === "Traitor") return "Loyalist";
+  return null;
+}
+
+/**
+ * Force allegiance is the owning player's side. A Blackshields army is a force
+ * type on that side. When the stored allegiance is still the old Blackshield
+ * mark, fill force_type Blackshields only if the type is blank or the same mark.
+ * A type that was already filled in (Legion, Militia, …) is kept.
+ */
+function applyOwnerSide(force, side) {
+  const marked = isBlackshieldMark(force.allegiance);
+  const next = { ...force, allegiance: side };
+  const type = String(force.force_type || "").trim();
+  if (marked && (!type || isBlackshieldMark(type))) next.force_type = "Blackshields";
+  else if (!marked && isBlackshieldMark(type)) next.force_type = "Blackshields";
+  return next;
+}
+
+function preserveBlackshieldMark(force) {
+  if (!isBlackshieldMark(force.allegiance)) return force;
+  const type = String(force.force_type || "").trim();
+  const nextType = !type || isBlackshieldMark(type) ? "Blackshields" : type;
+  if (force.allegiance === "Blackshield" && force.force_type === nextType) return force;
+  return { ...force, allegiance: "Blackshield", force_type: nextType };
+}
+
+function readExistingCollection(name) {
+  const spec = COLLECTIONS[name];
+  if (!spec) return [];
+  const fp = path.join(DATA, spec.file);
+  if (!fs.existsSync(fp)) return [];
+  const data = JSON.parse(fs.readFileSync(fp, "utf8"));
+  return data;
+}
+
+function alignOwnerForces(playerId, side) {
+  const forces = readCollection("forces");
+  let changed = false;
+  const next = forces.map((force) => {
+    if (Number(force.player_id) !== Number(playerId)) return force;
+    const updated = applyOwnerSide(force, side);
+    if (updated.allegiance === force.allegiance && updated.force_type === force.force_type) return force;
+    changed = true;
+    return updated;
+  });
+  if (changed) writeCollection("forces", next);
+  return changed;
+}
+
+function forceWithOwnerSide(force) {
+  const owner = readCollection("players").find((player) => Number(player.player_id) === Number(force.player_id));
+  if (!owner) return { ok: false, error: "Force owner was not found" };
+  const side = sideOf(owner);
+  if (!side) {
+    return { ok: false, error: "Assign this player a Loyalist or Traitor side before editing their forces" };
+  }
+  return { ok: true, force: applyOwnerSide(force, side) };
+}
+
+/**
+ * Idempotent load migration. Blackshield was never a third side.
+ * Players marked Blackshield become "needs side" until an admin assigns one.
+ * Forces of a Loyalist or Traitor player take that side. Their type becomes
+ * Blackshields only when it was blank or already a Blackshield mark.
+ * Forces of a player who still needs a side keep the Blackshield mark so the
+ * same pass can finish them after the admin assigns a side.
+ * A pre-change backup is written only when something actually changes.
+ * The admin Download backup (GET /api/admin/backup) is a separate full export.
+ */
+function migrateBlackshieldAllegiance() {
+  ensureDataDir();
+  const players = readExistingCollection("players");
+  const forces = readExistingCollection("forces");
+  const nextPlayers = players.map((player) => {
+    if (!isBlackshieldMark(player.allegiance)) return player;
+    return { ...player, allegiance: NEEDS_SIDE };
+  });
+  const sideById = new Map();
+  nextPlayers.forEach((player) => {
+    const side = sideOf(player);
+    if (side) sideById.set(Number(player.player_id), side);
+  });
+  const nextForces = forces.map((force) => {
+    const side = sideById.get(Number(force.player_id));
+    if (side) return applyOwnerSide(force, side);
+    return preserveBlackshieldMark(force);
+  });
+  const playersChanged = JSON.stringify(players) !== JSON.stringify(nextPlayers);
+  const forcesChanged = JSON.stringify(forces) !== JSON.stringify(nextForces);
+  if (!playersChanged && !forcesChanged) return { changed: false };
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = path.join(DATA, "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const backupFile = path.join(dir, "pre-blackshield-" + stamp + ".json");
+  atomicWrite(
+    backupFile,
+    JSON.stringify(
+      {
+        taken_at: new Date().toISOString(),
+        reason: "Before removing Blackshield as a player allegiance",
+        players,
+        forces
+      },
+      null,
+      2
+    ) + "\n"
+  );
+  if (playersChanged) writeCollection("players", nextPlayers);
+  if (forcesChanged) writeCollection("forces", nextForces);
+  const flagged = nextPlayers.filter((player, index) => player.allegiance === NEEDS_SIDE && players[index] && players[index].allegiance !== NEEDS_SIDE).length;
+  console.log("Blackshield migration: " + flagged + " players flagged as needs side. Backup: " + backupFile);
+  return { changed: true, backup: backupFile, flagged };
+}
 
 function normalizeInviteCode(code) {
   return String(code || "")
@@ -1222,10 +1364,9 @@ async function handleAuth(req, res, parts, method) {
     const displayName = String(body.display_name == null ? "" : body.display_name).trim();
     if (!displayName) return send(res, 400, { error: "Display name is required" });
     if (displayName.length > 80) return send(res, 400, { error: "Display name must be at most 80 characters" });
-    const allegiance = String(body.allegiance == null ? "" : body.allegiance).trim();
-    if (!ALLEGIANCES.includes(allegiance)) {
-      return send(res, 400, { error: "Allegiance must be Loyalist, Traitor, or Blackshield" });
-    }
+    const side = requirePlayerSide(body.allegiance);
+    if (!side.ok) return send(res, 400, { error: side.error });
+    const allegiance = side.allegiance;
     const contactRaw = String(body.contact == null ? "" : body.contact).trim();
     if (contactRaw.length > 120) return send(res, 400, { error: "Contact must be at most 120 characters" });
     const notesRaw = String(body.notes == null ? "" : body.notes).trim();
@@ -1381,7 +1522,16 @@ function applyPendingMoves(forces) {
   });
 }
 
-const DECISIVE_RESULTS = ["attacker_win", "defender_win", "draw", "conceded"];
+const DECISIVE_RESULTS = [
+  "attacker_win",
+  "defender_win",
+  "draw",
+  "conceded",
+  "unable_to_schedule",
+  "no_show",
+  "no_report"
+];
+const GAME_RESULTS = DECISIVE_RESULTS.concat(["in_progress"]);
 
 function isDecisive(result) {
   return DECISIVE_RESULTS.includes(result);
@@ -1420,6 +1570,7 @@ function sanitizeGameBody(body) {
   delete body.dispute_note;
   delete body.applied_at;
   delete body.assigned;
+  delete body.action_bonus;
 }
 
 function parsePositiveInteger(value) {
@@ -1466,15 +1617,34 @@ function victoryPointError(body) {
 
 function normalizeGameResult(body) {
   if (!body.result) body.result = "in_progress";
-  if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
-  else if (body.result === "defender_win") body.winner_id = Number(body.defender_id);
-  else if (body.result === "draw" || body.result === "in_progress") body.winner_id = null;
-  else if (body.result === "conceded" && body.winner_id != null && body.winner_id !== "") {
-    body.winner_id = Number(body.winner_id);
-  }
-  ["attacker_id", "defender_id", "attacker_force_id", "defender_force_id", "sys_id", "turn"].forEach((key) => {
+  ["attacker_id", "defender_id", "attacker_force_id", "defender_force_id", "sys_id", "turn", "no_show_id"].forEach((key) => {
     if (body[key] != null && body[key] !== "") body[key] = Number(body[key]);
   });
+  if (body.result === "attacker_win") body.winner_id = Number(body.attacker_id);
+  else if (body.result === "defender_win") body.winner_id = Number(body.defender_id);
+  else if (
+    body.result === "draw" ||
+    body.result === "in_progress" ||
+    body.result === "unable_to_schedule" ||
+    body.result === "no_report"
+  ) {
+    body.winner_id = null;
+  } else if (body.result === "conceded" && body.winner_id != null && body.winner_id !== "") {
+    body.winner_id = Number(body.winner_id);
+  } else if (body.result === "no_show") {
+    const offender = Number(body.no_show_id);
+    if (offender && offender === Number(body.attacker_id)) body.winner_id = Number(body.defender_id);
+    else if (offender && offender === Number(body.defender_id)) body.winner_id = Number(body.attacker_id);
+    else body.winner_id = null;
+    if (body.attacker_vp == null) body.attacker_vp = 0;
+    if (body.defender_vp == null) body.defender_vp = 0;
+  }
+  if (body.result === "unable_to_schedule" || body.result === "no_report") {
+    body.attacker_vp = null;
+    body.defender_vp = null;
+    body.no_show_id = null;
+  }
+  if (body.result !== "no_show") body.no_show_id = null;
 }
 
 function validateGameWrite(body, auth, existing) {
@@ -1498,8 +1668,37 @@ function validateGameWrite(body, auth, existing) {
   if (!attackerId || !defenderId) return { status: 400, error: "attacker_id and defender_id are required" };
   if (attackerId === defenderId) return { status: 400, error: "Attacker and defender must be different players" };
   if (!Number(body.sys_id)) return { status: 400, error: "sys_id is required" };
-  if (!["attacker_win", "defender_win", "draw", "conceded", "in_progress"].includes(body.result)) {
+  if (!GAME_RESULTS.includes(body.result)) {
     return { status: 400, error: "result is not valid" };
+  }
+  if (body.result === "no_report" && !isAdmin) {
+    return { status: 403, error: "Only the campaign admin can mark a battle as no report" };
+  }
+  if (body.result === "no_show") {
+    const offender = Number(body.no_show_id);
+    if (offender !== attackerId && offender !== defenderId) {
+      return { status: 400, error: "Say which player did not show up" };
+    }
+    if (!isAdmin && offender === Number(auth.account.player_id)) {
+      return { status: 400, error: "You can only report the other player as a no show" };
+    }
+  }
+  if (
+    !isAdmin &&
+    existing &&
+    existing.result === "no_report" &&
+    existing.result_state === "pending"
+  ) {
+    return { status: 403, error: "A no report is waiting for the campaign admin" };
+  }
+  if (
+    !isAdmin &&
+    existing &&
+    existing.result === "no_show" &&
+    existing.result_state === "pending" &&
+    Number(existing.proposed_by) !== Number(auth.account.player_id)
+  ) {
+    return { status: 403, error: "A no show is waiting for the campaign admin" };
   }
   if (body.result === "conceded") {
     const winner = Number(body.winner_id);
@@ -1582,6 +1781,7 @@ function sameProposal(previous, game) {
   return (
     previous.result === game.result &&
     String(previous.winner_id ?? "") === String(game.winner_id ?? "") &&
+    String(previous.no_show_id ?? "") === String(game.no_show_id ?? "") &&
     Number(previous.attacker_force_id) === Number(game.attacker_force_id) &&
     Number(previous.defender_force_id) === Number(game.defender_force_id) &&
     Number(previous.sys_id) === Number(game.sys_id)
@@ -1624,7 +1824,7 @@ function reverseResolution(game, state, games) {
 }
 
 function winnerAllegiance(game, state) {
-  if (!game || game.result === "draw" || game.result === "in_progress") return null;
+  if (!game || game.result === "draw" || game.result === "no_report" || game.result === "in_progress") return null;
   let winnerPlayerId = null;
   let winnerForceId = null;
   if (game.result === "attacker_win") {
@@ -1633,7 +1833,7 @@ function winnerAllegiance(game, state) {
   } else if (game.result === "defender_win") {
     winnerPlayerId = game.defender_id;
     winnerForceId = game.defender_force_id;
-  } else if (game.result === "conceded") {
+  } else if (game.result === "conceded" || game.result === "no_show") {
     winnerPlayerId = game.winner_id;
     if (Number(winnerPlayerId) === Number(game.attacker_id)) winnerForceId = game.attacker_force_id;
     else if (Number(winnerPlayerId) === Number(game.defender_id)) winnerForceId = game.defender_force_id;
@@ -1646,12 +1846,12 @@ function winnerAllegiance(game, state) {
 }
 
 function loserForceIds(game) {
-  if (game.result === "draw") {
+  if (game.result === "draw" || game.result === "no_report") {
     return [game.attacker_force_id, game.defender_force_id].filter((id) => id != null && id !== "");
   }
   if (game.result === "attacker_win") return [game.defender_force_id].filter((id) => id != null && id !== "");
   if (game.result === "defender_win") return [game.attacker_force_id].filter((id) => id != null && id !== "");
-  if (game.result === "conceded") {
+  if (game.result === "conceded" || game.result === "no_show") {
     if (Number(game.winner_id) === Number(game.attacker_id)) {
       return [game.defender_force_id].filter((id) => id != null && id !== "");
     }
@@ -1667,11 +1867,23 @@ function loserForceIds(game) {
  * Durability drops by 1 while it is above 0. The battle that reaches 0 does
  * not also drop power; the next battle does. Power does not go below 0.
  * A draw reduces both strengths and does not change sys_loyal / sys_traitor.
- * Blackshield winners do not change either system score (there is no track).
+ * Only a Loyalist or Traitor winner moves that side's system track.
  */
 function applyResolution(game, state, games) {
   if (!game || !isDecisive(game.result) || game.result_state !== "applied") {
     game.resolution = null;
+    return;
+  }
+  // Unable to schedule closes the battle so it no longer blocks the advance.
+  // It is not a fight: no VP, strength, durability, power, or control change,
+  // and neither force counts as having fought.
+  if (game.result === "unable_to_schedule") {
+    game.resolution = {
+      system: null,
+      forces: [],
+      result: game.result,
+      at: new Date().toISOString()
+    };
     return;
   }
   const sys = state.systems.find((s) => Number(s.sys_id) === Number(game.sys_id));
@@ -1684,16 +1896,20 @@ function applyResolution(game, state, games) {
     prev_controller: sys ? sys.sys_controller || null : null
   };
   if (sys) {
-    const dur = systemDurability(sys);
-    if (dur > 0) {
-      systemEffect.durability_delta = -1;
-      sys.sys_durability = dur - 1;
-    } else {
-      sys.sys_durability = 0;
-      const power = Number(sys.sys_power) || 0;
-      if (power > 0) {
-        systemEffect.power_delta = -1;
-        sys.sys_power = power - 1;
+    // No report punishes the forces only. Durability and power stay put,
+    // and there is no winning side to move the system score.
+    if (game.result !== "no_report") {
+      const dur = systemDurability(sys);
+      if (dur > 0) {
+        systemEffect.durability_delta = -1;
+        sys.sys_durability = dur - 1;
+      } else {
+        sys.sys_durability = 0;
+        const power = Number(sys.sys_power) || 0;
+        if (power > 0) {
+          systemEffect.power_delta = -1;
+          sys.sys_power = power - 1;
+        }
       }
     }
     const alleg = winnerAllegiance(game, state);
@@ -1811,6 +2027,14 @@ function settleGame(game, previous, state, games, actor) {
       game.dispute_note = null;
     }
   }
+  // Saving a no report, including an admin save, only flags it. Confirm applies
+  // the loss. The deadline flag uses the same pending state and does not call
+  // this with confirming set.
+  if (game.result === "no_report" && !actor.confirming) {
+    apply = false;
+    game.proposed_by = null;
+    if (!game.proposed_at) game.proposed_at = new Date().toISOString();
+  }
   if (apply) {
     game.result_state = "applied";
     applyResolution(game, state, games);
@@ -1818,6 +2042,52 @@ function settleGame(game, previous, state, games, actor) {
     game.result_state = "pending";
     game.resolution = null;
   }
+  syncNoShowBonus(previous, game);
+}
+
+function addActionBonus(meta, playerId, turn, delta) {
+  if (!meta.action_bonuses || typeof meta.action_bonuses !== "object" || Array.isArray(meta.action_bonuses)) {
+    meta.action_bonuses = {};
+  }
+  const key = String(playerId);
+  const bag = meta.action_bonuses[key] && typeof meta.action_bonuses[key] === "object" ? { ...meta.action_bonuses[key] } : {};
+  const turnKey = String(turn);
+  const next = (Number(bag[turnKey]) || 0) + delta;
+  if (next > 0) bag[turnKey] = next;
+  else delete bag[turnKey];
+  if (Object.keys(bag).length) meta.action_bonuses[key] = bag;
+  else delete meta.action_bonuses[key];
+}
+
+/** A confirmed no show grants the winner +1 action on the battle's next turn. */
+function syncNoShowBonus(previous, game) {
+  const meta = readCollection("meta") || {};
+  let changed = false;
+  const prevBonus = previous && previous.action_bonus;
+  const keep =
+    prevBonus &&
+    game.result === "no_show" &&
+    game.result_state === "applied" &&
+    previous.result_state === "applied" &&
+    sameProposal(previous, game);
+  if (prevBonus && !keep) {
+    addActionBonus(meta, prevBonus.player_id, prevBonus.turn, -1);
+    changed = true;
+  }
+  if (game.result === "no_show" && game.result_state === "applied" && !keep) {
+    const playerId = Number(game.winner_id);
+    const turn = (Number(game.turn) || 1) + 1;
+    if (playerId) {
+      addActionBonus(meta, playerId, turn, 1);
+      game.action_bonus = { player_id: playerId, turn, extra: 1 };
+      changed = true;
+    }
+  } else if (keep) {
+    game.action_bonus = previous.action_bonus;
+  } else if (game.result !== "no_show" || game.result_state !== "applied") {
+    game.action_bonus = null;
+  }
+  if (changed) writeCollection("meta", meta);
 }
 
 function activeSideForces(forces, sysId, allegiance) {
@@ -1837,7 +2107,8 @@ function activeSideForces(forces, sysId, allegiance) {
  * Counts are split as evenly as possible: 2 vs 5 means one force fights three
  * times and the other twice (sorted by force_id, extras go to the lower ids).
  * Loyalist is the attacker and Traitor the defender so the pairing is stable.
- * Only Loyalist vs Traitor is auto-paired. Blackshield forces are left out.
+ * Only Loyalist and Traitor forces are auto-paired. Any other allegiance,
+ * including a force still marked Blackshield because its owner needs a side, is left out.
  */
 function buildPairings(loyal, traitor) {
   if (!loyal.length || !traitor.length) return [];
@@ -2075,6 +2346,15 @@ async function confirmBattle(req, res, idPart) {
   if (!isDecisive(existing.result) || !canApply) {
     return send(res, 409, { error: "This battle has no result waiting to be applied" });
   }
+  if (existing.result === "no_report" && !isAdmin) {
+    return send(res, 403, { error: "A no report must be confirmed by the campaign admin" });
+  }
+  if (existing.result === "no_show" && !isAdmin) {
+    if (Number(existing.proposed_by) === playerId) {
+      return send(res, 403, { error: "Waiting for the campaign admin to confirm this no show" });
+    }
+    return send(res, 403, { error: "A no show must be confirmed by the campaign admin, not the opponent" });
+  }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "Waiting for your opponent to confirm this result" });
   }
@@ -2121,7 +2401,10 @@ function resultPhrase(result) {
       attacker_win: "an attacker win",
       defender_win: "a defender win",
       draw: "a draw",
-      conceded: "a concession"
+      conceded: "a concession",
+      unable_to_schedule: "unable to schedule",
+      no_show: "a no show",
+      no_report: "a no report"
     }[result] || "a result"
   );
 }
@@ -2130,7 +2413,7 @@ function winnerPlayerId(game) {
   if (!game) return null;
   if (game.result === "attacker_win") return Number(game.attacker_id) || null;
   if (game.result === "defender_win") return Number(game.defender_id) || null;
-  if (game.result === "conceded" && game.winner_id != null && game.winner_id !== "") {
+  if ((game.result === "conceded" || game.result === "no_show") && game.winner_id != null && game.winner_id !== "") {
     return Number(game.winner_id) || null;
   }
   return null;
@@ -2187,8 +2470,36 @@ function announceBattleChange(previous, game, actor) {
     !sameProposal(previous, game) ||
     Number(previous.proposed_by) !== Number(game.proposed_by) ||
     prevState !== "pending";
+  const special = game.result === "unable_to_schedule" || game.result === "no_show" || game.result === "no_report";
 
-  if (game.result_state === "pending" && proposalChanged && actor.role !== "campaign_admin") {
+  if (special && game.result_state === "pending" && proposalChanged) {
+    const players = [game.attacker_id, game.defender_id].filter(Boolean);
+    const offender = game.result === "no_show" ? playerLabel(game.no_show_id) : "";
+    const reporter = playerLabel(game.proposed_by);
+    const text = game.result === "no_show"
+      ? reporter + " reported " + offender + " as a no show for " + title + ". It is waiting for the campaign admin."
+      : game.result === "no_report"
+        ? "The campaign admin marked " + title + " as no report. No report, pending admin confirmation. Both forces will suffer a loss."
+        : reporter + " reported " + title + " as unable to schedule. Neither player is penalized.";
+    players.forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_submitted",
+        text,
+        ref
+      });
+    });
+    if (game.result === "no_show" || game.result === "no_report") {
+      notices.push({
+        player_id: null,
+        audience: "campaign_admin",
+        kind: "battle_result_submitted",
+        text,
+        ref
+      });
+    }
+  } else if (game.result_state === "pending" && proposalChanged && actor.role !== "campaign_admin") {
     const opponent = otherParticipant(game, game.proposed_by);
     if (opponent) {
       notices.push({
@@ -2201,7 +2512,22 @@ function announceBattleChange(previous, game, actor) {
     }
   }
 
-  if (game.result_state === "applied" && prevState !== "applied") {
+  if (special && game.result_state === "applied" && prevState !== "applied") {
+    const text = game.result === "no_show"
+      ? "The campaign admin confirmed the no show for " + title + ". " + playerLabel(game.no_show_id) + "'s force loses, and " + playerLabel(game.winner_id) + " gains an extra logistics action next turn."
+      : game.result === "no_report"
+        ? "The campaign admin confirmed the no report for " + title + ". Both forces suffer a loss. Neither side gains victory points or control."
+        : "Unable to schedule was confirmed for " + title + ". The battle is closed with no penalties.";
+    [game.attacker_id, game.defender_id].filter(Boolean).forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_applied",
+        text,
+        ref
+      });
+    });
+  } else if (game.result_state === "applied" && prevState !== "applied") {
     const adminDidIt = actor.role === "campaign_admin";
     const who = adminDidIt ? "The campaign admin" : playerLabel(actor.player_id);
     const targets = new Set();
@@ -2247,6 +2573,12 @@ async function disputeBattle(req, res, idPart) {
   if (!isAdmin && !isParticipant(existing, playerId)) {
     return send(res, 403, { error: "You can only dispute a battle you are taking part in" });
   }
+  if (existing.result === "no_show") {
+    return send(res, 409, { error: "A no show is confirmed or rejected by the campaign admin" });
+  }
+  if (existing.result === "no_report") {
+    return send(res, 409, { error: "A no report is confirmed or rejected by the campaign admin" });
+  }
   if (!isAdmin && Number(existing.proposed_by) === playerId) {
     return send(res, 403, { error: "You can't dispute your own result" });
   }
@@ -2287,6 +2619,54 @@ async function disputeBattle(req, res, idPart) {
       ref
     });
   }
+  writeNotices(notices);
+  return send(res, 200, game);
+}
+
+async function rejectNoShow(req, res, idPart) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const list = readCollection("games");
+  const idx = list.findIndex((g) => String(g.game_id) === String(idPart));
+  if (idx < 0) return send(res, 404, { error: "Not found" });
+  const existing = list[idx];
+  if (!["no_show", "no_report"].includes(existing.result) || existing.result_state !== "pending") {
+    return send(res, 409, { error: "Only a no show or no report waiting for admin confirmation can be rejected" });
+  }
+  const game = cloneData(existing);
+  if (game.resolution) {
+    const state = battleState();
+    reverseResolution(game, state, list);
+    saveBattleState(state);
+  }
+  game.result = "in_progress";
+  game.winner_id = null;
+  game.no_show_id = null;
+  game.result_state = "open";
+  game.proposed_by = null;
+  game.proposed_at = null;
+  game.disputed_by = null;
+  game.disputed_at = null;
+  game.dispute_note = null;
+  game.resolution = null;
+  game.action_bonus = null;
+  game.attacker_vp = null;
+  game.defender_vp = null;
+  list[idx] = game;
+  writeCollection("games", list);
+  const title = battlePlace(game);
+  const ref = { type: "game", game_id: game.game_id };
+  const text = existing.result === "no_report"
+    ? "The campaign admin rejected the no report for " + title + ". The battle is open again and nothing was applied."
+    : "The campaign admin rejected the no show for " + title + ". The battle is open again and nothing was applied.";
+  const notices = [existing.attacker_id, existing.defender_id].filter(Boolean).map((pid) => ({
+    player_id: Number(pid),
+    audience: "player",
+    kind: "battle_result_rejected",
+    text,
+    ref
+  }));
   writeNotices(notices);
   return send(res, 200, game);
 }
@@ -2379,7 +2759,9 @@ function describeWaitingGame(game) {
     disputed_by_name: pname(game.disputed_by),
     disputed_at: game.disputed_at || null,
     dispute_note: game.dispute_note || null,
-    notes: game.notes || null
+    notes: game.notes || null,
+    no_show_id: game.no_show_id == null || game.no_show_id === "" ? null : Number(game.no_show_id),
+    no_show_name: game.no_show_id == null || game.no_show_id === "" ? null : pname(game.no_show_id)
   };
 }
 
@@ -2398,7 +2780,11 @@ function inboxFor(account) {
       const card = describeWaitingGame(game);
       const proposedBy = game.proposed_by == null ? null : Number(game.proposed_by);
       const involved = pid != null && isParticipant(game, pid);
-      if (state === "pending" && involved && proposedBy !== pid) {
+      if (game.result === "no_show" && state === "pending") {
+        if (isAdmin) actions.push({ ...card, duty: "no_show" });
+      } else if (game.result === "no_report" && state === "pending") {
+        if (isAdmin) actions.push({ ...card, duty: "no_report" });
+      } else if (state === "pending" && involved && proposedBy !== pid) {
         actions.push({ ...card, duty: "confirm" });
       } else if (isAdmin && (state === "pending" || state === "disputed")) {
         actions.push({ ...card, duty: "admin" });
@@ -2510,24 +2896,105 @@ function ensurePlayerActions(meta, playerId, turn) {
   return entry;
 }
 
+function actionBonus(meta, playerId, turn) {
+  const all = meta && meta.action_bonuses;
+  if (!all || typeof all !== "object") return 0;
+  const bag = all[String(playerId)];
+  if (!bag || typeof bag !== "object") return 0;
+  const extra = Number(bag[String(turn)]);
+  if (!Number.isFinite(extra) || extra <= 0) return 0;
+  return extra;
+}
+
+function actionsForTurn(meta, playerId, turn) {
+  return ACTIONS_PER_TURN + actionBonus(meta, playerId, turn == null ? Number(meta && meta.turn) || 1 : turn);
+}
+
 function actionsRemaining(meta, playerId) {
   const turn = Number(meta.turn) || 1;
   const entry = ensurePlayerActions(meta, playerId, turn);
-  return Math.max(0, ACTIONS_PER_TURN - (Number(entry.used) || 0));
+  return Math.max(0, actionsForTurn(meta, playerId, turn) - (Number(entry.used) || 0));
+}
+
+function actionsUsedThisTurn(meta, playerId) {
+  const turn = Number(meta && meta.turn) || 1;
+  const bag = meta && meta.player_actions && typeof meta.player_actions === "object" ? meta.player_actions : {};
+  const entry = bag[String(playerId)];
+  if (!entry || Number(entry.turn) !== turn) return 0;
+  const used = Number(entry.used) || 0;
+  return used > 0 ? used : 0;
+}
+
+function canSpendCampaignActions(player) {
+  return sideOf(player) != null;
+}
+
+function rosterName(player) {
+  return player.display_name || player.player_name || "Player " + player.player_id;
+}
+
+function playerActionRoster() {
+  const meta = readCollection("meta") || {};
+  const forces = readCollection("forces");
+  const turn = Number(meta.turn) || 1;
+  const everyone = readCollection("players");
+  const needsSide = everyone
+    .filter((player) => !sideOf(player))
+    .map((player) => ({
+      player_id: player.player_id,
+      display_name: rosterName(player),
+      status: player.status || "active",
+      allegiance: player.allegiance || ""
+    }))
+    .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)));
+  const players = everyone
+    .filter((player) => String(player.status || "active").toLowerCase() === "active" && sideOf(player))
+    .map((player) => {
+      const used = actionsUsedThisTurn(meta, player.player_id);
+      const cap = actionsForTurn(meta, player.player_id, turn);
+      const remaining = Math.max(0, cap - used);
+      const activeForces = forces.filter(
+        (force) => Number(force.player_id) === Number(player.player_id) && force.status === "active"
+      ).length;
+      return {
+        player_id: player.player_id,
+        display_name: rosterName(player),
+        allegiance: player.allegiance,
+        actions_used: Math.min(used, cap),
+        actions_remaining: remaining,
+        actions_per_turn: cap,
+        active_forces: activeForces,
+        finished: remaining === 0
+      };
+    })
+    .sort((a, b) => String(a.display_name).localeCompare(String(b.display_name)));
+  const activePlayers = players.length;
+  const finished = players.filter((player) => player.finished).length;
+  return {
+    turn,
+    phase: meta.phase || "Logistics",
+    actions_per_turn: ACTIONS_PER_TURN,
+    active_players: activePlayers,
+    finished,
+    ready_to_advance: activePlayers > 0 && finished === activePlayers,
+    needs_side: needsSide,
+    players
+  };
 }
 
 function spendAction(meta, playerId, note) {
   const turn = Number(meta.turn) || 1;
   const entry = ensurePlayerActions(meta, playerId, turn);
-  if ((Number(entry.used) || 0) >= ACTIONS_PER_TURN) {
-    return { ok: false, error: "No actions remaining this turn (2 per turn)" };
+  const cap = actionsForTurn(meta, playerId, turn);
+  if ((Number(entry.used) || 0) >= cap) {
+    return { ok: false, error: "No actions remaining this turn (" + cap + " per turn)" };
   }
   entry.used = (Number(entry.used) || 0) + 1;
   entry.log = (entry.log || []).slice(-30);
   entry.log.push({
     at: new Date().toISOString(),
     note: note || "action",
-    remaining: ACTIONS_PER_TURN - entry.used
+    remaining: cap - entry.used
   });
   return { ok: true, entry };
 }
@@ -2542,7 +3009,7 @@ function refundAction(meta, playerId, note) {
   entry.log.push({
     at: new Date().toISOString(),
     note: note || "refund",
-    remaining: ACTIONS_PER_TURN - entry.used
+    remaining: actionsForTurn(meta, playerId, turn) - entry.used
   });
   return { ok: true, refunded: true, entry };
 }
@@ -2557,13 +3024,10 @@ function playerOwnsForce(force, auth) {
 }
 
 function opposingForcesInSystem(forces, sysId, allegiance) {
+  const other = otherSide(allegiance);
+  if (!other) return [];
   return forces.filter(
-    (f) =>
-      f.status === "active" &&
-      Number(f.sys_id) === Number(sysId) &&
-      f.allegiance &&
-      f.allegiance !== allegiance &&
-      f.allegiance !== "Blackshield"
+    (f) => f.status === "active" && Number(f.sys_id) === Number(sysId) && f.allegiance === other
   );
 }
 
@@ -2800,11 +3264,17 @@ function advanceCampaign(meta, options = {}) {
   meta.turn = turn;
   meta.phase = phase;
   meta.last_advanced_at = new Date().toISOString();
+  if (meta.phase_ends_at) log.push("Cleared the phase deadline");
+  meta.phase_ends_at = null;
+  meta.auto_advance_blocked = null;
+  if (options.automatic) log.unshift(automaticAdvanceNote(options.reason));
   meta.phase_log = (meta.phase_log || []).slice(-20).concat([
     {
       at: meta.last_advanced_at,
       from: { turn: fromTurn, phase: fromPhase },
       to: { turn, phase },
+      automatic: !!options.automatic,
+      reason: options.automatic ? options.reason || null : null,
       notes: log
     }
   ]);
@@ -2819,6 +3289,11 @@ function advanceCampaign(meta, options = {}) {
   writeCollection("systems", systems);
   writeCollection("forces", forces);
   writeCollection("meta", meta);
+  announcePhaseAdvance(
+    { turn: fromTurn, phase: fromPhase },
+    { turn, phase },
+    options
+  );
 
   return {
     ok: true,
@@ -2828,6 +3303,191 @@ function advanceCampaign(meta, options = {}) {
     to: { turn, phase },
     victory
   };
+}
+
+const AUTO_ADVANCE_INTERVAL_MS = (() => {
+  const raw = Number(process.env.AUTO_ADVANCE_INTERVAL_MS);
+  if (Number.isFinite(raw) && raw >= 200) return Math.min(raw, 60000);
+  return 30000;
+})();
+let advanceLock = false;
+
+function withAdvanceLock(fn) {
+  if (advanceLock) {
+    return { ok: false, code: "advance_in_progress", error: "An advance is already in progress" };
+  }
+  advanceLock = true;
+  try {
+    return fn();
+  } finally {
+    advanceLock = false;
+  }
+}
+
+function automaticAdvanceNote(reason) {
+  if (reason === "deadline") return "Automatic advance: the phase deadline passed";
+  if (reason === "all_actions_done") return "Automatic advance: every counted player is out of actions";
+  return "Automatic advance";
+}
+
+function phaseAdvanceText(from, to, options) {
+  const where =
+    Number(from.turn) === Number(to.turn)
+      ? "from " + from.phase + " to " + to.phase + " (turn " + to.turn + ")"
+      : "from " + from.phase + " (turn " + from.turn + ") to " + to.phase + " (turn " + to.turn + ")";
+  let because = "";
+  if (options.automatic && options.reason === "deadline") because = " because the phase deadline passed";
+  if (options.automatic && options.reason === "all_actions_done") {
+    because = " because every counted player is out of actions";
+  }
+  return "The campaign advanced" + (options.automatic ? " automatically" : "") + " " + where + because + ".";
+}
+
+function announcePhaseAdvance(from, to, options) {
+  const text = phaseAdvanceText(from, to, options || {});
+  const notices = readCollection("players")
+    .filter((player) => player && player.player_id != null)
+    .map((player) => ({
+      player_id: player.player_id,
+      audience: "player",
+      kind: "phase_advanced",
+      text,
+      ref: {
+        type: "campaign",
+        turn: to.turn,
+        phase: to.phase,
+        automatic: !!(options && options.automatic),
+        reason: options && options.automatic ? options.reason || null : null
+      }
+    }));
+  writeNotices(notices);
+}
+
+function autoAdvanceReason(meta, now) {
+  if (!meta || meta.victor) return null;
+  const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
+  if (Number.isFinite(deadlineMs) && deadlineMs <= now) return "deadline";
+  if (meta.auto_advance_when_done === false) return null;
+  const phase = meta.phase || "Logistics";
+  if (phase !== "Logistics") return null;
+  const roster = playerActionRoster();
+  if (roster.ready_to_advance) return "all_actions_done";
+  return null;
+}
+
+function isUnreportedOpenBattle(game, turn) {
+  if ((game.result_state || "open") !== "open") return false;
+  if (!isUnresolvedBattle(game, turn)) return false;
+  return (game.result || "in_progress") === "in_progress";
+}
+
+/**
+ * A Battles deadline that arrives with battles still unreported flags them
+ * No report, pending admin confirmation. It does not apply the loss.
+ * Already-pending no reports are left alone so players are not notified twice.
+ */
+function flagUnreportedBattles(turn) {
+  const games = readCollection("games");
+  const notices = [];
+  let changed = false;
+  games.forEach((game) => {
+    if (!isUnreportedOpenBattle(game, turn)) return;
+    game.result = "no_report";
+    game.winner_id = null;
+    game.no_show_id = null;
+    game.attacker_vp = null;
+    game.defender_vp = null;
+    game.result_state = "pending";
+    game.proposed_by = null;
+    game.proposed_at = new Date().toISOString();
+    game.disputed_by = null;
+    game.disputed_at = null;
+    game.dispute_note = null;
+    game.resolution = null;
+    game.action_bonus = null;
+    const title = battlePlace(game);
+    const text = "The phase deadline passed with no report for " + title + ". No report, pending admin confirmation. Both forces will suffer a loss if the campaign admin confirms it.";
+    const ref = { type: "game", game_id: game.game_id };
+    [game.attacker_id, game.defender_id].filter(Boolean).forEach((pid) => {
+      notices.push({
+        player_id: Number(pid),
+        audience: "player",
+        kind: "battle_result_submitted",
+        text,
+        ref
+      });
+    });
+    notices.push({
+      player_id: null,
+      audience: "campaign_admin",
+      kind: "battle_result_submitted",
+      text,
+      ref
+    });
+    changed = true;
+  });
+  if (changed) {
+    writeCollection("games", games);
+    writeNotices(notices);
+  }
+  return changed;
+}
+
+function blockedAdvanceRecord(result, reason) {
+  const battles = result.battles || [];
+  const reports = battles.filter((battle) => battle.result === "no_report");
+  let message = "Auto-advance blocked: " + battles.length + " open battles";
+  if (reports.length) {
+    message += ". No report, pending admin confirmation: " +
+      reports.map((battle) => "Battle #" + battle.game_id).join(", ") +
+      ". Confirm or reject them on the Actions page.";
+  }
+  return {
+    at: new Date().toISOString(),
+    reason,
+    battles: battles.length,
+    no_report: reports.map((battle) => battle.game_id),
+    message
+  };
+}
+
+function maybeAutoAdvance() {
+  return withAdvanceLock(() => {
+    const meta = readCollection("meta");
+    const fromTurn = Number(meta.turn) || 1;
+    const fromPhase = meta.phase || "Logistics";
+    const reason = autoAdvanceReason(meta, Date.now());
+    if (!reason) {
+      if (meta.auto_advance_blocked) {
+        meta.auto_advance_blocked = null;
+        writeCollection("meta", meta);
+      }
+      return { ok: true, advanced: false };
+    }
+    const again = readCollection("meta");
+    if ((Number(again.turn) || 1) !== fromTurn || (again.phase || "Logistics") !== fromPhase) {
+      return { ok: true, advanced: false, skipped: "stale" };
+    }
+    if (reason === "deadline" && fromPhase === "Battles") flagUnreportedBattles(fromTurn);
+    const result = advanceCampaign(again, { automatic: true, reason, force: false });
+    if (result && result.ok === false) {
+      if (result.code === "unresolved_battles") {
+        again.auto_advance_blocked = blockedAdvanceRecord(result, reason);
+        writeCollection("meta", again);
+      }
+      return { ok: false, advanced: false, result };
+    }
+    return { ok: true, advanced: true, result };
+  });
+}
+
+function runAutoAdvanceSafe() {
+  try {
+    return maybeAutoAdvance();
+  } catch (err) {
+    console.error("Auto-advance check failed", err);
+    return { ok: false, error: err && err.message };
+  }
 }
 
 async function handleCampaign(req, res, parts, method) {
@@ -2850,7 +3510,55 @@ async function handleCampaign(req, res, parts, method) {
       victor: meta.victor || null,
       victory_reason: meta.victory_reason || null,
       last_advanced_at: meta.last_advanced_at || null,
+      phase_ends_at: meta.phase_ends_at || null,
+      auto_advance_when_done: meta.auto_advance_when_done !== false,
+      auto_advance_blocked: meta.auto_advance_blocked || null,
       phases: PHASES
+    });
+  }
+
+  if (action === "phase-deadline" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    if (!Object.prototype.hasOwnProperty.call(body, "phase_ends_at")) {
+      return send(res, 400, { error: "phase_ends_at is required" });
+    }
+    const parsed = parsePhaseDeadline(body.phase_ends_at);
+    if (!parsed.ok) return send(res, 400, { error: parsed.error });
+    const meta = readCollection("meta");
+    meta.phase_ends_at = parsed.phase_ends_at;
+    writeCollection("meta", meta);
+    const check = runAutoAdvanceSafe();
+    const saved = readCollection("meta");
+    return send(res, 200, {
+      ok: true,
+      phase_ends_at: saved.phase_ends_at || null,
+      phase: saved.phase || null,
+      turn: saved.turn || null,
+      advanced: !!(check && check.advanced),
+      auto_advance_blocked: saved.auto_advance_blocked || null
+    });
+  }
+
+  if (action === "auto-advance" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    if (typeof body.enabled !== "boolean") {
+      return send(res, 400, { error: "enabled must be true or false" });
+    }
+    const meta = readCollection("meta");
+    meta.auto_advance_when_done = body.enabled;
+    writeCollection("meta", meta);
+    const check = body.enabled ? runAutoAdvanceSafe() : { advanced: false };
+    const saved = readCollection("meta");
+    return send(res, 200, {
+      ok: true,
+      auto_advance_when_done: saved.auto_advance_when_done !== false,
+      advanced: !!(check && check.advanced),
+      phase: saved.phase || null,
+      turn: saved.turn || null
     });
   }
 
@@ -2858,20 +3566,27 @@ async function handleCampaign(req, res, parts, method) {
     const gate = requireRole(auth, ["campaign_admin"]);
     if (!gate.ok) return send(res, gate.status, { error: gate.error });
     const body = (await readBody(req)) || {};
-    const meta = readCollection("meta");
-    if (meta.victor && !body.force) {
-      return send(res, 409, {
-        error: "Campaign already has a victor. Pass { force: true } to advance anyway.",
-        victor: meta.victor,
-        victory_reason: meta.victory_reason
-      });
-    }
-    const result = advanceCampaign(meta, { force: !!body.force });
+    const result = withAdvanceLock(() => {
+      const current = readCollection("meta");
+      if (current.victor && !body.force) {
+        return {
+          ok: false,
+          code: "victor",
+          status: 409,
+          error: "Campaign already has a victor. Pass { force: true } to advance anyway.",
+          victor: current.victor,
+          victory_reason: current.victory_reason
+        };
+      }
+      return advanceCampaign(current, { force: !!body.force });
+    });
     if (result && result.ok === false) {
-      return send(res, 409, {
+      return send(res, result.status || 409, {
         error: result.error,
         code: result.code,
-        battles: result.battles
+        battles: result.battles,
+        victor: result.victor,
+        victory_reason: result.victory_reason
       });
     }
     return send(res, 200, result);
@@ -2923,12 +3638,26 @@ async function handleCampaign(req, res, parts, method) {
     return send(res, 200, result);
   }
 
-  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase|reset" });
+  return send(res, 404, { error: "Unknown campaign action. Use advance|status|set-phase|phase-deadline|auto-advance|reset" });
+}
+
+function parsePhaseDeadline(value) {
+  if (value == null || value === "") return { ok: true, phase_ends_at: null };
+  if (typeof value !== "string") return { ok: false, error: "Phase deadline must be a date and time" };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, phase_ends_at: null };
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(trimmed)) {
+    return { ok: false, error: "Phase deadline must be a date and time" };
+  }
+  const ms = Date.parse(trimmed);
+  if (!Number.isFinite(ms)) return { ok: false, error: "Phase deadline must be a date and time" };
+  return { ok: true, phase_ends_at: new Date(ms).toISOString() };
 }
 
 /**
  * Player campaign actions (rules-enforced).
  *   GET  /api/actions/status
+ *   GET  /api/actions/players   (campaign_admin) remaining actions this turn
  *   POST /api/actions/move      { force_id, dest_sys_id }
  *   POST /api/actions/hold      { force_id }  (free: clear pending move)
  *   POST /api/actions/reinforce { force_id }
@@ -2952,9 +3681,11 @@ async function handleActions(req, res, parts, method) {
     };
     if (auth && auth.account && auth.account.role === "player" && auth.account.player_id) {
       const entry = ensurePlayerActions(meta, auth.account.player_id, meta.turn);
+      const cap = actionsForTurn(meta, auth.account.player_id, meta.turn);
       payload.player_id = auth.account.player_id;
+      payload.actions_per_turn = cap;
       payload.actions_used = Number(entry.used) || 0;
-      payload.actions_remaining = Math.max(0, ACTIONS_PER_TURN - payload.actions_used);
+      payload.actions_remaining = Math.max(0, cap - payload.actions_used);
       payload.log = entry.log || [];
     } else if (auth && auth.account && auth.account.role === "campaign_admin") {
       payload.actions_used = 0;
@@ -2963,6 +3694,12 @@ async function handleActions(req, res, parts, method) {
       payload.player_actions = meta.player_actions || {};
     }
     return send(res, 200, payload);
+  }
+
+  if (action === "players" && method === "GET") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    return send(res, 200, playerActionRoster());
   }
 
   const gate = requireRole(auth, ["player", "campaign_admin"]);
@@ -2994,9 +3731,9 @@ async function handleActions(req, res, parts, method) {
   const players = readCollection("players");
   const player = players.find((p) => Number(p.player_id) === Number(playerId));
   if (!player) return send(res, 404, { error: "Player not found" });
-  const allegiance = player.allegiance;
-  if (!allegiance || allegiance === "Blackshield") {
-    return send(res, 400, { error: "Player needs Loyalist or Traitor allegiance for campaign actions" });
+  const allegiance = sideOf(player);
+  if (!allegiance) {
+    return send(res, 400, { error: "This player needs a Loyalist or Traitor side before they can take campaign actions" });
   }
 
   // Admin bypasses action economy only when explicitly requested
@@ -3060,6 +3797,7 @@ async function handleActions(req, res, parts, method) {
 
     force.dest_sys_id = destId;
     writeCollection("forces", forces);
+    runAutoAdvanceSafe();
     return send(res, 200, {
       ok: true,
       action: "move",
@@ -3133,6 +3871,7 @@ async function handleActions(req, res, parts, method) {
     force.strength = strength + 1;
     writeCollection("forces", forces);
     writeCollection("meta", meta);
+    runAutoAdvanceSafe();
     return send(res, 200, {
       ok: true,
       action: "reinforce",
@@ -3181,6 +3920,7 @@ async function handleActions(req, res, parts, method) {
     systems[idx] = { ...sys, sys_durability: dur + 1 };
     writeCollection("systems", systems);
     writeCollection("meta", meta);
+    runAutoAdvanceSafe();
     return send(res, 200, {
       ok: true,
       action: "fortify",
@@ -3257,6 +3997,7 @@ async function handleActions(req, res, parts, method) {
     forces.push(newForce);
     writeCollection("forces", forces);
     writeCollection("meta", meta);
+    runAutoAdvanceSafe();
     return send(res, 201, {
       ok: true,
       action: "generate",
@@ -3335,9 +4076,9 @@ function buildStartingForces(players, existingForces, systems) {
   const allegianceCount = {};
   players.forEach((player) => {
     const owned = existingForces.filter((f) => Number(f.player_id) === Number(player.player_id));
-    const alleg = player.allegiance || "";
-    const index = allegianceCount[alleg] || 0;
-    allegianceCount[alleg] = index + 1;
+    const alleg = sideOf(player) || "";
+    const index = allegianceCount[alleg || "unassigned"] || 0;
+    allegianceCount[alleg || "unassigned"] = index + 1;
     const home = defaultHomeSystem(player, systems, index);
     for (let n = 0; n < 2; n++) {
       const prev = owned[n];
@@ -3349,7 +4090,7 @@ function buildStartingForces(players, existingForces, systems) {
         force_name: (prev && prev.force_name) || fallback,
         game_system: (prev && prev.game_system) || "HH",
         force_type: (prev && prev.force_type) || "Legion",
-        allegiance: player.allegiance || (prev && prev.allegiance) || "",
+        allegiance: alleg || (prev && isBlackshieldMark(prev.allegiance) ? "Blackshield" : ""),
         legion: (prev && prev.legion) || "",
         subfaction: (prev && prev.subfaction) || "",
         allies: (prev && prev.allies) || "",
@@ -3432,6 +4173,9 @@ function resetCampaign(options = {}) {
     loyal_score: 0,
     traitor_score: 0,
     last_advanced_at: now,
+    phase_ends_at: null,
+    auto_advance_when_done: true,
+    auto_advance_blocked: null,
     player_actions: {},
     phase_log: [
       {
@@ -3631,6 +4375,9 @@ async function handleApi(req, res, pathname) {
   if (parts[0] === "games" && method === "POST" && parts[2] === "void") {
     return voidBattle(req, res, parts[1]);
   }
+  if (parts[0] === "games" && method === "POST" && parts[2] === "reject") {
+    return rejectNoShow(req, res, parts[1]);
+  }
   if (parts[0] === "inbox") return handleInbox(req, res, parts, method);
 
   if (parts[0] === "feedback") return handleFeedback(req, res, method);
@@ -3722,11 +4469,12 @@ async function handleApi(req, res, pathname) {
     const bulkText = collectionTextError(collection, body);
     if (bulkText) return send(res, 400, { error: bulkText });
     writeCollection(collection, body);
-    return send(res, 200, body);
+    if (collection === "players" || collection === "forces") migrateBlackshieldAllegiance();
+    return send(res, 200, readCollection(collection));
   }
 
   if (method === "POST" && collection !== "meta") {
-    const body = await readBody(req);
+    let body = await readBody(req);
     if (!body || typeof body !== "object") return send(res, 400, { error: "Expected object" });
 
     if (collection === "players" || collection === "systems") {
@@ -3758,8 +4506,17 @@ async function handleApi(req, res, pathname) {
     }
 
     const list = readCollection(collection);
-    if (collection === "players") body.player_id = allocatePlayerId();
-    else if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
+    if (collection === "players") {
+      const side = requirePlayerSide(body.allegiance);
+      if (!side.ok) return send(res, 400, { error: side.error });
+      body.allegiance = side.allegiance;
+      body.player_id = allocatePlayerId();
+    } else if (collection === "forces") {
+      if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
+      const assigned = forceWithOwnerSide(body);
+      if (!assigned.ok) return send(res, 400, { error: assigned.error });
+      body = assigned.force;
+    } else if (body[spec.idKey] == null) body[spec.idKey] = nextId(list, spec.idKey);
     if (list.some((r) => r[spec.idKey] === body[spec.idKey])) {
       return send(res, 409, { error: "ID already exists" });
     }
@@ -3780,6 +4537,17 @@ async function handleApi(req, res, pathname) {
       if (isAdmin) {
         const err = textLimitError(body, PLAYER_TEXT_LIMITS, { player_name: true, display_name: true });
         if (err) return send(res, 400, { error: err });
+        const next = { ...existing, ...body, player_id: existing.player_id };
+        if (body.allegiance !== undefined) {
+          const side = requirePlayerSide(body.allegiance);
+          if (!side.ok) return send(res, 400, { error: side.error });
+          next.allegiance = side.allegiance;
+        }
+        list[idx] = next;
+        writeCollection(collection, list);
+        const side = sideOf(next);
+        if (side) alignOwnerForces(next.player_id, side);
+        return send(res, 200, list[idx]);
       } else if (isPlayer && Number(existing.player_id) === Number(auth.account.player_id)) {
         const err = textLimitError(
           body,
@@ -3815,7 +4583,12 @@ async function handleApi(req, res, pathname) {
         if (err) return send(res, 400, { error: err });
       }
       if (isAdmin) {
-        // full edit after the text check
+        const merged = { ...existing, ...body, force_id: existing.force_id };
+        const assigned = forceWithOwnerSide(merged);
+        if (!assigned.ok) return send(res, 400, { error: assigned.error });
+        list[idx] = assigned.force;
+        writeCollection(collection, list);
+        return send(res, 200, list[idx]);
       } else if (isPlayer && Number(existing.player_id) === Number(auth.account.player_id)) {
         // Flavour / list fields only — campaign position & strength go through /api/actions
         const allowed = [
@@ -3827,7 +4600,9 @@ async function handleApi(req, res, pathname) {
           if (body[k] !== undefined) safe[k] = body[k];
         });
         safe.player_id = existing.player_id;
-        list[idx] = safe;
+        const assigned = forceWithOwnerSide(safe);
+        if (!assigned.ok) return send(res, 400, { error: assigned.error });
+        list[idx] = assigned.force;
         writeCollection(collection, list);
         return send(res, 200, list[idx]);
       } else {
@@ -3897,6 +4672,7 @@ function logRequest(req, res, pathname, started) {
 
 ensureDataDir();
 seedBaselineSystems();
+migrateBlackshieldAllegiance();
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
@@ -3929,6 +4705,10 @@ const server = http.createServer(async (req, res) => {
 
 function startServer() {
   bootstrapAdmin();
+  // Catch a deadline that passed while this process was down, then keep checking.
+  // reset-campaign does not start this timer, so a CLI reset cannot advance first.
+  runAutoAdvanceSafe();
+  setInterval(runAutoAdvanceSafe, AUTO_ADVANCE_INTERVAL_MS);
   server.listen(PORT, HOST, () => {
     console.log(`Sunset Heresy server http://${HOST === "0.0.0.0" ? "localhost" : HOST}:${PORT}`);
     console.log(`Data directory: ${DATA}`);

@@ -167,7 +167,39 @@
     }
     .chip.loyal.active { border-color: var(--loyal); color: var(--loyal); }
     .chip.traitor.active { border-color: var(--traitor); color: var(--traitor); }
-    .chip.blackshield.active { border-color: var(--blackshield); color: var(--blackshield); }
+    .chip.needs-side.active { border-color: var(--accent); color: var(--accent); }
+    .needs-side-banner {
+      margin: 0 0 1rem;
+      padding: 0.85rem 0.95rem;
+      border-radius: 10px;
+      background: rgba(240, 192, 64, 0.16);
+      border: 1px solid var(--accent);
+    }
+    .needs-side-banner h2 {
+      color: var(--accent);
+      font-size: 1.05rem;
+      margin-bottom: 0.35rem;
+    }
+    .needs-side-banner p {
+      color: var(--text);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    .needs-side-banner ul {
+      margin: 0.55rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+    .needs-side-banner li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
 
     button, .btn {
       appearance: none;
@@ -276,6 +308,7 @@
     .badge.loyalist { background: var(--loyal-fill); color: var(--loyal); }
     .badge.traitor { background: var(--traitor-fill); color: var(--traitor); }
     .badge.blackshield { background: var(--blackshield-fill); color: var(--blackshield); }
+    .badge.needs-side { background: #422006; color: var(--accent); }
     .badge.active { background: #14532d; color: var(--success); }
     .badge.inactive { background: #3f3f46; color: #a1a1aa; }
     .badge.waitlist { background: #422006; color: var(--warn); }
@@ -563,6 +596,11 @@
       <p><a href="login.html" style="color:var(--accent)">Log in</a></p>
     </div>
     <div id="admin-body">
+    <div class="needs-side-banner" id="needs-side-banner" hidden>
+      <h2>Players who need a side</h2>
+      <p>These players are not Loyalist or Traitor. They cannot take campaign actions, and they are left out of pairing and scoring, until you assign a side. Their forces then count for that side. Blackshields is a force type, not a third allegiance.</p>
+      <ul id="needs-side-list"></ul>
+    </div>
     <div class="page-tools">
       <button type="button" class="ghost" id="btn-export" title="Download players as CSV">Export</button>
       <button type="button" class="primary" id="btn-add">+ Player</button>
@@ -621,7 +659,7 @@
         <span class="chip" data-filter="waitlist">Waitlist</span>
         <span class="chip loyal" data-filter="Loyalist">Loyalist</span>
         <span class="chip traitor" data-filter="Traitor">Traitor</span>
-        <span class="chip blackshield" data-filter="Blackshield">Blackshield</span>
+        <span class="chip needs-side" data-filter="needs side">Needs side</span>
       </div>
     </div>
 
@@ -692,8 +730,8 @@
             <select id="f-allegiance" required>
               <option value="Loyalist">Loyalist</option>
               <option value="Traitor">Traitor</option>
-              <option value="Blackshield">Blackshield</option>
             </select>
+            <div class="form-hint">Loyalist or Traitor only. Saving a side updates every force this player owns.</div>
           </div>
           <div class="form-group">
             <label for="f-start-sys">Starting System</label>
@@ -901,22 +939,38 @@
       const active = players.filter(p => p.status === "active").length;
       const loyal = players.filter(p => p.allegiance === "Loyalist").length;
       const traitor = players.filter(p => p.allegiance === "Traitor").length;
-      const black = players.filter(p => p.allegiance === "Blackshield").length;
+      const needs = players.filter(p => p.allegiance !== "Loyalist" && p.allegiance !== "Traitor").length;
       statsEl.innerHTML = `
         <div class="stat"><div class="num">${total}</div><div class="label">Players</div></div>
         <div class="stat"><div class="num">${active}</div><div class="label">Active</div></div>
         <div class="stat"><div class="num" style="color:var(--loyal)">${loyal}</div><div class="label">Loyalist</div></div>
         <div class="stat"><div class="num" style="color:var(--traitor)">${traitor}</div><div class="label">Traitor</div></div>
-        <div class="stat"><div class="num" style="color:var(--blackshield)">${black}</div><div class="label">Blackshield</div></div>
+        <div class="stat"><div class="num" style="color:var(--accent)">${needs}</div><div class="label">Needs side</div></div>
       `;
+      renderNeedsSide();
+    }
+
+    function renderNeedsSide() {
+      const banner = document.getElementById("needs-side-banner");
+      const list = document.getElementById("needs-side-list");
+      const waiting = players.filter(p => p.allegiance !== "Loyalist" && p.allegiance !== "Traitor");
+      banner.hidden = waiting.length === 0;
+      list.innerHTML = waiting.map(p => `
+        <li>
+          <span><strong>${escapeHtml(p.display_name || p.player_name)}</strong> · ${escapeHtml(p.status || "active")}</span>
+          <button type="button" data-edit="${p.player_id}">Assign side</button>
+        </li>
+      `).join("");
     }
 
     function filtered() {
       let list = players.slice();
       if (filter === "active" || filter === "inactive" || filter === "waitlist") {
         list = list.filter(p => p.status === filter);
-      } else if (filter === "Loyalist" || filter === "Traitor" || filter === "Blackshield") {
+      } else if (filter === "Loyalist" || filter === "Traitor") {
         list = list.filter(p => p.allegiance === filter);
+      } else if (filter === "needs side") {
+        list = list.filter(p => p.allegiance !== "Loyalist" && p.allegiance !== "Traitor");
       }
       if (searchQ) {
         const q = searchQ.toLowerCase();
@@ -940,7 +994,7 @@
       list.forEach(p => {
         const tr = document.createElement("tr");
         if (editingId === p.player_id) tr.classList.add("selected");
-        const all = p.allegiance.toLowerCase();
+        const all = p.allegiance === "needs side" ? "needs-side" : String(p.allegiance || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
         tr.innerHTML = `
           <td>${p.player_id}</td>
           <td>
@@ -972,6 +1026,24 @@
         .replace(/"/g, "&quot;");
     }
 
+    function syncAllegianceSelect(player) {
+      const sel = document.getElementById("f-allegiance");
+      sel.querySelectorAll("option[data-temporary]").forEach((opt) => opt.remove());
+      const value = player && player.allegiance ? player.allegiance : "Loyalist";
+      if (value === "Loyalist" || value === "Traitor") {
+        sel.value = value;
+        return;
+      }
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = "Needs side";
+      opt.disabled = true;
+      opt.selected = true;
+      opt.dataset.temporary = "1";
+      sel.appendChild(opt);
+      sel.value = value;
+    }
+
     function openDrawer(player) {
       if (!SH.canEditPlayers()) {
         showToast("Campaign admin only");
@@ -985,7 +1057,7 @@
       document.getElementById("f-contact").value = player ? (player.contact || "") : "";
       document.getElementById("f-status").value = player ? player.status : "active";
       document.getElementById("f-role").value = player ? player.role : "player";
-      document.getElementById("f-allegiance").value = player ? player.allegiance : "Loyalist";
+      syncAllegianceSelect(player);
       document.getElementById("f-start-sys").value = player && player.start_sys_id ? player.start_sys_id : "";
       document.getElementById("f-joined").value = player ? (player.joined_at || "") : new Date().toISOString().slice(0, 10);
       document.getElementById("f-notes").value = player ? (player.notes || "") : "";
@@ -1155,13 +1227,16 @@
       }
     });
 
-    tbody.addEventListener("click", async (e) => {
-      const btn = e.target.closest("[data-edit]");
+    function openPlayerFromButton(event) {
+      const btn = event.target.closest("[data-edit]");
       if (!btn) return;
       const id = Number(btn.dataset.edit);
       const p = players.find(x => x.player_id === id);
       if (p) openDrawer(p);
-    });
+    }
+
+    tbody.addEventListener("click", openPlayerFromButton);
+    document.getElementById("needs-side-list").addEventListener("click", openPlayerFromButton);
 
     document.getElementById("search").addEventListener("input", (e) => {
       searchQ = e.target.value.trim();
