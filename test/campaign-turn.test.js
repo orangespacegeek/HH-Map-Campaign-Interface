@@ -229,6 +229,22 @@ test("players cannot set another campaign turn, and game rounds are 1 to 10", as
     }));
     assert.equal(stale.status, 400, JSON.stringify(stale.json));
     assert.match(stale.json.error, /current turn/);
+
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    const mustering = await api(ctx, null, "GET", "/api/campaign/status");
+    assert.equal(mustering.json.phase, "Muster");
+    assert.equal(mustering.json.turn, 1);
+    const duringMuster = await api(ctx, loyal.token, "POST", "/api/games", battleBody(loyal, traitor, forces, {
+      turn: 1,
+      rounds_played: 3
+    }));
+    assert.equal(duringMuster.status, 409, JSON.stringify(duringMuster.json));
+    assert.match(duringMuster.json.error, /Battles are not available during Muster/);
+    const otherTurn = await api(ctx, loyal.token, "POST", "/api/games", battleBody(loyal, traitor, forces, {
+      turn: 4
+    }));
+    assert.equal(otherTurn.status, 400, JSON.stringify(otherTurn.json));
+    assert.match(otherTurn.json.error, /current turn/);
   } finally {
     await ctx.stop();
   }

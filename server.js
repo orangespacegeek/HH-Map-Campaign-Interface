@@ -1652,6 +1652,7 @@ function roundsPlayedError(body) {
 }
 
 function currentCampaignTurn() {
+  // Muster keeps the stored turn at 1, so a player's campaign turn is 1 until Begin campaign.
   return Number(readCollection("meta").turn) || 1;
 }
 
