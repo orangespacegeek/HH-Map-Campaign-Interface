@@ -22,7 +22,7 @@ Either use the blueprint or create a web service by hand.
 
 1. In the Render dashboard, choose **New → Blueprint**.
 2. Select this repo. Render reads `render.yaml`.
-3. When it asks for `CAMPAIGN_ADMIN_PASSWORD`, paste a long password you can store in a password manager. Leave `DISCORD_FEEDBACK_WEBHOOK` and `CORS_ORIGINS` blank unless you need them.
+3. When it asks for `CAMPAIGN_ADMIN_PASSWORD`, paste a long password you can store in a password manager. Leave `DISCORD_FEEDBACK_WEBHOOK`, `DISCORD_CAMPAIGN_WEBHOOK`, and `CORS_ORIGINS` blank unless you need them.
 4. Apply the blueprint. It creates a web service on plan `0.5c-512mb` with a disk named `campaign-data` mounted at `/var/data`, and sets `DATA_DIR=/var/data`.
 
 ### By hand
@@ -46,6 +46,7 @@ Set these on the service, not in a committed file.
 | `CAMPAIGN_ADMIN_LOGIN` | `admin`, or another username |
 | `CAMPAIGN_ADMIN_PASSWORD` | the password you chose |
 | `DISCORD_FEEDBACK_WEBHOOK` | leave unset unless feedback should also post to Discord |
+| `DISCORD_CAMPAIGN_WEBHOOK` | leave unset unless phase, battle, and deadline reminders should post to Discord. Separate from the feedback webhook. |
 | `CORS_ORIGINS` | leave unset. The site only needs to call itself. |
 | `TRUST_PROXY` | `1`. Render is one proxy hop and appends the client address. The login limiter uses that address. Leave this unset on a machine that is not behind a proxy, or a client can pick their own limit by sending `X-Forwarded-For`. |
 
@@ -104,6 +105,22 @@ To change the admin password and sign every session out:
 ## 9. Feedback webhook
 
 Leave `DISCORD_FEEDBACK_WEBHOOK` empty until you want a channel ping. Create a Discord webhook in the channel, paste the `https://discord.com/api/webhooks/...` URL into that env var, and redeploy. Feedback is still stored in `feedback.json` on the disk either way. The admin reads it under **Feedback**. A URL that is not a Discord webhook is ignored.
+
+## 10. Campaign Discord notifications
+
+`DISCORD_CAMPAIGN_WEBHOOK` is separate from the feedback webhook. Leave it unset and the campaign posts nothing. A failed post never stops a phase from advancing.
+
+Create the webhook:
+
+1. In Discord, open the channel that should receive campaign posts.
+2. Open **Edit Channel** (the gear on the channel) → **Integrations** → **Webhooks** → **New Webhook**.
+3. Name it (for example `Sunset Heresy`), pick that channel, and copy the webhook URL. It looks like `https://discord.com/api/webhooks/...`.
+4. On the Render service, set `DISCORD_CAMPAIGN_WEBHOOK` to that URL. Do not commit the URL. Save. Render restarts the service.
+5. Sign in as the campaign admin, open the dashboard, and choose **Send test notification**. The channel should show a test message. If the variable is unset, the button says the webhook is not configured.
+
+Players who want an @mention add their Discord user ID on **My account**. In Discord, enable Developer Mode, right-click their name, and choose **Copy User ID**. On a phone, turn Developer Mode on, then long-press their name. The ID is visible only to that player and the campaign admin. Posts mention only those saved IDs. They do not ping @everyone or roles.
+
+The channel is notified when a phase starts (including **Begin campaign**), when the admin adds a battle, and once in the 24 hours before a phase deadline. In the Battles phase the phase-start post lists open battles, and the reminder mentions players who still have an unreported battle.
 
 ## Health
 
