@@ -782,6 +782,20 @@
     return { ok: true, auto_advance_when_done: meta.auto_advance_when_done };
   }
 
+  async function sendDiscordTest() {
+    await probe();
+    if (mode !== "server") throw new Error("Discord notifications need the campaign server");
+    const res = await fetch(apiBase() + "/api/campaign/discord-test", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify({})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not send the test notification");
+    return data;
+  }
+
   async function playerActions() {
     await probe();
     if (mode !== "server") throw new Error("Player actions need the campaign server");
@@ -1056,6 +1070,7 @@
     setPhaseDeadline,
     setAutoAdvance,
     setMusterAutoAdvance,
+    sendDiscordTest,
     actionsStatus,
     playerActions,
     doAction,
