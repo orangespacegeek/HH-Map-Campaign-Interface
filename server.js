@@ -1627,6 +1627,52 @@ function victoryPointError(body) {
   return null;
 }
 
+function parseRoundsPlayed(value) {
+  if (value == null || value === "") return { ok: true, value: null };
+  if (typeof value === "boolean") return { ok: false };
+  if (typeof value === "number") {
+    if (!Number.isInteger(value) || value < 1 || value > 10) return { ok: false };
+    return { ok: true, value };
+  }
+  if (typeof value === "string" && /^(?:[1-9]|10)$/.test(value.trim())) {
+    return { ok: true, value: Number(value.trim()) };
+  }
+  return { ok: false };
+}
+
+function roundsPlayedError(body) {
+  if (!body || typeof body !== "object") return null;
+  if (!Object.prototype.hasOwnProperty.call(body, "rounds_played")) return null;
+  const parsed = parseRoundsPlayed(body.rounds_played);
+  if (!parsed.ok) {
+    return { status: 400, error: "Game rounds played must be a whole number from 1 to 10" };
+  }
+  body.rounds_played = parsed.value;
+  return null;
+}
+
+function currentCampaignTurn() {
+  // Muster keeps the stored turn at 1, so a player's campaign turn is 1 until Begin campaign.
+  return Number(readCollection("meta").turn) || 1;
+}
+
+// A player may omit the turn. A supplied turn that is not the current
+// campaign turn is rejected, so a tabletop round count cannot land in this field.
+function playerSuppliedTurnError(body, auth) {
+  if (!body || !auth || auth.account.role === "campaign_admin") return null;
+  if (!Object.prototype.hasOwnProperty.call(body, "turn")) return null;
+  if (body.turn == null || body.turn === "") return null;
+  const current = currentCampaignTurn();
+  const value = body.turn;
+  let supplied = null;
+  if (typeof value === "number" && Number.isInteger(value)) supplied = value;
+  else if (typeof value === "string" && /^(0|[1-9]\d*)$/.test(value.trim())) supplied = Number(value.trim());
+  if (supplied !== current) {
+    return { status: 400, error: "Campaign turn must be the current turn" };
+  }
+  return null;
+}
+
 function normalizeGameResult(body) {
   if (!body.result) body.result = "in_progress";
   ["attacker_id", "defender_id", "attacker_force_id", "defender_force_id", "sys_id", "turn", "no_show_id"].forEach((key) => {
@@ -1670,6 +1716,8 @@ function validateGameWrite(body, auth, existing) {
   if (blocked) return blocked;
   const textError = textLimitError(body, GAME_TEXT_LIMITS);
   if (textError) return { status: 400, error: textError };
+  const rounds = roundsPlayedError(body);
+  if (rounds) return rounds;
   const isAdmin = auth.account.role === "campaign_admin";
   if (!isAdmin) {
     const playerId = Number(auth.account.player_id);
@@ -2252,6 +2300,7 @@ function assignBattles(turn) {
         attacker_list: null,
         defender_list: null,
         notes: "Assigned when the Battles phase began",
+        rounds_played: null,
         result_state: "open",
         proposed_by: null,
         resolution: null,
@@ -2266,10 +2315,11 @@ function assignBattles(turn) {
 
 async function createBattle(res, auth, body) {
   sanitizeGameBody(body);
+  const turnProblem = playerSuppliedTurnError(body, auth);
+  if (turnProblem) return send(res, turnProblem.status, { error: turnProblem.error });
   normalizeGameResult(body);
   if (auth.account.role !== "campaign_admin") {
-    const meta = readCollection("meta");
-    body.turn = Number(meta.turn) || 1;
+    body.turn = currentCampaignTurn();
   }
   const problem = validateGameWrite(body, auth, null);
   if (problem) return send(res, problem.status, { error: problem.error });
@@ -2293,6 +2343,8 @@ async function createBattle(res, auth, body) {
 
 async function updateBattle(res, auth, existing, list, idx, body) {
   sanitizeGameBody(body);
+  const turnProblem = playerSuppliedTurnError(body, auth);
+  if (turnProblem) return send(res, turnProblem.status, { error: turnProblem.error });
   const merged = { ...existing, ...body, game_id: existing.game_id };
   if (auth.account.role !== "campaign_admin") merged.turn = existing.turn;
   normalizeGameResult(merged);
@@ -2318,6 +2370,8 @@ function replaceBattles(res, body) {
     if (textError) return send(res, 400, { error: textError });
     const vp = victoryPointError(raw);
     if (vp) return send(res, vp.status, { error: vp.error });
+    const rounds = roundsPlayedError(raw);
+    if (rounds) return send(res, rounds.status, { error: rounds.error });
   }
   const state = battleState();
   const old = readCollection("games");
@@ -2771,6 +2825,10 @@ function describeWaitingGame(game) {
     result_state: game.result_state || "open",
     result: game.result,
     turn: game.turn || null,
+    rounds_played: (() => {
+      const n = Number(game.rounds_played);
+      return Number.isInteger(n) && n >= 1 && n <= 10 ? n : null;
+    })(),
     sys_id: game.sys_id,
     system_name: sys && sys.sys_name ? sys.sys_name : "System " + game.sys_id,
     mission: game.mission || null,

@@ -154,6 +154,15 @@
     .form-group { margin-bottom: 0.85rem; }
     .form-group label { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
     .form-group input, .form-group select, .form-group textarea { width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 0.55rem 0.7rem; border-radius: 8px; font-size: 16px; font-family: inherit; min-height: 44px; }
+    .field-hint { font-size: 0.75rem; color: var(--muted); line-height: 1.4; margin-top: 0.35rem; }
+    #f-turn[readonly] {
+      color: var(--muted);
+      background: var(--panel);
+      -moz-appearance: textfield;
+      appearance: textfield;
+    }
+    #f-turn[readonly]::-webkit-inner-spin-button,
+    #f-turn[readonly]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
     .toast { position: fixed; bottom: calc(1.2rem + var(--safe-bottom)); left: 50%; transform: translateX(-50%) translateY(120%); background: var(--panel-2); border: 1px solid var(--accent); color: var(--text); padding: 0.65rem 1.1rem; border-radius: 8px; font-size: 0.85rem; z-index: 80; transition: transform 0.25s; }
@@ -220,13 +229,19 @@
         <input type="hidden" id="f-id" />
         <div class="form-row">
           <div class="form-group">
-            <label for="f-turn">Turn *</label>
-            <input type="number" id="f-turn" required min="1" />
+            <label for="f-turn">Campaign turn</label>
+            <input type="number" id="f-turn" required min="1" inputmode="numeric" />
+            <p class="field-hint" id="turn-hint">Which campaign turn this battle belongs to. Players cannot change it.</p>
           </div>
           <div class="form-group">
             <label for="f-date">Played on</label>
             <input type="date" id="f-date" />
           </div>
+        </div>
+        <div class="form-group">
+          <label for="f-rounds">Game rounds played</label>
+          <input type="number" id="f-rounds" min="1" max="10" step="1" inputmode="numeric" placeholder="Optional" />
+          <p class="field-hint">Optional. How many rounds the tabletop game lasted, from 1 to 10.</p>
         </div>
         <div class="form-row">
           <div class="form-group">
@@ -488,6 +503,12 @@
       `;
     }
 
+    function roundsBit(g) {
+      const n = Number(g && g.rounds_played);
+      if (!Number.isInteger(n) || n < 1 || n > 10) return "";
+      return " · " + n + (n === 1 ? " game round" : " game rounds");
+    }
+
     function filtered() {
       let list = games.slice();
       if (searchQ) {
@@ -528,7 +549,7 @@
             ${g.result === "unable_to_schedule" || g.result === "no_show" || g.result === "no_report" ? "" : `<span class="score">${g.attacker_vp ?? "—"} – ${g.defender_vp ?? "—"}</span>`}
           </div>
           <div class="meta">
-            Turn ${g.turn} · ${g.played_on || "undated"} · ${g.game_system || "HH"} ${g.points ? g.points + " pts" : ""}
+            Campaign turn ${g.turn}${roundsBit(g)} · ${g.played_on || "undated"} · ${g.game_system || "HH"} ${g.points ? g.points + " pts" : ""}
             · ${esc(playerName(g.attacker_id))}${g.attacker_force_id ? " (" + esc(forceName(g.attacker_force_id)) + ")" : ""} vs ${esc(playerName(g.defender_id))}${g.defender_force_id ? " (" + esc(forceName(g.defender_force_id)) + ")" : ""}
             ${g.result === "no_show" && g.no_show_id ? "<br>No show: " + esc(playerName(g.no_show_id)) : ""}
             ${g.result === "no_report" ? "<br>Both forces suffer a loss. No victory points, control change, or durability change" : ""}
@@ -653,6 +674,12 @@
       const saveBtn = document.getElementById("btn-save");
       if (saveBtn) saveBtn.disabled = !!locked;
     }
+    function syncCampaignTurn() {
+      const input = document.getElementById("f-turn");
+      input.readOnly = SH.role !== "campaign_admin";
+      if (input.readOnly) input.setAttribute("aria-readonly", "true");
+      else input.removeAttribute("aria-readonly");
+    }
     function syncOutcome() {
       const outcome = selectedOutcome();
       document.getElementById("played-fields").hidden = outcome !== "played";
@@ -686,6 +713,7 @@
         : "Log Battle";
       document.getElementById("f-id").value = g ? g.game_id : "";
       document.getElementById("f-turn").value = g ? g.turn : (meta.turn || 1);
+      document.getElementById("f-rounds").value = g && g.rounds_played != null ? g.rounds_played : "";
       document.getElementById("f-date").value = g ? (g.played_on || "") : new Date().toISOString().slice(0, 10);
       const ownForce = forces.find(f => SH.role === "player" && myPlayerId() != null && Number(f.player_id) === myPlayerId() && f.status !== "destroyed" && f.status !== "removed");
       document.getElementById("f-sys").value = g ? g.sys_id : (ownForce ? ownForce.sys_id : (systems[0] && systems[0].sys_id));
@@ -709,6 +737,7 @@
         defender_force_id: g.defender_force_id
       } : { attacker_id: myPlayerId(), no_show_id: g && g.no_show_id });
       syncNoReportChoice(g);
+      syncCampaignTurn();
       syncOutcome();
       if (g && g.no_show_id) fillNoShow(g.no_show_id);
       document.getElementById("btn-delete").hidden = !g || !canDeleteGame(g);
@@ -766,6 +795,7 @@
       const payload = {
         game_id: idVal ? Number(idVal) : undefined,
         turn: Number(document.getElementById("f-turn").value),
+        rounds_played: document.getElementById("f-rounds").value.trim() === "" ? null : Number(document.getElementById("f-rounds").value),
         played_on: document.getElementById("f-date").value || null,
         sys_id: Number(document.getElementById("f-sys").value),
         game_system: document.getElementById("f-gsys").value,
@@ -810,6 +840,16 @@
       }
     }
 
+    const turnInput = document.getElementById("f-turn");
+    turnInput.addEventListener("beforeinput", (event) => {
+      if (event.target.readOnly) event.preventDefault();
+    });
+    turnInput.addEventListener("keydown", (event) => {
+      if (event.target.readOnly && event.key !== "Tab") event.preventDefault();
+    });
+    turnInput.addEventListener("wheel", (event) => {
+      if (event.target.readOnly) event.preventDefault();
+    }, { passive: false });
     document.getElementById("f-sys").addEventListener("change", () => refreshSides());
     document.getElementById("f-att").addEventListener("change", () => refreshSides());
     document.getElementById("f-def").addEventListener("change", () => refreshSides());
