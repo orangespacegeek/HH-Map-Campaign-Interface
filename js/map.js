@@ -234,8 +234,8 @@
     const sub = document.getElementById("header-sub");
     if (sub) {
       const sector = meta.subsector || "Port Maw";
-      const turn = meta.turn != null ? "Turn " + meta.turn : "";
       const phase = meta.phase || "";
+      const turn = phase === "Muster" ? "" : (meta.turn != null ? "Turn " + meta.turn : "");
       sub.textContent = [sector, turn, phase].filter(Boolean).join(" · ");
     }
     const slot = document.getElementById("mode-slot");

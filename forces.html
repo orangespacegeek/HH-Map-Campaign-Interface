@@ -659,7 +659,7 @@
       const phase = actionStatus.phase || "—";
       const turn = actionStatus.turn ?? "—";
       panel.hidden = false;
-      metaEl.textContent = `Turn ${turn} · ${phase}`;
+      metaEl.textContent = phase === "Muster" ? "Muster" : `Turn ${turn} · ${phase}`;
 
       if (role !== "player" && role !== "campaign_admin") {
         forms.hidden = true;
@@ -680,7 +680,10 @@
         row.style.display = need === phase ? "flex" : "none";
       });
 
-      if (phase === "Logistics") {
+      if (phase === "Muster") {
+        hint.textContent = "Muster: name your forces and choose home systems. Campaign actions start when the admin begins the campaign.";
+        forms.hidden = true;
+      } else if (phase === "Logistics") {
         hint.textContent = "Logistics: Reinforce (1), Fortify (1), or Generate Force (2). Max 2 actions per turn.";
       } else if (phase === "Movement") {
         hint.textContent = "Movement: order a force to a linked system (1 action). Changing that order is free. Hold cancels it and refunds the action.";

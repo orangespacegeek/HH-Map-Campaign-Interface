@@ -136,7 +136,23 @@ test("a deadline that passed while the server was down advances exactly once", a
         display_name: "boot_loyal",
         allegiance: "Loyalist",
         status: "active"
+      },
+      {
+        player_id: 2,
+        player_name: "boot_traitor",
+        display_name: "boot_traitor",
+        allegiance: "Traitor",
+        status: "active"
       }
+    ])
+  );
+  fs.writeFileSync(
+    path.join(dataDir, "forces.json"),
+    JSON.stringify([
+      { force_id: 1, player_id: 1, force_name: "Boot Loyal I", allegiance: "Loyalist", status: "active", strength: 3, sys_id: 2, home_sys_id: 2 },
+      { force_id: 2, player_id: 1, force_name: "Boot Loyal II", allegiance: "Loyalist", status: "active", strength: 3, sys_id: 2, home_sys_id: 2 },
+      { force_id: 3, player_id: 2, force_name: "Boot Traitor I", allegiance: "Traitor", status: "active", strength: 3, sys_id: 4, home_sys_id: 4 },
+      { force_id: 4, player_id: 2, force_name: "Boot Traitor II", allegiance: "Traitor", status: "active", strength: 3, sys_id: 4, home_sys_id: 4 }
     ])
   );
   fs.writeFileSync(
@@ -218,6 +234,7 @@ test("Logistics advances once when every counted player is out of actions", asyn
     const admin = await adminToken(ctx);
     const loyal = await signup(ctx, admin, "done_loyal", "Loyalist", 2);
     assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
     const fresh = await api(ctx, null, "GET", "/api/campaign/status");
     assert.equal(fresh.json.phase, "Logistics");
     assert.equal(fresh.json.auto_advance_when_done, true);
@@ -374,6 +391,7 @@ test("deadline edits stay admin-only, and clearing the deadline leaves the phase
     const loyal = await signup(ctx, admin, "dead_loyal", "Loyalist", 2);
     await signup(ctx, admin, "dead_traitor", "Traitor", 4);
     assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
     assert.equal((await api(ctx, loyal.token, "POST", "/api/campaign/phase-deadline", { phase_ends_at: null })).status, 403);
     assert.equal((await api(ctx, loyal.token, "POST", "/api/campaign/auto-advance", { enabled: false })).status, 403);
 

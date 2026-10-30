@@ -364,9 +364,9 @@
     }
     .phase-step {
       flex: 1;
-      min-width: 90px;
+      min-width: 4.5rem;
       text-align: center;
-      padding: 0.45rem 0.5rem;
+      padding: 0.45rem 0.35rem;
       border-radius: 8px;
       border: 1px solid var(--border);
       background: var(--panel-2);
@@ -467,6 +467,47 @@
       gap: 0.5rem;
       align-items: center;
     }
+    .muster-roster { margin: 0.15rem 0 0.9rem; }
+    .muster-balance {
+      font-weight: 700;
+      font-size: 1rem;
+      margin-bottom: 0.45rem;
+    }
+    .muster-hint {
+      color: var(--muted);
+      font-size: 0.75rem;
+      line-height: 1.4;
+      margin-bottom: 0.55rem;
+    }
+    .muster-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+    .muster-card {
+      padding: 0.75rem;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .muster-card h4 {
+      font-size: 0.95rem;
+      margin-bottom: 0.15rem;
+      text-transform: none;
+      letter-spacing: 0;
+      color: var(--text);
+    }
+    .muster-side { font-size: 0.8rem; font-weight: 700; }
+    .muster-side.loyalist { color: var(--loyal); }
+    .muster-side.traitor { color: var(--traitor); }
+    .muster-side.needs { color: var(--accent); }
+    .muster-forces {
+      list-style: none;
+      margin-top: 0.35rem;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
     .turn-actions button {
       appearance: none;
       border: 1px solid var(--border);
@@ -476,6 +517,7 @@
       border-radius: 8px;
       font-size: 0.85rem;
       cursor: pointer;
+      min-height: 44px;
     }
     .turn-actions button.primary {
       background: var(--accent);
@@ -772,9 +814,15 @@
       <h3>Campaign turn</h3>
       <p class="auto-advance-blocked" id="auto-advance-blocked" hidden role="status"></p>
       <div class="phase-track" id="phase-track">
+        <div class="phase-step" data-phase="Muster">Muster</div>
         <div class="phase-step" data-phase="Logistics">Logistics</div>
         <div class="phase-step" data-phase="Movement">Movement</div>
         <div class="phase-step" data-phase="Battles">Battles</div>
+      </div>
+      <div class="muster-roster" id="muster-roster" data-role="campaign_admin" hidden>
+        <p class="muster-balance" id="muster-balance"></p>
+        <p class="muster-hint">Active players only. Someone who still needs a side is listed, and is not counted in the balance.</p>
+        <ul class="muster-list" id="muster-list"></ul>
       </div>
       <div class="action-roster" id="action-roster" data-role="campaign_admin" hidden>
         <p class="action-roster-needs" id="action-roster-needs" hidden role="status"></p>
@@ -784,8 +832,10 @@
         <p class="action-roster-alert" id="action-roster-alert" hidden role="status">All players are done. Ready to advance the turn.</p>
       </div>
       <div class="turn-actions" data-role="campaign_admin">
+        <button type="button" class="primary" id="btn-begin" hidden>Begin campaign</button>
         <button type="button" class="primary" id="btn-advance">Advance phase</button>
         <select id="set-phase" aria-label="Set phase">
+          <option value="Muster">Muster</option>
           <option value="Logistics">Logistics</option>
           <option value="Movement">Movement</option>
           <option value="Battles">Battles</option>
@@ -803,9 +853,13 @@
           <input type="checkbox" id="auto-advance-done" checked />
           Auto-advance when all players are done
         </label>
-        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Open battles are not voided. At the Battles deadline, an unreported battle is flagged No report, pending admin confirmation, and the loss is not applied until you confirm it.</p>
+        <label class="deadline-toggle" for="auto-advance-muster">
+          <input type="checkbox" id="auto-advance-muster" />
+          Auto-advance out of Muster when the deadline passes
+        </label>
+        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Muster stays put until you begin the campaign, unless you turn on the Muster deadline. Open battles are not voided. At the Battles deadline, an unreported battle is flagged No report, pending admin confirmation, and the loss is not applied until you confirm it.</p>
       </div>
-      <p class="admin-hint" data-role="campaign_admin">Advance follows the rules: Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to turn 1 with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
+      <p class="admin-hint" data-role="campaign_admin">Muster is sign-up: players join, pick a side, and name two forces. Begin campaign locks that roster and starts Turn 1 in Logistics. After that, advance follows Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to Muster with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
       <div class="turn-log" id="turn-log"></div>
     </div>
 
@@ -836,7 +890,7 @@
   <div class="reset-overlay" id="reset-overlay" hidden>
     <div class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title">
       <h3 id="reset-title">Reset campaign</h3>
-      <p>Clears battles, sets turn 1 / Logistics, zeroes the campaign score, and gives every player two strength-3 forces. Accounts stay.</p>
+      <p>Clears battles, returns the campaign to Muster, zeroes the campaign score, and gives every player two strength-3 forces. Accounts stay. Battles and campaign actions stay closed until you begin the campaign.</p>
       <label class="keep-sys" for="keep-map"><input type="checkbox" id="keep-map" /> Keep current map</label>
       <p class="field-hint" id="keep-map-hint">Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.</p>
       <label class="keep-sys is-disabled" id="keep-control-label" for="keep-control"><input type="checkbox" id="keep-control" disabled /> Keep current system control</label>
@@ -852,7 +906,7 @@
   <script src="js/api.js"></script>
   <script>
     function updatePhaseTrack(phase) {
-      const order = ["Logistics", "Movement", "Battles"];
+      const order = ["Muster", "Logistics", "Movement", "Battles"];
       const idx = order.indexOf(phase);
       document.querySelectorAll(".phase-step").forEach((el) => {
         const p = el.dataset.phase;
@@ -964,16 +1018,18 @@
       const lead = document.getElementById("hero-lead");
       if (title) title.textContent = meta.campaign_name || "Sunset Heresy";
       const place = meta.subsector ? meta.subsector + " · " : "";
+      const mustering = meta.phase === "Muster";
       if (lead) {
-        lead.textContent =
-          place +
-          "Turn " +
-          (meta.turn ?? "—") +
-          ", " +
-          (meta.phase || "—") +
-          " phase. Scores and recent battles are the live campaign.";
+        lead.textContent = mustering
+          ? place + "Muster. Players are joining, choosing a side, and naming their starting forces."
+          : place +
+            "Turn " +
+            (meta.turn ?? "—") +
+            ", " +
+            (meta.phase || "—") +
+            " phase. Scores and recent battles are the live campaign.";
       }
-      document.getElementById("meta-turn").textContent = meta.turn ?? "—";
+      document.getElementById("meta-turn").textContent = mustering ? "Muster" : (meta.turn ?? "—");
       document.getElementById("meta-phase").textContent = meta.phase ?? "—";
       document.getElementById("meta-systems").textContent = systemCount ?? "—";
       phaseDeadline = meta.phase_ends_at || null;
@@ -984,6 +1040,10 @@
       const toggle = document.getElementById("auto-advance-done");
       if (toggle && document.activeElement !== toggle) {
         toggle.checked = meta.auto_advance_when_done !== false;
+      }
+      const musterToggle = document.getElementById("auto-advance-muster");
+      if (musterToggle && document.activeElement !== musterToggle) {
+        musterToggle.checked = meta.auto_advance_muster === true;
       }
       const blocked = document.getElementById("auto-advance-blocked");
       if (blocked) {
@@ -1047,9 +1107,18 @@
     }
 
     function advanceLabel(phase) {
+      if (phase === "Muster") return "Begin campaign";
       if (phase === "Logistics") return "Advance to Movement";
       if (phase === "Movement") return "Advance to Battles (apply moves)";
       return "End turn & score → next Logistics";
+    }
+
+    function syncPhaseButtons(phase) {
+      const begin = document.getElementById("btn-begin");
+      const advance = document.getElementById("btn-advance");
+      const mustering = phase === "Muster";
+      if (begin) begin.hidden = !mustering;
+      if (advance) advance.hidden = mustering;
     }
 
     async function refreshDashboard() {
@@ -1077,8 +1146,56 @@
       renderRecent(games, players, forces, systems);
       const btn = document.getElementById("btn-advance");
       if (btn) btn.textContent = advanceLabel(meta.phase);
-      await refreshActionRoster();
+      syncPhaseButtons(meta.phase);
+      await refreshMusterRoster();
+      if (meta.phase === "Muster") {
+        const actions = document.getElementById("action-roster");
+        if (actions) actions.hidden = true;
+      } else {
+        await refreshActionRoster();
+      }
       return meta;
+    }
+
+    async function refreshMusterRoster() {
+      const panel = document.getElementById("muster-roster");
+      if (!panel) return;
+      if (SH.role !== "campaign_admin" || SH.mode !== "server") {
+        panel.hidden = true;
+        return;
+      }
+      let data;
+      try {
+        data = await SH.musterRoster();
+      } catch (_) {
+        panel.hidden = true;
+        return;
+      }
+      panel.hidden = false;
+      document.getElementById("muster-balance").textContent =
+        "Loyalists " + data.loyalists + " · Traitors " + data.traitors;
+      const rows = (data.players || []).slice().sort((a, b) =>
+        String(a.display_name).localeCompare(String(b.display_name))
+      );
+      document.getElementById("muster-list").innerHTML = rows.map((player) => {
+        const side = player.allegiance === "Loyalist" || player.allegiance === "Traitor"
+          ? player.allegiance
+          : "Needs a side";
+        const sideClass = player.allegiance === "Loyalist"
+          ? "loyalist"
+          : player.allegiance === "Traitor"
+            ? "traitor"
+            : "needs";
+        const forces = (player.forces || []).map((force) => {
+          const where = force.system_name || (force.sys_id ? "System " + force.sys_id : "No home system");
+          return "<li>" + escDash(force.force_name || "Force") + " · " + escDash(where) +
+            " · strength " + escDash(force.strength) + "</li>";
+        }).join("");
+        const inactive = player.status === "inactive" ? " · inactive" : "";
+        return '<li class="muster-card"><h4>' + escDash(player.display_name || "Player") + "</h4>" +
+          '<div class="muster-side ' + sideClass + '">' + escDash(side) + inactive + "</div>" +
+          '<ul class="muster-forces">' + (forces || "<li>No forces yet</li>") + "</ul></li>";
+      }).join("");
     }
 
     function finishedLine(finished, total) {
@@ -1225,6 +1342,17 @@
       }
     }
 
+    document.getElementById("btn-begin").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      try {
+        const result = await SH.beginCampaign();
+        showAdvanceResult(result);
+        await refreshDashboard();
+      } catch (err) {
+        log.textContent = err.message || "Could not begin the campaign";
+      }
+    });
+
     document.getElementById("btn-advance").addEventListener("click", async () => {
       const log = document.getElementById("turn-log");
       try {
@@ -1363,6 +1491,22 @@
         await refreshDashboard();
       } catch (err) {
         log.textContent = err.message || "Could not clear the phase deadline";
+      }
+    });
+
+    document.getElementById("auto-advance-muster").addEventListener("change", async (event) => {
+      const log = document.getElementById("turn-log");
+      try {
+        const saved = await SH.setMusterAutoAdvance(event.target.checked);
+        log.textContent = event.target.checked
+          ? (saved && saved.advanced
+            ? "Muster auto-advance is on, and the deadline had passed, so the campaign began."
+            : "Muster will begin automatically when its deadline passes.")
+          : "Muster will not auto-advance.";
+        await refreshDashboard();
+      } catch (err) {
+        event.target.checked = !event.target.checked;
+        log.textContent = err.message || "Could not update Muster auto-advance";
       }
     });
 

@@ -626,7 +626,7 @@
       phase: meta.phase,
       loyal_score: meta.loyal_score,
       traitor_score: meta.traitor_score,
-      phases: ["Logistics", "Movement", "Battles"]
+      phases: ["Muster", "Logistics", "Movement", "Battles"]
     };
   }
 
@@ -652,6 +652,9 @@
       return data;
     }
     const meta = localRead("meta");
+    if (meta.phase === "Muster") {
+      throw new Error("Use Begin campaign to leave Muster");
+    }
     const phases = ["Logistics", "Movement", "Battles"];
     let i = phases.indexOf(meta.phase);
     if (i < 0) i = 0;
@@ -703,6 +706,61 @@
     meta.phase_ends_at = phaseEndsAt || null;
     localWrite("meta", meta);
     return { ok: true, phase_ends_at: meta.phase_ends_at };
+  }
+
+  async function beginCampaign() {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/begin", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({})
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not begin the campaign");
+      return data;
+    }
+    const meta = localRead("meta");
+    if (meta.phase !== "Muster") throw new Error("The campaign has already begun");
+    meta.phase = "Logistics";
+    meta.turn = 1;
+    meta.roster_locked = true;
+    meta.phase_ends_at = null;
+    localWrite("meta", meta);
+    return { ok: true, meta, to: { turn: 1, phase: "Logistics" }, log: ["Began the campaign"] };
+  }
+
+  async function musterRoster() {
+    await probe();
+    if (mode !== "server") throw new Error("The muster roster needs the campaign server");
+    const res = await fetch(apiBase() + "/api/campaign/muster", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load the muster roster");
+    return data;
+  }
+
+  async function setMusterAutoAdvance(enabled) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/auto-advance", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ muster: !!enabled })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not update Muster auto-advance");
+      return data;
+    }
+    const meta = localRead("meta");
+    meta.auto_advance_muster = !!enabled;
+    localWrite("meta", meta);
+    return { ok: true, auto_advance_muster: meta.auto_advance_muster };
   }
 
   async function setAutoAdvance(enabled) {
@@ -992,9 +1050,12 @@
     revokeInvite,
     campaignStatus,
     advancePhase,
+    beginCampaign,
+    musterRoster,
     setPhase,
     setPhaseDeadline,
     setAutoAdvance,
+    setMusterAutoAdvance,
     actionsStatus,
     playerActions,
     doAction,

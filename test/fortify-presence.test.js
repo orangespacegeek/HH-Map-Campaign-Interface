@@ -116,6 +116,7 @@ test("fortify requires the player's own active force, and admin may skip that ch
     const loyal = await inviteAndSignup(ctx, admin, "fort_loyal", "Loyalist", AEOLUS);
     const traitor = await inviteAndSignup(ctx, admin, "fort_traitor", "Traitor", 4);
     assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
 
     const forces = (await api(ctx, admin, "GET", "/api/forces")).json;
     const loyalForces = forces.filter((f) => f.player_id === loyal.player_id);
