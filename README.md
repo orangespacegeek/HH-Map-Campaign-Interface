@@ -53,6 +53,7 @@ The restart re-hashes the admin account and deletes `data/sessions.json`. Sign i
 | `NODE_ENV` | No | `production` rejects the old published admin password. |
 | `CORS_ORIGINS` | No | Comma-separated extra browser origins allowed to call the API with cookies. Same-origin is always allowed. Leave unset for a normal single-site deploy. |
 | `DISCORD_FEEDBACK_WEBHOOK` | No | Discord webhook URL. When set, new feedback is also posted to that channel. Unset means feedback is stored only. |
+| `DISCORD_CAMPAIGN_WEBHOOK` | No | Separate Discord webhook for phase starts, battles the admin adds, and one reminder in the 24 hours before a deadline. Unset means those posts are skipped. See `DEPLOY_RENDER.md` for how to create the webhook. |
 | `MAX_BODY_BYTES` | No | Request body limit. Default `1048576` (1 MB). |
 | `TRUST_PROXY` | No | Leave unset when Node sees the client directly. The rate limiter then ignores `X-Forwarded-For`. Render's proxy is one hop and appends the real client IP, so set this to `1` there. A number is how many proxy hops to trust, counting from the right. |
 

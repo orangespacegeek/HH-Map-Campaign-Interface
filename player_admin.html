@@ -706,6 +706,11 @@
           <label for="f-contact">Contact</label>
           <input id="f-contact" maxlength="120" placeholder="discord:vox#1234" />
         </div>
+        <div class="form-group">
+          <label for="f-discord">Discord user ID</label>
+          <input id="f-discord" inputmode="numeric" maxlength="20" spellcheck="false" autocomplete="off" placeholder="Optional" />
+          <div class="form-hint">Numeric snowflake. Enable Developer Mode in Discord, right-click their name, Copy User ID. Only this player and you can see it.</div>
+        </div>
         <div class="form-row">
           <div class="form-group">
             <label for="f-status">Status *</label>
@@ -1055,6 +1060,7 @@
       document.getElementById("f-name").value = player ? player.player_name : "";
       document.getElementById("f-display").value = player ? (player.display_name || "") : "";
       document.getElementById("f-contact").value = player ? (player.contact || "") : "";
+      document.getElementById("f-discord").value = player ? (player.discord_user_id || "") : "";
       document.getElementById("f-status").value = player ? player.status : "active";
       document.getElementById("f-role").value = player ? player.role : "player";
       syncAllegianceSelect(player);
@@ -1105,6 +1111,7 @@
         player_name: document.getElementById("f-name").value.trim(),
         display_name: document.getElementById("f-display").value.trim() || null,
         contact: document.getElementById("f-contact").value.trim() || null,
+        discord_user_id: document.getElementById("f-discord").value.trim(),
         status: document.getElementById("f-status").value,
         role: document.getElementById("f-role").value,
         allegiance: document.getElementById("f-allegiance").value,
@@ -1139,7 +1146,7 @@
 
     function exportCsv() {
       const headers = [
-        "player_id","player_name","display_name","contact","status","role",
+        "player_id","player_name","display_name","contact","discord_user_id","status","role",
         "allegiance","start_sys_id","notes","joined_at","invite_code","invite_used"
       ];
       const rows = players.map(p => {

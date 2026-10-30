@@ -37,6 +37,7 @@
  *   GET  /api/campaign/muster          (campaign_admin) sides, forces, and balance counts
  *   POST /api/campaign/phase-deadline  (campaign_admin) { phase_ends_at } — ISO time, or null to clear
  *   POST /api/campaign/auto-advance    (campaign_admin) { enabled?: boolean, muster?: boolean }
+ *   POST /api/campaign/discord-test    (campaign_admin) post a test to the campaign Discord webhook
  *   A past phase deadline, or every counted player being out of actions during
  *   Logistics, advances one phase. Muster does not auto-advance unless the
  *   admin sets muster. Checked on startup and about every 30s
@@ -55,6 +56,9 @@
  *     and invalidate every session)
  *   CORS_ORIGINS (optional comma-separated extra origins; same-origin is always allowed)
  *   DISCORD_FEEDBACK_WEBHOOK (optional; off when unset)
+ *   DISCORD_CAMPAIGN_WEBHOOK (optional; off when unset). Phase starts, admin-added
+ *     battles, a once-per-phase 24h deadline reminder, and the admin test button.
+ *     Unset skips quietly. A webhook error never blocks a phase advance.
  *   MAX_BODY_BYTES (default 1048576)
  *   TRUST_PROXY (unset or 0: ignore X-Forwarded-For and rate-limit the socket
  *     address. Render is one proxy hop, so set TRUST_PROXY=1 there. The hop
@@ -538,6 +542,41 @@ const PLAYER_TEXT_LIMITS = {
   contact: ["Contact", 120],
   notes: ["Notes", 500]
 };
+
+// Discord snowflakes are 64-bit and do not fit in a JSON number. Keep the copied ID as digits.
+const DISCORD_SNOWFLAKE_MAX = 18446744073709551615n;
+const DISCORD_ID_ERROR = "Discord user ID must be the numeric snowflake copied from Discord (17–20 digits)";
+
+function parseDiscordUserId(value) {
+  if (value == null) return { ok: true, discord_user_id: null };
+  if (typeof value !== "string") return { ok: false, error: DISCORD_ID_ERROR };
+  const trimmed = value.trim();
+  if (!trimmed) return { ok: true, discord_user_id: null };
+  if (!/^[1-9][0-9]{16,19}$/.test(trimmed)) return { ok: false, error: DISCORD_ID_ERROR };
+  let snowflake;
+  try {
+    snowflake = BigInt(trimmed);
+  } catch {
+    return { ok: false, error: DISCORD_ID_ERROR };
+  }
+  if (snowflake > DISCORD_SNOWFLAKE_MAX) return { ok: false, error: DISCORD_ID_ERROR };
+  return { ok: true, discord_user_id: trimmed };
+}
+
+function discordIdError(body) {
+  if (!body || typeof body !== "object") return null;
+  if (!Object.prototype.hasOwnProperty.call(body, "discord_user_id")) return null;
+  const parsed = parseDiscordUserId(body.discord_user_id);
+  if (!parsed.ok) return parsed.error;
+  body.discord_user_id = parsed.discord_user_id;
+  return null;
+}
+
+function storedDiscordId(player) {
+  if (!player || player.discord_user_id == null || player.discord_user_id === "") return "";
+  const parsed = parseDiscordUserId(String(player.discord_user_id));
+  return parsed.ok && parsed.discord_user_id ? parsed.discord_user_id : "";
+}
 
 const SYSTEM_TEXT_LIMITS = {
   sys_name: ["System name", 80],
@@ -2338,6 +2377,13 @@ async function createBattle(res, auth, body) {
   writeCollection("games", list);
   saveBattleState(state);
   announceBattleChange(null, body, auth.account);
+  if (auth.account.role === "campaign_admin") {
+    try {
+      queueDiscord(buildBattleAddedDiscord(body));
+    } catch (err) {
+      console.error("Discord campaign notification failed: " + (err && err.message ? err.message : err));
+    }
+  }
   return send(res, 201, body);
 }
 
@@ -3388,6 +3434,11 @@ function advanceCampaign(meta, options = {}) {
     { turn, phase },
     options
   );
+  try {
+    queueDiscord(buildPhaseStartDiscord(meta));
+  } catch (err) {
+    console.error("Discord campaign notification failed: " + (err && err.message ? err.message : err));
+  }
 
   return {
     ok: true,
@@ -3584,7 +3635,13 @@ function maybeAutoAdvance() {
 
 function runAutoAdvanceSafe() {
   try {
-    return maybeAutoAdvance();
+    const result = maybeAutoAdvance();
+    try {
+      maybeQueueDeadlineReminder(Date.now());
+    } catch (err) {
+      console.error("Discord deadline reminder failed", err);
+    }
+    return result;
   } catch (err) {
     console.error("Auto-advance check failed", err);
     return { ok: false, error: err && err.message };
@@ -3768,7 +3825,23 @@ async function handleCampaign(req, res, parts, method) {
     return send(res, 200, result);
   }
 
-  return send(res, 404, { error: "Unknown campaign action. Use advance|begin|muster|status|set-phase|phase-deadline|auto-advance|reset" });
+  if (action === "discord-test" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    if (!campaignWebhookUrl()) {
+      return send(res, 400, { error: "Discord campaign webhook is not configured" });
+    }
+    const result = await postDiscordCampaign({
+      content: "**Sunset Heresy** test notification. Campaign Discord posts are reaching this channel.",
+      mentions: []
+    });
+    if (!result || !result.ok || result.skipped) {
+      return send(res, 502, { error: "The Discord webhook did not accept the test notification" });
+    }
+    return send(res, 200, { ok: true });
+  }
+
+  return send(res, 404, { error: "Unknown campaign action. Use advance|begin|muster|status|set-phase|phase-deadline|auto-advance|discord-test|reset" });
 }
 
 function parsePhaseDeadline(value) {
@@ -4146,7 +4219,7 @@ async function handleActions(req, res, parts, method) {
 }
 
 function publicMeta(meta) {
-  const hidden = new Set(["player_actions", "admin_pin", "next_player_id"]);
+  const hidden = new Set(["player_actions", "admin_pin", "next_player_id", "discord_deadline_reminder_key"]);
   const safe = {};
   Object.keys(meta || {}).forEach((key) => {
     if (hidden.has(key)) return;
@@ -4482,6 +4555,11 @@ function beginCampaign(meta, options = {}) {
     { turn: 1, phase: "Logistics" },
     options || {}
   );
+  try {
+    queueDiscord(buildPhaseStartDiscord(meta, { begun: true }));
+  } catch (err) {
+    console.error("Discord campaign notification failed: " + (err && err.message ? err.message : err));
+  }
   return {
     ok: true,
     meta,
@@ -4578,6 +4656,255 @@ function migrateStartingForces() {
       backupFile
   );
   return { changed: true, added: filled.added, backup: backupFile };
+}
+
+const DISCORD_CONTENT_LIMIT = 2000;
+const DISCORD_REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
+let discordDelivery = Promise.resolve();
+let campaignWebhookWarned = false;
+
+function discordWebhookTimeoutMs() {
+  const raw = Number(process.env.DISCORD_WEBHOOK_TIMEOUT_MS);
+  if (Number.isFinite(raw) && raw >= 50) return Math.min(raw, 20000);
+  return 4000;
+}
+
+// Discord webhook URLs, plus loopback http so tests can stand in for Discord.
+function campaignWebhookUrl() {
+  const url = String(process.env.DISCORD_CAMPAIGN_WEBHOOK || "").trim();
+  if (!url) return "";
+  if (/^https:\/\/(discord\.com|discordapp\.com)\/api\/webhooks\/[^\s]+$/.test(url)) return url;
+  if (/^http:\/\/(127\.0\.0\.1|localhost):\d+\/api\/webhooks\/[^\s]+$/.test(url)) return url;
+  if (!campaignWebhookWarned) {
+    campaignWebhookWarned = true;
+    console.warn("DISCORD_CAMPAIGN_WEBHOOK is set but is not a Discord webhook URL. Campaign notifications are off.");
+  }
+  return "";
+}
+
+function sanitizeDiscordText(value) {
+  const text = String(value == null ? "" : value)
+    .replace(/[\r\n\u0000-\u001f]+/g, " ")
+    .replace(/<@[&!]?/g, "< @")
+    .replace(/@everyone/gi, "@ everyone")
+    .replace(/@here/gi, "@ here")
+    .trim();
+  return text || "Unknown";
+}
+
+function uniqueMentions(ids) {
+  const out = [];
+  (ids || []).forEach((id) => {
+    const value = String(id || "");
+    if (value && out.indexOf(value) < 0) out.push(value);
+  });
+  return out;
+}
+
+function deadlineSentence(phaseEndsAt) {
+  const ms = phaseEndsAt ? Date.parse(phaseEndsAt) : NaN;
+  if (!Number.isFinite(ms)) return "No deadline is set.";
+  const unix = Math.floor(ms / 1000);
+  return "Deadline: <t:" + unix + ":F> (<t:" + unix + ":R>)";
+}
+
+function battleSideLabel(player, force) {
+  const fromPlayer = player && sideOf(player);
+  if (fromPlayer) return fromPlayer;
+  if (force && (force.allegiance === "Loyalist" || force.allegiance === "Traitor")) return force.allegiance;
+  return "Unknown";
+}
+
+function formatBattleMention(game) {
+  const players = readCollection("players");
+  const forces = readCollection("forces");
+  const systems = readCollection("systems");
+  function token(playerId, forceId) {
+    const player = players.find((row) => Number(row.player_id) === Number(playerId));
+    const force = forces.find((row) => Number(row.force_id) === Number(forceId));
+    const side = battleSideLabel(player, force);
+    const forceName = sanitizeDiscordText(force && force.force_name ? force.force_name : "Unknown force");
+    const snowflake = storedDiscordId(player);
+    if (snowflake) {
+      return { text: "<@" + snowflake + "> (" + side + ", " + forceName + ")", mentions: [snowflake] };
+    }
+    const name = sanitizeDiscordText(
+      player ? player.display_name || player.player_name || "Player " + playerId : "Player " + playerId
+    );
+    return { text: name + " (" + side + ", " + forceName + ")", mentions: [] };
+  }
+  const left = token(game.attacker_id, game.attacker_force_id);
+  const right = token(game.defender_id, game.defender_force_id);
+  const system = systems.find((row) => Number(row.sys_id) === Number(game.sys_id));
+  const where = sanitizeDiscordText(
+    system && system.sys_name ? system.sys_name : "system " + (game.sys_id == null ? "?" : game.sys_id)
+  );
+  return {
+    text: left.text + " vs " + right.text + " at " + where,
+    mentions: uniqueMentions(left.mentions.concat(right.mentions))
+  };
+}
+
+function openBattlesForTurn(turn) {
+  return readCollection("games")
+    .filter((game) => Number(game.turn) === Number(turn) && (game.result_state || "open") === "open")
+    .sort((a, b) => Number(a.game_id) - Number(b.game_id));
+}
+
+function buildPhaseStartDiscord(meta, options) {
+  const turn = Number(meta.turn) || 1;
+  const phase = meta.phase || "Logistics";
+  const lines = [];
+  if (options && options.begun) lines.push("The campaign has begun.");
+  lines.push("**Turn " + turn + " — " + phase + "** has started.");
+  lines.push(deadlineSentence(meta.phase_ends_at));
+  const mentions = [];
+  if (phase === "Battles") {
+    const games = openBattlesForTurn(turn);
+    lines.push("");
+    if (!games.length) lines.push("No open battles.");
+    else {
+      lines.push("Open battles:");
+      games.forEach((game) => {
+        const row = formatBattleMention(game);
+        lines.push(row.text);
+        row.mentions.forEach((id) => mentions.push(id));
+      });
+    }
+  }
+  return { content: lines.join("\n"), mentions: uniqueMentions(mentions) };
+}
+
+function buildBattleAddedDiscord(game) {
+  const meta = readCollection("meta") || {};
+  const turn = Number(meta.turn) || 1;
+  const phase = meta.phase || "Logistics";
+  const row = formatBattleMention(game);
+  return {
+    content: "A battle was added during **Turn " + turn + " — " + phase + "**.\n" + row.text,
+    mentions: row.mentions
+  };
+}
+
+function buildDeadlineReminderDiscord(meta) {
+  const turn = Number(meta.turn) || 1;
+  const phase = meta.phase || "Logistics";
+  const lines = [
+    "**Turn " + turn + " — " + phase + "** ends in under 24 hours.",
+    deadlineSentence(meta.phase_ends_at)
+  ];
+  const mentions = [];
+  if (phase === "Battles") {
+    const games = readCollection("games")
+      .filter((game) => isUnreportedOpenBattle(game, turn))
+      .sort((a, b) => Number(a.game_id) - Number(b.game_id));
+    lines.push("");
+    if (!games.length) lines.push("No unreported battles.");
+    else {
+      lines.push("Unreported battles:");
+      games.forEach((game) => {
+        const row = formatBattleMention(game);
+        lines.push(row.text);
+        row.mentions.forEach((id) => mentions.push(id));
+      });
+    }
+  }
+  return { content: lines.join("\n"), mentions: uniqueMentions(mentions) };
+}
+
+function reminderKey(meta) {
+  return (Number(meta.turn) || 1) + "|" + (meta.phase || "Logistics") + "|" + (meta.phase_ends_at || "");
+}
+
+function maybeQueueDeadlineReminder(now) {
+  if (!campaignWebhookUrl()) return false;
+  const locked = withAdvanceLock(() => {
+    const meta = readCollection("meta");
+    if (!meta || meta.victor) return false;
+    const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
+    if (!Number.isFinite(deadlineMs) || deadlineMs <= now) return false;
+    if (deadlineMs - now > DISCORD_REMINDER_WINDOW_MS) return false;
+    const key = reminderKey(meta);
+    if (meta.discord_deadline_reminder_key === key) return false;
+    let payload;
+    try {
+      payload = buildDeadlineReminderDiscord(meta);
+    } catch (err) {
+      console.error("Discord deadline reminder failed: " + (err && err.message ? err.message : err));
+      return false;
+    }
+    meta.discord_deadline_reminder_key = key;
+    writeCollection("meta", meta);
+    queueDiscord(payload);
+    return true;
+  });
+  return locked === true;
+}
+
+function chunkDiscordContent(content) {
+  const text = String(content || "");
+  if (!text) return [];
+  const chunks = [];
+  let rest = text;
+  while (rest.length > DISCORD_CONTENT_LIMIT) {
+    let cut = rest.lastIndexOf("\n", DISCORD_CONTENT_LIMIT);
+    if (cut < 1) cut = DISCORD_CONTENT_LIMIT;
+    const mentionAt = rest.lastIndexOf("<@", cut);
+    const mentionEnd = mentionAt < 0 ? -1 : rest.indexOf(">", mentionAt);
+    if (mentionAt > 0 && mentionAt < cut && (mentionEnd < 0 || mentionEnd >= cut)) cut = mentionAt;
+    if (cut < 1) cut = Math.min(DISCORD_CONTENT_LIMIT, rest.length);
+    chunks.push(rest.slice(0, cut));
+    rest = rest.slice(cut).replace(/^\n/, "");
+  }
+  if (rest) chunks.push(rest);
+  return chunks.filter((chunk) => chunk.length > 0);
+}
+
+function queueDiscord(payload) {
+  if (!payload || !payload.content) return;
+  if (!campaignWebhookUrl()) return;
+  discordDelivery = discordDelivery
+    .then(() => postDiscordCampaign(payload))
+    .catch((err) => {
+      console.error("Discord campaign webhook failed: " + (err && err.message ? err.message : err));
+    });
+}
+
+async function postDiscordWebhook(url, body) {
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(discordWebhookTimeoutMs())
+    });
+    await res.text().catch(() => "");
+    if (!res.ok) {
+      console.error("Discord campaign webhook returned " + res.status);
+      return { ok: false, status: res.status };
+    }
+    return { ok: true };
+  } catch (err) {
+    console.error("Discord campaign webhook failed: " + (err && err.message ? err.message : err));
+    return { ok: false, error: err && err.message ? err.message : "error" };
+  }
+}
+
+async function postDiscordCampaign(payload) {
+  const url = campaignWebhookUrl();
+  if (!url || !payload || !payload.content) return { ok: true, skipped: true };
+  const mentions = uniqueMentions(payload.mentions);
+  const chunks = chunkDiscordContent(payload.content);
+  let ok = true;
+  for (const content of chunks) {
+    const users = mentions.filter((id) => content.indexOf("<@" + id + ">") >= 0);
+    const posted = await postDiscordWebhook(url, {
+      content,
+      allowed_mentions: { parse: [], users }
+    });
+    if (!posted.ok) ok = false;
+  }
+  return { ok };
 }
 
 function feedbackWebhookUrl() {
@@ -4826,6 +5153,12 @@ async function handleApi(req, res, pathname) {
     if (collection === "games") return replaceBattles(res, body);
     const bulkText = collectionTextError(collection, body);
     if (bulkText) return send(res, 400, { error: bulkText });
+    if (collection === "players") {
+      for (const row of body) {
+        const discordError = discordIdError(row);
+        if (discordError) return send(res, 400, { error: discordError });
+      }
+    }
     writeCollection(collection, body);
     if (collection === "players" || collection === "forces") migrateBlackshieldAllegiance();
     return send(res, 200, readCollection(collection));
@@ -4865,6 +5198,8 @@ async function handleApi(req, res, pathname) {
 
     const list = readCollection(collection);
     if (collection === "players") {
+      const discordError = discordIdError(body);
+      if (discordError) return send(res, 400, { error: discordError });
       const side = requirePlayerSide(body.allegiance);
       if (!side.ok) return send(res, 400, { error: side.error });
       body.allegiance = side.allegiance;
@@ -4895,6 +5230,8 @@ async function handleApi(req, res, pathname) {
       if (isAdmin) {
         const err = textLimitError(body, PLAYER_TEXT_LIMITS, { player_name: true, display_name: true });
         if (err) return send(res, 400, { error: err });
+        const discordError = discordIdError(body);
+        if (discordError) return send(res, 400, { error: discordError });
         const next = { ...existing, ...body, player_id: existing.player_id };
         if (body.allegiance !== undefined) {
           const side = requirePlayerSide(body.allegiance);
@@ -4917,10 +5254,13 @@ async function handleApi(req, res, pathname) {
           { display_name: true }
         );
         if (err) return send(res, 400, { error: err });
+        const discordError = discordIdError(body);
+        if (discordError) return send(res, 400, { error: discordError });
         const safe = { ...existing };
         if (body.display_name !== undefined && body.display_name !== null) safe.display_name = body.display_name;
         if (body.contact !== undefined) safe.contact = body.contact || null;
         if (body.notes !== undefined) safe.notes = body.notes || null;
+        if (Object.prototype.hasOwnProperty.call(body, "discord_user_id")) safe.discord_user_id = body.discord_user_id;
         list[idx] = safe;
         writeCollection(collection, list);
         if (body.display_name !== undefined && body.display_name !== null) {
@@ -5098,6 +5438,8 @@ function startServer() {
     console.log(`Health: /health`);
     if (feedbackWebhookUrl()) console.log("Discord feedback webhook: enabled");
     else console.log("Discord feedback webhook: off (set DISCORD_FEEDBACK_WEBHOOK to enable)");
+    if (campaignWebhookUrl()) console.log("Discord campaign webhook: enabled");
+    else console.log("Discord campaign webhook: off (set DISCORD_CAMPAIGN_WEBHOOK to enable)");
   });
 }
 

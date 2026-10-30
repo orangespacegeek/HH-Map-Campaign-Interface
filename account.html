@@ -48,6 +48,7 @@
     .msg.error { display: block; background: #3f1515; color: #fca5a5; border: 1px solid var(--danger); }
     .msg.ok { display: block; background: #14532d; color: #86efac; border: 1px solid #22c55e; }
     .who { font-size: 0.85rem; color: var(--muted); margin-bottom: 0.8rem; line-height: 1.4; }
+    .hint { color: var(--muted); font-size: 0.8rem; line-height: 1.45; margin: -0.2rem 0 0.85rem; }
     a { color: var(--accent); }
   </style>
   <link rel="stylesheet" href="css/site-nav.css" />
@@ -105,6 +106,11 @@
           <input id="contact" maxlength="120" autocomplete="off" placeholder="Discord name, email, or leave blank" />
         </div>
         <div class="form-group">
+          <label for="discord_user_id">Discord user ID</label>
+          <input id="discord_user_id" inputmode="numeric" autocomplete="off" maxlength="20" spellcheck="false" placeholder="Optional" />
+        </div>
+        <p class="hint">Optional. Enable Developer Mode in Discord, right-click your name, and choose Copy User ID. On a phone, turn Developer Mode on, then long-press your name and choose Copy User ID. Only you and the campaign admin can see this. Campaign posts use it to @mention you.</p>
+        <div class="form-group">
           <label for="notes">Notes</label>
           <textarea id="notes" maxlength="500" placeholder="When you can play, list preferences…"></textarea>
         </div>
@@ -145,7 +151,8 @@
           player_id: me.player.player_id,
           display_name: document.getElementById("display_name").value.trim(),
           contact: document.getElementById("contact").value.trim(),
-          notes: document.getElementById("notes").value.trim()
+          notes: document.getElementById("notes").value.trim(),
+          discord_user_id: document.getElementById("discord_user_id").value.trim()
         });
         await SH.me();
         await SH.applyNavPermissions();
@@ -187,6 +194,7 @@
         document.getElementById("display_name").value = me.player.display_name || "";
         document.getElementById("contact").value = me.player.contact || "";
         document.getElementById("notes").value = me.player.notes || "";
+        document.getElementById("discord_user_id").value = me.player.discord_user_id || "";
         const invite = me.signup_invite;
         if (invite && invite.code) {
           const line = document.getElementById("invite-line");

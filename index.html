@@ -849,6 +849,7 @@
         <input type="datetime-local" id="phase-ends-at" />
         <button type="button" id="btn-set-deadline">Set deadline</button>
         <button type="button" id="btn-clear-deadline">Clear deadline</button>
+        <button type="button" id="btn-discord-test">Send test notification</button>
         <label class="deadline-toggle" for="auto-advance-done">
           <input type="checkbox" id="auto-advance-done" checked />
           Auto-advance when all players are done
@@ -857,7 +858,7 @@
           <input type="checkbox" id="auto-advance-muster" />
           Auto-advance out of Muster when the deadline passes
         </label>
-        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Muster stays put until you begin the campaign, unless you turn on the Muster deadline. Open battles are not voided. At the Battles deadline, an unreported battle is flagged No report, pending admin confirmation, and the loss is not applied until you confirm it.</p>
+        <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Muster stays put until you begin the campaign, unless you turn on the Muster deadline. Open battles are not voided. At the Battles deadline, an unreported battle is flagged No report, pending admin confirmation, and the loss is not applied until you confirm it. Send test notification posts to the campaign Discord channel and does not mention anyone.</p>
       </div>
       <p class="admin-hint" data-role="campaign_admin">Muster is sign-up: players join, pick a side, and name two forces. Begin campaign locks that roster and starts Turn 1 in Logistics. After that, advance follows Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to Muster with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
       <div class="turn-log" id="turn-log"></div>
@@ -1495,6 +1496,20 @@
         await refreshDashboard();
       } catch (err) {
         log.textContent = err.message || "Could not clear the phase deadline";
+      }
+    });
+
+    document.getElementById("btn-discord-test").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      const button = document.getElementById("btn-discord-test");
+      button.disabled = true;
+      try {
+        await SH.sendDiscordTest();
+        log.textContent = "Test notification sent.";
+      } catch (err) {
+        log.textContent = err.message || "Could not send the test notification";
+      } finally {
+        button.disabled = false;
       }
     });
 
