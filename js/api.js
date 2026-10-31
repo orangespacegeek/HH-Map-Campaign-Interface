@@ -581,6 +581,34 @@
     return res.blob();
   }
 
+  async function previewBackup(backup) {
+    await probe();
+    if (mode !== "server") throw new Error("Restore needs the live server");
+    const res = await fetch(apiBase() + "/api/admin/backup/preview", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(backup)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not read that backup");
+    return data;
+  }
+
+  async function restoreBackup(restoreToken) {
+    await probe();
+    if (mode !== "server") throw new Error("Restore needs the live server");
+    const res = await fetch(apiBase() + "/api/admin/backup/restore", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify({ confirm: "RESTORE", restore_token: restoreToken })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Restore failed");
+    return data;
+  }
+
   async function resetCampaign(body) {
     await probe();
     if (mode !== "server") throw new Error("Reset needs the live server");
@@ -1050,6 +1078,8 @@
     submitFeedback,
     listFeedback,
     downloadBackup,
+    previewBackup,
+    restoreBackup,
     resetCampaign,
     confirmGame,
     disputeGame,

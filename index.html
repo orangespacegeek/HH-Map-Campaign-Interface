@@ -346,6 +346,63 @@
       border-color: var(--accent);
       font-weight: 600;
     }
+    .reset-actions button.danger {
+      background: var(--traitor);
+      color: #fff;
+      border-color: var(--traitor);
+      font-weight: 700;
+    }
+    #restore-overlay .reset-dialog h3 { color: var(--traitor); }
+    #restore-overlay .reset-actions button { min-height: 44px; }
+    .restore-file {
+      display: block;
+      width: 100%;
+      max-width: 100%;
+      margin: 0.35rem 0 0.75rem;
+      min-height: 44px;
+      font-size: 16px;
+      color: var(--text);
+    }
+    .restore-file::file-selector-button {
+      min-height: 44px;
+      margin-right: 0.6rem;
+      border: 1px solid var(--border);
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.45rem 0.8rem;
+      font: inherit;
+      cursor: pointer;
+    }
+    .restore-preview {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 0.7rem 0.75rem;
+      margin: 0.75rem 0;
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+    .restore-preview[hidden] { display: none; }
+    .restore-preview strong { color: var(--accent); }
+    .restore-warning {
+      background: rgba(239, 68, 68, 0.14);
+      border: 1px solid var(--traitor);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 0.65rem 0.75rem;
+      font-size: 0.82rem;
+      line-height: 1.4;
+      margin-bottom: 0.75rem;
+    }
+    .restore-error {
+      color: var(--traitor);
+      font-size: 0.82rem;
+      line-height: 1.4;
+      margin-top: 0.7rem;
+    }
+    .restore-error[hidden] { display: none; }
+    #restore-confirm-block[hidden] { display: none; }
     @media (min-width: 700px) {
       .reset-overlay { align-items: center; }
     }
@@ -842,6 +899,7 @@
         </select>
         <button type="button" id="btn-set-phase">Set phase</button>
         <button type="button" id="btn-backup">Download backup</button>
+        <button type="button" id="btn-restore">Restore from backup</button>
         <button type="button" id="btn-reset">Reset campaign</button>
       </div>
       <div class="deadline-editor" data-role="campaign_admin">
@@ -860,7 +918,7 @@
         </label>
         <p class="admin-hint">Times are in your local time zone. When the deadline is reached the phase advances once, and the deadline is cleared. Clearing it turns the time trigger off. The actions toggle applies in Logistics only. Muster stays put until you begin the campaign, unless you turn on the Muster deadline. Open battles are not voided. At the Battles deadline, an unreported battle is flagged No report, pending admin confirmation, and the loss is not applied until you confirm it. Send test notification posts to the campaign Discord channel and does not mention anyone.</p>
       </div>
-      <p class="admin-hint" data-role="campaign_admin">Muster is sign-up: players join, pick a side, and name two forces. Begin campaign locks that roster and starts Turn 1 in Logistics. After that, advance follows Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to Muster with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls.</p>
+      <p class="admin-hint" data-role="campaign_admin">Muster is sign-up: players join, pick a side, and name two forces. Begin campaign locks that roster and starts Turn 1 in Logistics. After that, advance follows Logistics, then Movement, then Battles. Ending the Battles phase scores the turn and starts the next Logistics phase. Open, pending, or disputed battles block that step until they are resolved, or you confirm voiding them. Set phase jumps without those side effects. Reset returns the campaign to Muster with two strength-3 forces per player and keeps accounts. A player with no starting system is placed in a system their side controls. Restore from backup replaces the campaign with a downloaded file after you review the summary and type RESTORE.</p>
       <div class="turn-log" id="turn-log"></div>
     </div>
 
@@ -887,6 +945,29 @@
   </main>
 
   <footer id="footer-note">Loading campaign…</footer>
+
+  <div class="reset-overlay" id="restore-overlay" hidden>
+    <div class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="restore-title">
+      <h3 id="restore-title">Restore from backup</h3>
+      <p>Choose the JSON file from Download backup. The server checks it and shows a summary. Nothing is replaced until you type RESTORE.</p>
+      <label class="confirm-label" for="restore-file">Backup file</label>
+      <input class="restore-file" type="file" id="restore-file" accept=".json,application/json,text/json" />
+      <div class="reset-actions">
+        <button type="button" id="restore-review">Review backup</button>
+      </div>
+      <p class="restore-error" id="restore-error" hidden role="alert"></p>
+      <div class="restore-preview" id="restore-preview" hidden></div>
+      <div id="restore-confirm-block" hidden>
+        <p class="restore-warning">This overwrites players, forces, systems, battles, invites, and the campaign turn. A copy of the current data is saved on the server first. You stay signed in.</p>
+        <label class="confirm-label" for="restore-confirm">Type RESTORE to confirm</label>
+        <input type="text" id="restore-confirm" autocomplete="off" autocapitalize="characters" spellcheck="false" enterkeyhint="done" />
+        <div class="reset-actions">
+          <button type="button" id="restore-cancel">Cancel</button>
+          <button type="button" class="danger" id="restore-go">Restore backup</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="reset-overlay" id="reset-overlay" hidden>
     <div class="reset-dialog" role="dialog" aria-modal="true" aria-labelledby="reset-title">
@@ -1394,6 +1475,132 @@
         log.textContent = "Backup downloaded. It omits password hashes and sessions.";
       } catch (err) {
         log.textContent = err.message || "Backup failed";
+      }
+    });
+
+    const restoreOverlay = document.getElementById("restore-overlay");
+    const restoreFile = document.getElementById("restore-file");
+    const restoreError = document.getElementById("restore-error");
+    const restorePreview = document.getElementById("restore-preview");
+    const restoreConfirmBlock = document.getElementById("restore-confirm-block");
+    let restoreToken = null;
+
+    function setRestoreError(message) {
+      restoreError.hidden = !message;
+      restoreError.textContent = message || "";
+    }
+
+    function clearRestorePreview() {
+      restoreToken = null;
+      restorePreview.hidden = true;
+      restorePreview.replaceChildren();
+      restoreConfirmBlock.hidden = true;
+      document.getElementById("restore-confirm").value = "";
+    }
+
+    function openRestoreDialog() {
+      restoreFile.value = "";
+      clearRestorePreview();
+      setRestoreError("");
+      restoreOverlay.hidden = false;
+      restoreFile.focus();
+    }
+
+    function closeRestoreDialog() {
+      restoreOverlay.hidden = true;
+    }
+
+    function showRestorePreview(preview) {
+      const when = preview && preview.exported_at ? new Date(preview.exported_at) : null;
+      const whenText = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : (preview && preview.exported_at) || "—";
+      const lines = [
+        ["Turn", preview.turn == null ? "—" : String(preview.turn)],
+        ["Phase", preview.phase || "—"],
+        ["Backup taken", whenText],
+        ["Players", String(preview.players)],
+        ["Forces", String(preview.forces)],
+        ["Systems", String(preview.systems)],
+        ["Battles", String(preview.battles)]
+      ];
+      restorePreview.replaceChildren();
+      lines.forEach(([label, value]) => {
+        const row = document.createElement("div");
+        const key = document.createElement("strong");
+        key.textContent = label;
+        row.append(key, document.createTextNode(": " + value));
+        restorePreview.appendChild(row);
+      });
+      restorePreview.hidden = false;
+      restoreConfirmBlock.hidden = false;
+      document.getElementById("restore-confirm").focus();
+    }
+
+    document.getElementById("btn-restore").addEventListener("click", openRestoreDialog);
+    document.getElementById("restore-cancel").addEventListener("click", () => {
+      closeRestoreDialog();
+      document.getElementById("turn-log").textContent = "Restore cancelled.";
+    });
+    restoreOverlay.addEventListener("click", (event) => {
+      if (event.target === restoreOverlay) closeRestoreDialog();
+    });
+    restoreFile.addEventListener("change", () => {
+      clearRestorePreview();
+      setRestoreError("");
+    });
+
+    document.getElementById("restore-review").addEventListener("click", async () => {
+      const file = restoreFile.files && restoreFile.files[0];
+      setRestoreError("");
+      clearRestorePreview();
+      if (!file) {
+        setRestoreError("Choose a backup file first.");
+        return;
+      }
+      let parsed;
+      try {
+        const text = await file.text();
+        parsed = JSON.parse(text);
+      } catch (_) {
+        setRestoreError("That file is not valid JSON.");
+        return;
+      }
+      const button = document.getElementById("restore-review");
+      button.disabled = true;
+      try {
+        const result = await SH.previewBackup(parsed);
+        restoreToken = result.restore_token;
+        showRestorePreview(result.preview || {});
+      } catch (err) {
+        setRestoreError(err.message || "Could not read that backup");
+      } finally {
+        button.disabled = false;
+      }
+    });
+
+    document.getElementById("restore-go").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      const typed = document.getElementById("restore-confirm").value.trim();
+      if (typed !== "RESTORE") {
+        setRestoreError("Type RESTORE to confirm.");
+        return;
+      }
+      if (!restoreToken) {
+        setRestoreError("Review the backup file first.");
+        return;
+      }
+      const button = document.getElementById("restore-go");
+      button.disabled = true;
+      try {
+        await SH.restoreBackup(restoreToken);
+        restoreToken = null;
+        closeRestoreDialog();
+        log.textContent = "Campaign restored from backup. A copy of the previous data was saved on the server.";
+        await refreshDashboard();
+      } catch (err) {
+        setRestoreError(err.message || "Restore failed");
+        log.textContent = err.message || "Restore failed";
+      } finally {
+        button.disabled = false;
       }
     });
 

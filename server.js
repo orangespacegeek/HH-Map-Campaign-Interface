@@ -32,6 +32,8 @@
  *   POST /api/feedback                 (logged in) { message, page? }
  *   GET  /api/feedback                 (campaign_admin)
  *   GET  /api/admin/backup             (campaign_admin) campaign JSON download
+ *   POST /api/admin/backup/preview     (campaign_admin) backup JSON → summary, no writes
+ *   POST /api/admin/backup/restore     (campaign_admin) { confirm: "RESTORE", restore_token }
  *   POST /api/campaign/reset           (campaign_admin) { confirm: "RESET", keep_map?, keep_control? }
  *   POST /api/campaign/begin           (campaign_admin) leave Muster for Turn 1 Logistics
  *   GET  /api/campaign/muster          (campaign_admin) sides, forces, and balance counts
@@ -60,6 +62,7 @@
  *     battles, a once-per-phase 24h deadline reminder, and the admin test button.
  *     Unset skips quietly. A webhook error never blocks a phase advance.
  *   MAX_BODY_BYTES (default 1048576)
+ *   RESTORE_MAX_BYTES (default 8388608) cap for backup preview and restore uploads
  *   TRUST_PROXY (unset or 0: ignore X-Forwarded-For and rate-limit the socket
  *     address. Render is one proxy hop, so set TRUST_PROXY=1 there. The hop
  *     count is how many entries to trust from the right of X-Forwarded-For.)
@@ -150,6 +153,70 @@ function atomicWrite(fp, text) {
     try {
       fs.unlinkSync(tmp);
     } catch (_) {}
+    throw err;
+  }
+}
+
+function resolvedInsideData(filePath) {
+  ensureDataDir();
+  const root = fs.realpathSync(DATA);
+  const parent = path.dirname(filePath);
+  if (!fs.existsSync(parent)) fs.mkdirSync(parent, { recursive: true });
+  const parentReal = fs.realpathSync(parent);
+  const resolved = path.resolve(parentReal, path.basename(filePath));
+  const rel = path.relative(root, resolved);
+  if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+    throw httpError(500, "Refusing to write outside the data directory");
+  }
+  return resolved;
+}
+
+function dataCollectionPath(name) {
+  if (typeof name !== "string" || name !== path.basename(name) || name.startsWith(".") || name.includes("..")) {
+    throw httpError(500, "Refusing to write outside the data directory");
+  }
+  return resolvedInsideData(path.join(DATA, name));
+}
+
+// Write every file to a temp name first, then rename. A thrown error rolls
+// the renamed files back so a failed restore cannot leave a mix of old and new.
+function writeDataFilesAtomically(files) {
+  const planned = files.map((file) => {
+    const dest = dataCollectionPath(file.name);
+    const previous = fs.existsSync(dest) ? fs.readFileSync(dest, "utf8") : null;
+    return { dest, text: file.text, previous };
+  });
+  const temps = [];
+  let renamed = 0;
+  try {
+    for (const file of planned) {
+      const tmp = file.dest + ".tmp-" + process.pid + "-" + crypto.randomBytes(4).toString("hex");
+      const tmpRel = path.relative(path.dirname(file.dest), tmp);
+      if (!tmpRel || tmpRel.startsWith("..") || path.isAbsolute(tmpRel)) {
+        throw httpError(500, "Refusing to write outside the data directory");
+      }
+      fs.writeFileSync(tmp, file.text);
+      temps.push(tmp);
+    }
+    for (let i = 0; i < planned.length; i++) {
+      fs.renameSync(temps[i], planned[i].dest);
+      temps[i] = null;
+      renamed += 1;
+    }
+  } catch (err) {
+    for (const tmp of temps) {
+      if (!tmp) continue;
+      try {
+        fs.unlinkSync(tmp);
+      } catch (_) {}
+    }
+    for (let i = 0; i < renamed; i++) {
+      const file = planned[i];
+      try {
+        if (file.previous == null) fs.unlinkSync(file.dest);
+        else atomicWrite(file.dest, file.previous);
+      } catch (_) {}
+    }
     throw err;
   }
 }
@@ -1038,7 +1105,9 @@ function assertCsrf(req) {
 
 const MAX_BODY_BYTES = Number(process.env.MAX_BODY_BYTES) || 1024 * 1024;
 
-function readBody(req) {
+function readBody(req, options) {
+  const limit = options && options.limit ? options.limit : MAX_BODY_BYTES;
+  const tooBigMessage = (options && options.tooBig) || "Request body too large";
   return new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
@@ -1052,9 +1121,9 @@ function readBody(req) {
     req.on("data", (c) => {
       if (settled || tooBig) return;
       size += c.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > limit) {
         tooBig = true;
-        fail(httpError(413, "Request body too large"));
+        fail(httpError(413, tooBigMessage));
         // Answer first, then drop the rest of the upload.
         setImmediate(() => {
           if (!req.destroyed) req.destroy();
@@ -3426,6 +3495,7 @@ function advanceCampaign(meta, options = {}) {
     log.push(`Victory: ${victory.winner} — ${victory.reason}`);
   }
 
+  clearRestoreQuiet();
   writeCollection("systems", systems);
   writeCollection("forces", forces);
   writeCollection("meta", meta);
@@ -3456,6 +3526,33 @@ const AUTO_ADVANCE_INTERVAL_MS = (() => {
   return 30000;
 })();
 let advanceLock = false;
+// Set by a restore. While the live turn, phase, and deadline still match the
+// file, do not auto-advance and do not post the deadline reminder. A restore
+// must not announce the restored phase or spam Discord for a deadline that
+// was already due in the file. Manual advance, a new deadline, or an
+// auto-advance setting change clears this.
+let quietRestore = null;
+
+function quietRestoreMatches(meta) {
+  if (!quietRestore || !meta || typeof meta !== "object") return false;
+  const turn = Number(meta.turn) || 1;
+  const phase = meta.phase || "Logistics";
+  const deadline = meta.phase_ends_at || null;
+  return turn === quietRestore.turn && phase === quietRestore.phase && deadline === quietRestore.phase_ends_at;
+}
+
+function armRestoreQuiet(meta) {
+  const source = meta && typeof meta === "object" ? meta : {};
+  quietRestore = {
+    turn: Number(source.turn) || 1,
+    phase: source.phase || "Logistics",
+    phase_ends_at: source.phase_ends_at || null
+  };
+}
+
+function clearRestoreQuiet() {
+  quietRestore = null;
+}
 
 function withAdvanceLock(fn) {
   if (advanceLock) {
@@ -3509,6 +3606,7 @@ function announcePhaseAdvance(from, to, options) {
 }
 
 function autoAdvanceReason(meta, now) {
+  if (quietRestoreMatches(meta)) return null;
   if (!meta || meta.victor) return null;
   const phase = meta.phase || "Logistics";
   const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
@@ -3704,6 +3802,7 @@ async function handleCampaign(req, res, parts, method) {
     if (!parsed.ok) return send(res, 400, { error: parsed.error });
     const meta = readCollection("meta");
     meta.phase_ends_at = parsed.phase_ends_at;
+    clearRestoreQuiet();
     writeCollection("meta", meta);
     const check = runAutoAdvanceSafe();
     const saved = readCollection("meta");
@@ -3735,6 +3834,7 @@ async function handleCampaign(req, res, parts, method) {
     const meta = readCollection("meta");
     if (hasEnabled) meta.auto_advance_when_done = body.enabled;
     if (hasMuster) meta.auto_advance_muster = body.muster;
+    clearRestoreQuiet();
     writeCollection("meta", meta);
     const shouldCheck = (hasEnabled && body.enabled) || (hasMuster && body.muster);
     const check = shouldCheck ? runAutoAdvanceSafe() : { advanced: false };
@@ -3796,6 +3896,7 @@ async function handleCampaign(req, res, parts, method) {
     }
     meta.phase = body.phase;
     meta.last_advanced_at = new Date().toISOString();
+    clearRestoreQuiet();
     writeCollection("meta", meta);
     return send(res, 200, { ok: true, from, to: { turn: meta.turn, phase: meta.phase }, meta });
   }
@@ -4233,9 +4334,9 @@ function publicAccount(account) {
   return {
     account_id: account.account_id,
     role: account.role,
-    label: account.label,
+    label: account.label == null ? null : account.label,
     login: account.login || null,
-    player_id: account.player_id,
+    player_id: account.player_id == null ? null : account.player_id,
     provider: account.provider || "local",
     created_at: account.created_at || null
   };
@@ -4430,6 +4531,7 @@ function resetCampaign(options = {}) {
   if (keepControl && !keepMap) {
     throw httpError(400, "Keep current system control requires Keep current map.");
   }
+  clearRestoreQuiet();
   const previous = readCollection("meta") || {};
   const players = readCollection("players");
   const existingForces = readCollection("forces");
@@ -4549,6 +4651,7 @@ function beginCampaign(meta, options = {}) {
       notes
     }
   ]);
+  clearRestoreQuiet();
   writeCollection("meta", meta);
   announcePhaseAdvance(
     { turn: fromTurn, phase: "Muster" },
@@ -4820,6 +4923,7 @@ function maybeQueueDeadlineReminder(now) {
   if (!campaignWebhookUrl()) return false;
   const locked = withAdvanceLock(() => {
     const meta = readCollection("meta");
+    if (quietRestoreMatches(meta)) return false;
     if (!meta || meta.victor) return false;
     const deadlineMs = meta.phase_ends_at ? Date.parse(meta.phase_ends_at) : NaN;
     if (!Number.isFinite(deadlineMs) || deadlineMs <= now) return false;
@@ -4981,11 +5085,31 @@ async function handleFeedback(req, res, method) {
   return send(res, 405, { error: "Method not allowed" });
 }
 
+const BACKUP_FORMAT = "sunset-heresy-backup";
+const BACKUP_VERSION = 1;
+const BACKUP_NOTE =
+  "Password hashes and sessions are omitted. Invite codes are included so a restore can keep player sign-up working. Treat this file as secret.";
+const BACKUP_LISTS = ["players", "forces", "systems", "games", "invites", "notifications", "feedback"];
+const BACKUP_KEYS = ["format", "version", "exported_at", "note"].concat(BACKUP_LISTS, ["meta", "accounts"]);
+const BACKUP_LEGACY_KEYS = ["exported_at", "note"].concat(BACKUP_LISTS, ["meta", "accounts"]);
+const ACCOUNT_KEYS = ["account_id", "role", "label", "login", "player_id", "provider", "created_at"];
+const RESTORE_MAX_DEFAULT = 8 * 1024 * 1024;
+const RESTORE_TOKEN_MS = 15 * 60 * 1000;
+const pendingRestores = new Map();
+
+function restoreMaxBytes() {
+  const raw = Number(process.env.RESTORE_MAX_BYTES);
+  if (Number.isFinite(raw) && raw >= 1024) return Math.min(Math.floor(raw), 32 * 1024 * 1024);
+  return RESTORE_MAX_DEFAULT;
+}
+
 function backupPayload() {
   const accounts = readCollection("accounts").map(publicAccount);
   return {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
     exported_at: new Date().toISOString(),
-    note: "Password hashes and sessions are omitted. Invite codes are included so a restore can keep player sign-up working. Treat this file as secret.",
+    note: BACKUP_NOTE,
     players: readCollection("players"),
     forces: readCollection("forces"),
     systems: readCollection("systems"),
@@ -4998,6 +5122,288 @@ function backupPayload() {
   };
 }
 
+function sameKeySet(value, keys) {
+  const got = Object.keys(value);
+  if (got.length !== keys.length) return false;
+  return keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+}
+
+function rejectUnsafeBackupValue(value, depth) {
+  if (depth > 32) return "Backup is nested too deeply";
+  if (value == null || typeof value !== "object") return null;
+  if (Array.isArray(value)) {
+    if (Object.getPrototypeOf(value) !== Array.prototype) {
+      return "Backup contains a field this server does not accept";
+    }
+    if (value.length > 50000) return "Backup is too large";
+    for (let i = 0; i < value.length; i++) {
+      const err = rejectUnsafeBackupValue(value[i], depth + 1);
+      if (err) return err;
+    }
+    return null;
+  }
+  if (Object.getPrototypeOf(value) !== Object.prototype) {
+    return "Backup contains a field this server does not accept";
+  }
+  const keys = Object.keys(value);
+  if (keys.length > 4000) return "Backup contains a record with too many fields";
+  for (const key of keys) {
+    if (key === "__proto__" || key === "prototype" || key === "constructor") {
+      return "Backup contains a field this server does not accept";
+    }
+    const err = rejectUnsafeBackupValue(value[key], depth + 1);
+    if (err) return err;
+  }
+  return null;
+}
+
+function validateAccounts(accounts) {
+  if (!Array.isArray(accounts)) return "accounts must be a list";
+  const seen = new Set();
+  for (const account of accounts) {
+    if (!account || typeof account !== "object" || Array.isArray(account)) return "Each account must be an object";
+    const keys = Object.keys(account);
+    if (keys.length !== ACCOUNT_KEYS.length || ACCOUNT_KEYS.some((key) => keys.indexOf(key) < 0)) {
+      return "Account records must match a downloaded backup. Password hashes are not part of the file.";
+    }
+    if (!Number.isInteger(account.account_id) || account.account_id < 1) return "Each account needs an id";
+    if (seen.has(account.account_id)) return "Backup has two accounts with the same id";
+    seen.add(account.account_id);
+    if (account.role !== "player" && account.role !== "campaign_admin") return "Account role is not valid";
+    if (account.label != null && typeof account.label !== "string") return "Account label is not valid";
+    if (account.login != null && typeof account.login !== "string") return "Account login is not valid";
+    if (account.player_id != null && (!Number.isInteger(account.player_id) || account.player_id < 1)) {
+      return "Account player id is not valid";
+    }
+    if (typeof account.provider !== "string" || !account.provider) return "Account provider is not valid";
+    if (account.created_at != null && typeof account.created_at !== "string") return "Account created_at is not valid";
+  }
+  return null;
+}
+
+function validateBackup(payload) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return { ok: false, error: "Backup must be a JSON object" };
+  }
+  const unsafe = rejectUnsafeBackupValue(payload, 0);
+  if (unsafe) return { ok: false, error: unsafe };
+  const versioned = sameKeySet(payload, BACKUP_KEYS);
+  const legacy = sameKeySet(payload, BACKUP_LEGACY_KEYS);
+  if (!versioned && !legacy) {
+    return {
+      ok: false,
+      error: "This file is not a Sunset Heresy backup. Use a file from Download backup."
+    };
+  }
+  if (versioned) {
+    if (payload.format !== BACKUP_FORMAT) {
+      return { ok: false, error: "This file is not a Sunset Heresy backup." };
+    }
+    if (payload.version !== BACKUP_VERSION) {
+      return { ok: false, error: "This backup version is not supported" };
+    }
+  }
+  if (payload.note !== BACKUP_NOTE) {
+    return { ok: false, error: "This file is not a Sunset Heresy backup." };
+  }
+  if (typeof payload.exported_at !== "string" || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(payload.exported_at)) {
+    return { ok: false, error: "Backup timestamp is missing or not a date" };
+  }
+  if (!Number.isFinite(Date.parse(payload.exported_at))) {
+    return { ok: false, error: "Backup timestamp is missing or not a date" };
+  }
+  if (!payload.meta || typeof payload.meta !== "object" || Array.isArray(payload.meta)) {
+    return { ok: false, error: "meta must be an object" };
+  }
+  for (const name of BACKUP_LISTS) {
+    const list = payload[name];
+    if (!Array.isArray(list)) return { ok: false, error: name + " must be a list" };
+    for (const item of list) {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return { ok: false, error: "Each " + name + " entry must be an object" };
+      }
+    }
+  }
+  const accountsError = validateAccounts(payload.accounts);
+  if (accountsError) return { ok: false, error: accountsError };
+  return { ok: true, backup: payload };
+}
+
+function backupSummary(payload) {
+  const meta = payload.meta || {};
+  const turn = meta.turn == null || meta.turn === "" ? null : Number(meta.turn);
+  return {
+    exported_at: payload.exported_at,
+    version: payload.version == null ? BACKUP_VERSION : payload.version,
+    players: payload.players.length,
+    forces: payload.forces.length,
+    systems: payload.systems.length,
+    battles: payload.games.length,
+    turn: Number.isFinite(turn) ? turn : null,
+    phase: meta.phase ? String(meta.phase) : null,
+    accounts: payload.accounts.length,
+    invites: payload.invites.length
+  };
+}
+
+function purgePendingRestores(now) {
+  for (const [token, row] of pendingRestores) {
+    if (row.expiresAt <= now) pendingRestores.delete(token);
+  }
+  while (pendingRestores.size > 8) {
+    const oldest = pendingRestores.keys().next().value;
+    pendingRestores.delete(oldest);
+  }
+}
+
+function rememberRestore(accountId, payload) {
+  const now = Date.now();
+  purgePendingRestores(now);
+  for (const [token, row] of pendingRestores) {
+    if (row.accountId === accountId) pendingRestores.delete(token);
+  }
+  const token = crypto.randomBytes(24).toString("hex");
+  const expiresAt = now + RESTORE_TOKEN_MS;
+  pendingRestores.set(token, { accountId, payload, expiresAt });
+  return { restore_token: token, expires_at: new Date(expiresAt).toISOString() };
+}
+
+function takeRestore(accountId, token) {
+  purgePendingRestores(Date.now());
+  if (!token || typeof token !== "string") return null;
+  const row = pendingRestores.get(token);
+  if (!row || row.accountId !== accountId) return null;
+  pendingRestores.delete(token);
+  return row.payload;
+}
+
+function holdRestore(accountId, token, payload) {
+  if (!token || typeof token !== "string" || !payload) return;
+  pendingRestores.set(token, {
+    accountId,
+    payload,
+    expiresAt: Date.now() + RESTORE_TOKEN_MS
+  });
+}
+
+const PRE_RESTORE_NAME = /^pre-restore-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z(?:-[a-f0-9]+)?\.json$/;
+
+function preRestoreFilename() {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  let name = "pre-restore-" + stamp + ".json";
+  const dir = path.join(DATA, "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  if (fs.existsSync(path.join(dir, name))) {
+    name = "pre-restore-" + stamp + "-" + crypto.randomBytes(3).toString("hex") + ".json";
+  }
+  if (!PRE_RESTORE_NAME.test(name) || name !== path.basename(name)) {
+    throw httpError(500, "Refusing to write outside the data directory");
+  }
+  return name;
+}
+
+function accountsForRestore(incoming, existing, sessionAccountId) {
+  const byId = new Map(existing.map((account) => [account.account_id, account]));
+  const merged = incoming.map((pub) => {
+    const prev = byId.get(pub.account_id);
+    const row = {
+      account_id: pub.account_id,
+      role: pub.role,
+      label: pub.label == null ? null : pub.label,
+      login: pub.login == null ? null : pub.login,
+      player_id: pub.player_id == null ? null : pub.player_id,
+      provider: pub.provider || "local",
+      created_at: pub.created_at || null
+    };
+    if (prev) {
+      if (prev.pass_hash) row.pass_hash = prev.pass_hash;
+      if (prev.pass_salt) row.pass_salt = prev.pass_salt;
+      if (Object.prototype.hasOwnProperty.call(prev, "invite_code")) row.invite_code = prev.invite_code;
+    }
+    return row;
+  });
+  if (sessionAccountId != null && !merged.some((account) => account.account_id === sessionAccountId)) {
+    const current = byId.get(sessionAccountId);
+    if (current && current.role === "campaign_admin") merged.push(current);
+  }
+  return merged;
+}
+
+function collectionText(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+function applyRestore(sessionAccountId, payload) {
+  const locked = withAdvanceLock(() => {
+    ensureDataDir();
+    const current = {
+      players: readCollection("players"),
+      forces: readCollection("forces"),
+      systems: readCollection("systems"),
+      games: readCollection("games"),
+      meta: readCollection("meta"),
+      accounts: readCollection("accounts"),
+      invites: readCollection("invites"),
+      notifications: readCollection("notifications"),
+      feedback: readCollection("feedback"),
+      sessions: readCollection("sessions")
+    };
+    const filename = preRestoreFilename();
+    const backupFile = resolvedInsideData(path.join(DATA, "backups", filename));
+    if (path.basename(backupFile) !== filename) {
+      throw httpError(500, "Refusing to write outside the data directory");
+    }
+    atomicWrite(
+      backupFile,
+      JSON.stringify(
+        {
+          taken_at: new Date().toISOString(),
+          reason: "Before restoring a campaign backup",
+          players: current.players,
+          forces: current.forces,
+          systems: current.systems,
+          games: current.games,
+          meta: current.meta,
+          accounts: current.accounts,
+          invites: current.invites,
+          notifications: current.notifications,
+          feedback: current.feedback,
+          sessions: current.sessions
+        },
+        null,
+        2
+      ) + "\n"
+    );
+    const accounts = accountsForRestore(payload.accounts, current.accounts, sessionAccountId);
+    const keepIds = new Set(accounts.map((account) => account.account_id));
+    const sessions = current.sessions.filter((session) => keepIds.has(session.account_id));
+    const files = [
+      ["players", payload.players],
+      ["forces", payload.forces],
+      ["systems", payload.systems],
+      ["games", payload.games],
+      ["meta", payload.meta],
+      ["accounts", accounts],
+      ["invites", payload.invites],
+      ["notifications", payload.notifications],
+      ["feedback", payload.feedback],
+      ["sessions", sessions]
+    ].map(([name, value]) => ({ name: COLLECTIONS[name].file, text: collectionText(value) }));
+    writeDataFilesAtomically(files);
+    armRestoreQuiet(payload.meta);
+    console.log("Restored campaign backup taken " + payload.exported_at + ". Previous data: " + filename);
+    return {
+      ok: true,
+      preview: backupSummary(payload),
+      pre_restore: filename
+    };
+  });
+  if (locked && locked.code === "advance_in_progress") {
+    return { ok: false, status: 409, error: locked.error };
+  }
+  return locked;
+}
+
 function handleBackup(req, res) {
   const auth = getSession(req);
   const gate = requireRole(auth, ["campaign_admin"]);
@@ -5006,6 +5412,60 @@ function handleBackup(req, res) {
   return send(res, 200, backupPayload(), {
     "Content-Disposition": 'attachment; filename="sunset-heresy-backup-' + day + '.json"'
   });
+}
+
+async function readBackupBody(req) {
+  return readBody(req, { limit: restoreMaxBytes(), tooBig: "Backup file is too large" });
+}
+
+async function handleBackupPreview(req, res) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const body = await readBackupBody(req);
+  const parsed = validateBackup(body);
+  if (!parsed.ok) return send(res, 400, { error: parsed.error });
+  const pending = rememberRestore(auth.account.account_id, parsed.backup);
+  return send(res, 200, {
+    ok: true,
+    restore_token: pending.restore_token,
+    expires_at: pending.expires_at,
+    preview: backupSummary(parsed.backup)
+  });
+}
+
+async function handleBackupRestore(req, res) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const body = await readBackupBody(req);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return send(res, 400, { error: 'Send { "confirm": "RESTORE", "restore_token": "..." } to restore the campaign' });
+  }
+  if (body.confirm !== "RESTORE") {
+    return send(res, 400, { error: 'Send { "confirm": "RESTORE" } to restore the campaign' });
+  }
+  const payload = takeRestore(auth.account.account_id, body.restore_token);
+  if (!payload) {
+    return send(res, 400, { error: "Upload the backup again. That preview is no longer available." });
+  }
+  const parsed = validateBackup(payload);
+  if (!parsed.ok) {
+    holdRestore(auth.account.account_id, body.restore_token, payload);
+    return send(res, 400, { error: parsed.error });
+  }
+  let result;
+  try {
+    result = applyRestore(auth.account.account_id, parsed.backup);
+  } catch (err) {
+    holdRestore(auth.account.account_id, body.restore_token, payload);
+    throw err;
+  }
+  if (!result || result.ok === false) {
+    holdRestore(auth.account.account_id, body.restore_token, payload);
+    return send(res, (result && result.status) || 409, { error: (result && result.error) || "Restore failed" });
+  }
+  return send(res, 200, result);
 }
 
 async function handlePublic(req, res, parts, method) {
@@ -5067,8 +5527,16 @@ async function handleApi(req, res, pathname) {
 
   if (parts[0] === "feedback") return handleFeedback(req, res, method);
 
-  if (parts[0] === "admin" && parts[1] === "backup" && method === "GET") {
+  if (parts[0] === "admin" && parts[1] === "backup" && parts.length === 2 && method === "GET") {
     return handleBackup(req, res);
+  }
+  if (parts[0] === "admin" && parts[1] === "backup" && parts[2] === "preview" && parts.length === 3) {
+    if (method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    return handleBackupPreview(req, res);
+  }
+  if (parts[0] === "admin" && parts[1] === "backup" && parts[2] === "restore" && parts.length === 3) {
+    if (method !== "POST") return send(res, 405, { error: "Method not allowed" });
+    return handleBackupRestore(req, res);
   }
 
   // Public sanitized routes
