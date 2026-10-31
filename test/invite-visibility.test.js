@@ -149,6 +149,13 @@ test("invite codes stay off public routes and other players", async () => {
   }
 });
 
+function sliceFunction(source, name) {
+  const start = source.indexOf("function " + name);
+  assert.notEqual(start, -1, name);
+  const next = source.indexOf("\n    function ", start + 10);
+  return source.slice(start, next === -1 ? source.length : next);
+}
+
 test("player admin and account pages name invites and show the signup code", () => {
   const adminPage = fs.readFileSync(path.join(ROOT, "player_admin.html"), "utf8");
   const account = fs.readFileSync(path.join(ROOT, "account.html"), "utf8");
@@ -159,12 +166,28 @@ test("player admin and account pages name invites and show the signup code", () 
   assert.doesNotMatch(adminPage, /Tester invites/);
   assert.doesNotMatch(adminPage, /the tester/);
   assert.match(adminPage, /inviteDetailsHtml/);
-  assert.match(adminPage, /Used by/);
-  assert.match(adminPage, /used_at/);
+  assert.match(adminPage, /<th>Used by<\/th>/);
+  assert.match(adminPage, /<th>Invite<\/th>/);
+  assert.match(adminPage, /class="invite-cell"/);
+  assert.match(adminPage, /inviteDetailsHtml\(p\.player_id\)/);
+
+  const card = sliceFunction(adminPage, "inviteDetailsHtml");
+  assert.match(card, /invite-code/);
+  assert.match(card, /code_display/);
+  assert.doesNotMatch(card, /Used by/);
+  assert.doesNotMatch(card, /used_by/);
+  assert.doesNotMatch(card, /used_at/);
+
+  const inviteList = sliceFunction(adminPage, "renderInvites");
+  assert.match(inviteList, /used_by/);
+  assert.match(inviteList, /used_at/);
+
   assert.match(account, /signup_invite/);
   assert.doesNotMatch(login, /New testers/);
   assert.match(login, /New players need an invite code/);
   assert.match(readme, /Player invites/);
+  assert.match(readme, /show only the code that player used/);
+  assert.doesNotMatch(readme, /plus everyone who used it/);
   assert.doesNotMatch(readme, /Tester invites/);
   assert.match(deploy, /Player invites/);
   assert.doesNotMatch(deploy, /Tester invites/);

@@ -371,13 +371,20 @@
       color: var(--muted);
       margin-top: 0.15rem;
     }
+    .player-contact {
+      font-size: 0.72rem;
+      color: var(--muted);
+    }
     .invite-on-player {
       margin-top: 0.28rem;
       font-size: 0.75rem;
       color: var(--muted);
       line-height: 1.35;
     }
+    .invite-cell .invite-on-player { margin-top: 0; }
     .invite-on-player .invite-code { color: var(--text); font-size: 0.78rem; }
+    #invite-detail .invite-code,
+    .invite-cell .invite-code { overflow-wrap: anywhere; }
 
     .row-actions {
       display: flex;
@@ -548,6 +555,29 @@
       .invite-form { grid-template-columns: 1fr 1fr; }
       .invite-form button { grid-column: 1 / -1; }
     }
+    @media (max-width: 719px) {
+      /* Cards: name stays on the player row; the code gets the same labeled row as the other fields. */
+      #tbody td.player-cell .player-ident {
+        margin-left: auto;
+        min-width: 0;
+        text-align: right;
+        overflow-wrap: anywhere;
+      }
+      #tbody td.invite-cell {
+        align-items: flex-start;
+      }
+      #tbody td.invite-cell .invite-on-player {
+        flex: 1 1 auto;
+        min-width: 0;
+        text-align: right;
+      }
+      #tbody td.invite-cell .invite-code {
+        white-space: normal;
+      }
+    }
+    @media (min-width: 720px) {
+      #tbody .invite-code { white-space: nowrap; }
+    }
     @media (max-width: 640px) {
       th.hide-sm, td.hide-sm { display: none; }
       .form-row { grid-template-columns: 1fr; }
@@ -607,7 +637,7 @@
     </div>
     <section class="invite-panel" id="invite-panel">
       <h2>Player invites</h2>
-      <p class="form-hint">Generate a code and send it to the player. They sign up at <strong>Log in → Sign up</strong> and enter their own username, password, and player details. You do not create their account first. Each player row below shows the code they used.</p>
+      <p class="form-hint">Generate a code and send it to the player. They sign up at <strong>Log in → Sign up</strong> and enter their own username, password, and player details. You do not create their account first. Each player card below shows only the code that player used. Who used a code stays in this list.</p>
       <div class="invite-form">
         <div class="form-group">
           <label for="inv-note">Note</label>
@@ -669,6 +699,7 @@
           <tr>
             <th>ID</th>
             <th>Player</th>
+            <th>Invite</th>
             <th class="hide-sm">Display</th>
             <th>Allegiance</th>
             <th>Status</th>
@@ -887,15 +918,11 @@
 
     function inviteDetailsHtml(playerId) {
       const rows = playerInvites(playerId);
-      if (!rows.length) return `<span class="invite-note">No invite code</span>`;
-      return rows.map((inv) => {
-        const used = (inv.used_by || []).map((u) => {
-          const who = u.display_name || u.player_name || u.login || "player";
-          const login = u.login ? escapeHtml(u.login) + " · " : "";
-          return `<div>Used by ${login}${escapeHtml(who)} · ${escapeHtml(formatStamp(u.used_at))}</div>`;
-        }).join("");
-        return `<div class="invite-on-player"><span class="invite-code">${escapeHtml(inv.code_display || inv.code || "")}</span>${used}</div>`;
-      }).join("");
+      if (!rows.length) return `<div class="invite-on-player"><span class="invite-note">No invite code</span></div>`;
+      const codes = rows.map((inv) =>
+        `<div class="invite-code">${escapeHtml(inv.code_display || inv.code || "")}</div>`
+      ).join("");
+      return `<div class="invite-on-player"><div class="invite-codes">${codes}</div></div>`;
     }
 
     function renderInvites() {
@@ -1002,11 +1029,13 @@
         const all = p.allegiance === "needs side" ? "needs-side" : String(p.allegiance || "").toLowerCase().replace(/[^a-z0-9-]/g, "");
         tr.innerHTML = `
           <td>${p.player_id}</td>
-          <td>
-            <strong>${escapeHtml(p.player_name)}</strong>
-            <div style="font-size:0.72rem;color:var(--muted)">${escapeHtml(p.contact || "")}</div>
-            ${inviteDetailsHtml(p.player_id)}
+          <td class="player-cell">
+            <div class="player-ident">
+              <strong>${escapeHtml(p.player_name)}</strong>
+              ${p.contact ? `<div class="player-contact">${escapeHtml(p.contact)}</div>` : ""}
+            </div>
           </td>
+          <td class="invite-cell">${inviteDetailsHtml(p.player_id)}</td>
           <td class="hide-sm">${escapeHtml(p.display_name || "—")}</td>
           <td><span class="badge ${all}">${p.allegiance}</span></td>
           <td><span class="badge ${p.status}">${p.status}</span></td>
