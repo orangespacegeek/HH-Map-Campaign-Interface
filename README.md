@@ -74,7 +74,7 @@ The campaign admin only issues a code. The player creates their own login and pl
 
 Codes are 16 characters (about 78 bits). Login and sign-up are limited per IP (30 login attempts and 15 sign-ups per 15 minutes). A fresh code for someone who already has an account does not clear their password.
 
-The invite table shows whether each code is active, used, revoked, or expired, who used it, and when. Each player row and the player editor show that same code, plus everyone who used it and the time. A player sees only their own code on **My account**. Public pages and other players do not receive codes. **Revoke** stops an unused or still-open code immediately. On Render, keep the persistent disk mounted at `DATA_DIR` so invites, accounts, and players survive restarts. See [DEPLOY_RENDER.md](DEPLOY_RENDER.md).
+The invite table shows whether each code is active, used, revoked, or expired, who used it, and when. Each player card and the player editor show only the code that player used. A player sees only their own code on **My account**. Public pages and other players do not receive codes. **Revoke** stops an unused or still-open code immediately. On Render, keep the persistent disk mounted at `DATA_DIR` so invites, accounts, and players survive restarts. See [DEPLOY_RENDER.md](DEPLOY_RENDER.md).
 
 ## Starting a fresh campaign
 
