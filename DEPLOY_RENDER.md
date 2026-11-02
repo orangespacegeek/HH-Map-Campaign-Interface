@@ -25,15 +25,26 @@ Either use the blueprint or create a web service by hand.
 3. When it asks for `CAMPAIGN_ADMIN_PASSWORD`, paste a long password you can store in a password manager. Leave `DISCORD_FEEDBACK_WEBHOOK`, `DISCORD_CAMPAIGN_WEBHOOK`, and `CORS_ORIGINS` blank unless you need them.
 4. Apply the blueprint. It creates a web service on plan `0.5c-512mb` with a disk named `campaign-data` mounted at `/var/data`, and sets `DATA_DIR=/var/data`.
 
+The disk and `DATA_DIR=/var/data` in `render.yaml` apply only when Render creates the service from this blueprint. A web service you create by hand does not read that file, so it does not get the disk or the variable unless you add them yourself.
+
 ### By hand
 
 1. **New → Web Service**, connect the repo.
 2. Runtime **Node**. Build command `npm install`. Start command `npm start`.
 3. Instance type: the $7 plan (`0.5c-512mb`), not Free, if this campaign must survive a restart.
 4. Add a disk. Mount path `/var/data`. Size 1 GB is enough for this JSON. You can grow it later. You cannot shrink it.
-5. Health check path: `/health`.
+5. Set `DATA_DIR` to `/var/data` yourself. The blueprint would have set this. A service created by hand does not.
+6. Health check path: `/health`.
 
 Disks only keep files under the mount path. `DATA_DIR` must be that path. The rest of the container, including the git checkout, is replaced on every deploy.
+
+After the first boot, open the logs and confirm this line:
+
+```text
+Data directory: /var/data
+```
+
+That is the check that the process is using the disk. If `DATA_DIR` is unset, or the path resolves inside the application directory, production refuses to start (`NODE_ENV=production`, or Render's `RENDER` variable) and prints why. Fix `DATA_DIR`, redeploy, and look for the line above. `ALLOW_EPHEMERAL_DATA=1` overrides the refusal and logs a loud warning, but the campaign is then stored on the container filesystem and wiped on the next deploy. Leave that override unset for a campaign you want to keep.
 
 ### Node.js
 
@@ -53,8 +64,11 @@ Set these on the service, not in a committed file.
 | `DISCORD_CAMPAIGN_WEBHOOK` | leave unset unless phase, battle, and deadline reminders should post to Discord. Separate from the feedback webhook. |
 | `CORS_ORIGINS` | leave unset. The site only needs to call itself. |
 | `TRUST_PROXY` | `1`. Render is one proxy hop and appends the client address. The login limiter uses that address. Leave this unset on a machine that is not behind a proxy, or a client can pick their own limit by sending `X-Forwarded-For`. |
+| `ALLOW_EPHEMERAL_DATA` | Leave unset. Set to `1` only to override the production refusal when `DATA_DIR` is missing or points inside the app. The process logs a warning and will lose the campaign on the next deploy. |
 
-Do not set `CAMPAIGN_ADMIN_FORCE_PASSWORD` on the first deploy.
+Do not set `CAMPAIGN_ADMIN_FORCE_PASSWORD` on the first deploy. Do not set `ALLOW_EPHEMERAL_DATA` on a service that has a disk.
+
+On a Blueprint service, `render.yaml` sets `DATA_DIR=/var/data` and attaches the disk. On a service you created by hand, those two settings are not applied for you: add the disk at `/var/data` and set `DATA_DIR=/var/data` in the dashboard. The boot log must say `Data directory: /var/data`. If it refuses to start, that line is missing because `DATA_DIR` was unset or still pointed at the code directory.
 
 Save and deploy. The first boot creates the admin account from `CAMPAIGN_ADMIN_PASSWORD` and copies nothing secret out of the image.
 
@@ -75,7 +89,7 @@ That username is how they sign in afterwards. A used, revoked, or expired code i
 
 ## 6. Start the campaign you actually want to play
 
-The repo ships a sample already on turn 3. A brand-new disk has no `systems.json`; the first boot copies `data/baseline/systems.json` into `DATA_DIR`, so sign-up can offer a starting system before the reset. After the first deploy, sign in as admin, open the dashboard, and choose **Reset campaign**. Leave both keep-boxes unchecked and type `RESET`. That sets turn 1, Logistics, restores the Port Maw starting map, clears the sample battle, and gives every current player two strength-3 forces in that player's starting system. A player who never chose one is placed in a system their side already controls, not in Port Maw with everyone else. Accounts stay. Check **Keep current map** only if you have edited systems, links, or positions and want to keep that layout. **Keep current system control** is available only after that, and it keeps each system's loyal and traitor scores.
+The repo ships a sample campaign already on turn 3 (`data/players.json` includes "The Warsmith"). That sample is not copied onto a fresh disk. A brand-new disk has no `systems.json`; the first boot copies `data/baseline/systems.json` into `DATA_DIR`, so sign-up can offer a starting system. Players, forces, games, and meta start empty. `SEED_SAMPLE_CAMPAIGN=1` can copy the sample for local development; production ignores it. After the first deploy, sign in as admin and invite players. When you later want a clean start, open the dashboard and choose **Reset campaign**. Leave both keep-boxes unchecked and type `RESET`. That sets turn 1, Muster, restores the Port Maw starting map, clears battles, and gives every current player two strength-3 forces in that player's starting system. A player who never chose one is placed in a system their side already controls, not in Port Maw with everyone else. Accounts stay. Check **Keep current map** only if you have edited systems, links, or positions and want to keep that layout. **Keep current system control** is available only after that, and it keeps each system's loyal and traitor scores.
 
 You can do the same over SSH or a one-off shell only on a service that has a disk and shell access (paid instances):
 

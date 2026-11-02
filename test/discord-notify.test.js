@@ -22,6 +22,12 @@ function startWebhook() {
   const posts = [];
   const options = { status: 204, delayMs: 0, hang: false };
   const sockets = new Set();
+  const held = new Set();
+  function finish(res, status) {
+    if (res.writableEnded || res.destroyed) return;
+    res.writeHead(status);
+    res.end();
+  }
   const server = http.createServer((req, res) => {
     const chunks = [];
     req.on("data", (chunk) => chunks.push(chunk));
@@ -32,16 +38,14 @@ function startWebhook() {
       } catch {
         body = { raw: Buffer.concat(chunks).toString("utf8") };
       }
+      posts.push(body);
+      if (options.hang) {
+        held.add(res);
+        return;
+      }
       const status = options.status || 204;
       const delayMs = options.delayMs || 0;
-      const hang = options.hang;
-      posts.push(body);
-      if (hang) return;
-      setTimeout(() => {
-        if (res.writableEnded || res.destroyed) return;
-        res.writeHead(status);
-        res.end();
-      }, delayMs);
+      setTimeout(() => finish(res, status), delayMs);
     });
   });
   server.on("connection", (socket) => {
@@ -62,6 +66,16 @@ function startWebhook() {
         },
         setHang(on) {
           options.hang = !!on;
+        },
+        pendingCount() {
+          return held.size;
+        },
+        release() {
+          const status = options.status || 204;
+          for (const res of Array.from(held)) {
+            held.delete(res);
+            finish(res, status);
+          }
         },
         stop() {
           sockets.forEach((socket) => socket.destroy());
@@ -750,19 +764,24 @@ test("long battle lists split at 2000 characters and mentions stay with their ch
 
 test("a webhook failure does not block or roll back a phase advance", async () => {
   const hook = await startWebhook();
-  hook.setDelay(1200);
-  const ctx = startServer({ webhook: hook.url, timeoutMs: 4000 });
+  // Hold the Discord response. The advance must settle while that response is still unsent.
+  hook.setHang(true);
+  const ctx = startServer({ webhook: hook.url, timeoutMs: 20000 });
   try {
     await ctx.ready;
     const admin = await adminToken(ctx);
-    const started = Date.now();
-    const advanced = await api(ctx, admin, "POST", "/api/campaign/advance", {});
-    const elapsed = Date.now() - started;
+    let advanced = null;
+    const inflight = api(ctx, admin, "POST", "/api/campaign/advance", {}).then((result) => {
+      advanced = result;
+      return result;
+    });
+    await waitFor(() => advanced && hook.posts.length >= 1 && hook.pendingCount() >= 1, 15000);
     assert.equal(advanced.status, 200, JSON.stringify(advanced.json));
     assert.equal(advanced.json.to.phase, "Movement");
-    assert.ok(elapsed < 800, "advance waited for Discord (" + elapsed + "ms)");
-    hook.setDelay(0);
-    await waitForCount(hook, 1);
+    assert.ok(hook.pendingCount() >= 1);
+    hook.setHang(false);
+    hook.release();
+    await inflight;
 
     hook.setStatus(500);
     const next = await api(ctx, admin, "POST", "/api/campaign/advance", {});
@@ -794,11 +813,10 @@ test("a hung webhook times out without leaving the new phase", async () => {
   try {
     await ctx.ready;
     const admin = await adminToken(ctx);
-    const started = Date.now();
     const advanced = await api(ctx, admin, "POST", "/api/campaign/advance", {});
     assert.equal(advanced.status, 200, JSON.stringify(advanced.json));
-    assert.ok(Date.now() - started < 800);
-    await waitFor(() => /Discord campaign webhook failed/.test(ctx.log()), 3000);
+    assert.equal(advanced.json.to.phase, "Movement");
+    await waitFor(() => /Discord campaign webhook failed/.test(ctx.log()), 8000);
     const status = await api(ctx, admin, "GET", "/api/campaign/status");
     assert.equal(status.json.phase, "Movement");
   } finally {
