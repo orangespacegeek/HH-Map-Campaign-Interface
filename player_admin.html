@@ -200,6 +200,77 @@
       gap: 0.6rem;
       flex-wrap: wrap;
     }
+    .needs-password-banner {
+      margin: 0 0 1rem;
+      padding: 0.85rem 0.95rem;
+      border-radius: 10px;
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid var(--traitor);
+    }
+    .needs-password-banner h2 {
+      color: var(--traitor);
+      font-size: 1.05rem;
+      margin-bottom: 0.35rem;
+    }
+    .needs-password-banner p,
+    .needs-password-banner .reset-note {
+      color: var(--text);
+      font-size: 0.88rem;
+      line-height: 1.45;
+    }
+    .needs-password-banner ul {
+      margin: 0.55rem 0 0;
+      padding: 0;
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55rem;
+    }
+    .needs-password-banner li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.6rem;
+      flex-wrap: wrap;
+    }
+    .needs-password-banner li button,
+    #reset-fresh-copy {
+      min-height: 44px;
+      width: 100%;
+    }
+    .needs-password-flag {
+      display: inline-block;
+      margin-top: 0.2rem;
+      color: var(--traitor);
+      font-size: 0.75rem;
+      font-weight: 700;
+    }
+    #reset-fresh {
+      margin-top: 0.8rem;
+      padding: 0.75rem;
+      border-radius: 8px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+    }
+    #reset-fresh .label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 0.35rem;
+    }
+    #reset-fresh-code,
+    #reset-fresh-link {
+      overflow-wrap: anywhere;
+      font-size: 1rem;
+      line-height: 1.4;
+    }
+    #reset-fresh-code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+    }
+    #reset-fresh-copy { margin-top: 0.65rem; }
 
     button, .btn {
       appearance: none;
@@ -693,6 +764,18 @@
       </div>
     </div>
 
+    <div class="needs-password-banner" id="needs-password-banner" hidden>
+      <h2>Players who need a password</h2>
+      <p>These accounts were restored without a password. They cannot sign in until you send a one-time code. It works once and expires in 72 hours. Their forces and Discord ID stay as they are.</p>
+      <ul id="needs-password-list"></ul>
+      <div id="reset-fresh" hidden>
+        <div class="label">Set-password code</div>
+        <div id="reset-fresh-code"></div>
+        <div id="reset-fresh-link"></div>
+        <p class="reset-note" id="reset-fresh-expires"></p>
+        <button type="button" class="primary" id="reset-fresh-copy">Copy for Discord</button>
+      </div>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -826,6 +909,8 @@
     let players = [];
     let forces = [];
     let invites = [];
+    let passwordAccounts = [];
+    let resetShareText = "";
     let filter = "all";
     let searchQ = "";
     let editingId = null;
@@ -840,7 +925,15 @@
         invites = [];
         showToast(err.message || "Could not load invites");
       }
+      try {
+        const status = await SH.passwordStatus();
+        passwordAccounts = status.accounts || [];
+      } catch (err) {
+        passwordAccounts = [];
+        showToast(err.message || "Could not load password status");
+      }
       renderInvites();
+      renderPasswordBanner();
       renderTable();
       const badgeHost = document.querySelector(".header-actions");
       if (badgeHost && !document.getElementById("mode-badge")) {
@@ -982,6 +1075,26 @@
       renderNeedsSide();
     }
 
+    function needsPassword(playerId) {
+      return passwordAccounts.some((account) => Number(account.player_id) === Number(playerId) && account.needs_password);
+    }
+
+    function renderPasswordBanner() {
+      const banner = document.getElementById("needs-password-banner");
+      const list = document.getElementById("needs-password-list");
+      const waiting = passwordAccounts.filter((account) => account.needs_password && account.player_id != null);
+      banner.hidden = waiting.length === 0;
+      list.innerHTML = waiting.map((account) => {
+        const player = players.find((row) => Number(row.player_id) === Number(account.player_id));
+        const name = player ? (player.display_name || player.player_name) : (account.display_name || account.login || "Player");
+        const login = account.login ? " · " + escapeHtml(account.login) : "";
+        return `<li>
+          <span><strong>${escapeHtml(name)}</strong>${login} <span class="needs-password-flag">Needs a password</span></span>
+          <button type="button" data-reset-player="${account.player_id}">Set-password code</button>
+        </li>`;
+      }).join("");
+    }
+
     function renderNeedsSide() {
       const banner = document.getElementById("needs-side-banner");
       const list = document.getElementById("needs-side-list");
@@ -1033,6 +1146,7 @@
             <div class="player-ident">
               <strong>${escapeHtml(p.player_name)}</strong>
               ${p.contact ? `<div class="player-contact">${escapeHtml(p.contact)}</div>` : ""}
+              ${needsPassword(p.player_id) ? `<div class="needs-password-flag">Needs a password</div>` : ""}
             </div>
           </td>
           <td class="invite-cell">${inviteDetailsHtml(p.player_id)}</td>
@@ -1240,6 +1354,45 @@
     document.getElementById("invite-fresh-copy").addEventListener("click", () => {
       const code = document.getElementById("invite-fresh").dataset.code || "";
       if (code) copyInvite(code);
+    });
+
+    document.getElementById("needs-password-list").addEventListener("click", async (event) => {
+      const btn = event.target.closest("[data-reset-player]");
+      if (!btn) return;
+      btn.disabled = true;
+      try {
+        const result = await SH.createPasswordReset(Number(btn.dataset.resetPlayer));
+        const when = result.expires_at ? new Date(result.expires_at) : null;
+        const whenText = when && !Number.isNaN(when.getTime()) ? when.toLocaleString() : "";
+        const link = location.origin + (result.path || "");
+        const box = document.getElementById("reset-fresh");
+        box.hidden = false;
+        document.getElementById("reset-fresh-code").textContent = result.code || "";
+        document.getElementById("reset-fresh-link").textContent = link;
+        document.getElementById("reset-fresh-expires").textContent = whenText
+          ? "Expires " + whenText + ". Works once."
+          : "Works once.";
+        const who = result.login ? "Username: " + result.login + "\n" : "";
+        resetShareText = "Sunset Heresy set-password code\n" + who +
+          "Code: " + (result.code || "") + "\n" + link + "\nWorks once." +
+          (whenText ? " Expires " + whenText + "." : "");
+        showToast("Set-password code created");
+        box.scrollIntoView({ block: "nearest" });
+      } catch (err) {
+        showToast(err.message || "Could not create a set-password code");
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    document.getElementById("reset-fresh-copy").addEventListener("click", async () => {
+      if (!resetShareText) return;
+      try {
+        await navigator.clipboard.writeText(resetShareText);
+        showToast("Copied for Discord");
+      } catch (_) {
+        showToast("Copy the code above");
+      }
     });
 
     document.getElementById("invite-tbody").addEventListener("click", async (e) => {

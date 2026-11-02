@@ -147,6 +147,7 @@
     <div class="tabs" id="tabs">
       <button type="button" class="tab active" data-tab="admin">Sign in</button>
       <button type="button" class="tab" data-tab="signup">Sign up</button>
+      <button type="button" class="tab" data-tab="set-password" id="tab-set-password">Set password</button>
       <button type="button" class="tab" data-tab="reset" id="tab-reset" hidden>Change password</button>
     </div>
 
@@ -252,6 +253,24 @@
       <button type="submit" class="primary" id="btn-signup">Create account</button>
     </form>
 
+    <form class="card" id="panel-set-password" hidden autocomplete="off">
+      <p class="hint" style="margin-top:0">Enter the one-time code from your campaign admin, then choose a password. Your forces and Discord ID stay as they are.</p>
+      <div class="form-group">
+        <label for="sp-code">Set-password code</label>
+        <input id="sp-code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH-IJKL-MNOP" />
+      </div>
+      <div class="form-group">
+        <label for="sp-pass">New password</label>
+        <input id="sp-pass" type="password" autocomplete="new-password" />
+        <div class="hint">At least 6 characters.</div>
+      </div>
+      <div class="form-group">
+        <label for="sp-pass2">Confirm new password</label>
+        <input id="sp-pass2" type="password" autocomplete="new-password" />
+      </div>
+      <button type="submit" class="primary" id="btn-set-password-code">Save password and sign in</button>
+    </form>
+
     <div class="card" id="panel-reset" hidden>
       <div class="form-group">
         <label for="current-pass">Current password</label>
@@ -301,6 +320,7 @@
       });
       document.getElementById("panel-admin").hidden = which !== "admin";
       document.getElementById("panel-signup").hidden = which !== "signup";
+      document.getElementById("panel-set-password").hidden = which !== "set-password";
       document.getElementById("panel-reset").hidden = which !== "reset";
       msg.className = "msg";
     }
@@ -393,6 +413,33 @@
       }
     });
 
+    document.getElementById("panel-set-password").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const password = document.getElementById("sp-pass").value;
+      const confirm = document.getElementById("sp-pass2").value;
+      if (password.length < 6) {
+        showMsg("Password must be at least 6 characters.", false);
+        return;
+      }
+      if (password !== confirm) {
+        showMsg("Password and confirmation do not match.", false);
+        return;
+      }
+      const btn = document.getElementById("btn-set-password-code");
+      btn.disabled = true;
+      try {
+        const me = await SH.redeemPasswordReset({
+          code: document.getElementById("sp-code").value.trim(),
+          password
+        });
+        showMsg("Password saved. Signed in as " + (me.label || me.login || "player") + ".", true);
+        setTimeout(() => { location.href = "index.html"; }, 600);
+      } catch (err) {
+        showMsg(err.message || "Could not set that password", false);
+        btn.disabled = false;
+      }
+    });
+
     document.getElementById("btn-logout").addEventListener("click", async () => {
       await SH.logout();
       location.reload();
@@ -413,8 +460,13 @@
         });
       } catch (_) {}
       const me = await SH.me();
-      const requested = new URLSearchParams(location.search).get("tab");
-      if (me.authenticated && me.role !== "visitor") {
+      const params = new URLSearchParams(location.search);
+      const requested = params.get("tab");
+      const resetCode = params.get("reset");
+      if (resetCode) {
+        document.getElementById("sp-code").value = resetCode;
+        showTab("set-password");
+      } else if (me.authenticated && me.role !== "visitor") {
         document.getElementById("already").hidden = false;
         document.getElementById("already").textContent =
           `Signed in as ${me.label || me.role}` + (me.player_id ? ` (player #${me.player_id})` : "");
@@ -424,6 +476,8 @@
         else showTab("reset");
       } else if (requested === "signup" || requested === "invite") {
         showTab("signup");
+      } else if (requested === "set-password") {
+        showTab("set-password");
       }
     })();
   </script>

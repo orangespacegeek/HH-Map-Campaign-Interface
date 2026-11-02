@@ -17,6 +17,9 @@
  *   GET  /api/auth/invites        (campaign_admin) list player invite codes
  *   POST /api/auth/invites        (campaign_admin) { note?, expires_in_days?, max_uses? }
  *   POST /api/auth/invites/revoke (campaign_admin) { invite_id }
+ *   GET  /api/auth/password-resets (campaign_admin) accounts restored without a password
+ *   POST /api/auth/password-resets (campaign_admin) { player_id } one-time set-password code
+ *   POST /api/auth/password-resets/redeem { code, password } set that password and sign in
  *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
  *   Login and signup are rate-limited per IP (see AUTH_MAX_ATTEMPTS).
  *
@@ -63,6 +66,7 @@
  *     Unset skips quietly. A webhook error never blocks a phase advance.
  *   MAX_BODY_BYTES (default 1048576)
  *   RESTORE_MAX_BYTES (default 8388608) cap for backup preview and restore uploads
+ *   PASSWORD_RESET_TTL_MS (default 72 hours) lifetime of a one-time set-password code
  *   TRUST_PROXY (unset or 0: ignore X-Forwarded-For and rate-limit the socket
  *     address. Render is one proxy hop, so set TRUST_PROXY=1 there. The hop
  *     count is how many entries to trust from the right of X-Forwarded-For.)
@@ -96,7 +100,8 @@ const COLLECTIONS = {
   sessions: { file: "sessions.json", idKey: "token" },
   invites: { file: "invites.json", idKey: "invite_id" },
   notifications: { file: "notifications.json", idKey: "notification_id" },
-  feedback: { file: "feedback.json", idKey: "feedback_id" }
+  feedback: { file: "feedback.json", idKey: "feedback_id" },
+  password_resets: { file: "password_resets.json", idKey: "reset_id" }
 };
 
 const PUBLIC_PAGES = new Set([
@@ -342,6 +347,13 @@ function verifyPassword(password, salt, hash) {
   } catch {
     return false;
   }
+}
+
+// A missing hash is a failed login, never a match. needs_password is set when a
+// restore had no hash to copy. An empty password cannot satisfy either check.
+function passwordLoginRejected(account, password) {
+  if (!account || !account.pass_hash || !account.pass_salt || account.needs_password === true) return true;
+  return !verifyPassword(password == null ? "" : password, account.pass_salt, account.pass_hash);
 }
 
 function randomToken() {
@@ -712,7 +724,7 @@ function sessionCookie(req, token, maxAgeSeconds) {
 // Per-IP brake on password guessing and invite-code spraying. In-memory only;
 // a process restart clears it, which is enough for a small tester group.
 const AUTH_WINDOW_MS = 15 * 60 * 1000;
-const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15, feedback: 10 };
+const AUTH_MAX_ATTEMPTS = { login: 30, signup: 15, feedback: 10, password_reset: 15 };
 const authBuckets = new Map();
 
 function trustProxyHops() {
@@ -847,6 +859,7 @@ function bootstrapAdmin() {
     const { salt, hash } = hashPassword(envPassword);
     admin.pass_hash = hash;
     admin.pass_salt = salt;
+    admin.needs_password = false;
     writeCollection("accounts", accounts);
     clearAllSessions();
     console.log(
@@ -860,6 +873,7 @@ function bootstrapAdmin() {
     const { salt, hash } = hashPassword(password);
     admin.pass_hash = hash;
     admin.pass_salt = salt;
+    admin.needs_password = false;
     writeCollection("accounts", accounts);
     console.log(`Set campaign admin password for login="${admin.login}"`);
     return;
@@ -1259,6 +1273,7 @@ async function handleAuth(req, res, parts, method) {
         (a) => a.invite_code && normalizeInviteCode(a.invite_code) === code
       );
       if (!account) return send(res, 401, { error: "Invalid invite code" });
+      if (account.needs_password) return send(res, 401, { error: "Invalid invite code" });
       const password = String(body.password || "");
       if (!account.pass_hash) {
         if (password.length < 6 || password.length > 128) {
@@ -1285,12 +1300,13 @@ async function handleAuth(req, res, parts, method) {
         const { salt, hash } = hashPassword(password);
         account.pass_hash = hash;
         account.pass_salt = salt;
+        account.needs_password = false;
       }
       account.invite_code = null;
       writeCollection("accounts", accounts);
     } else if (body.login) {
       account = findAccountByLogin(accounts, body.login);
-      if (!account || !verifyPassword(body.password, account.pass_salt, account.pass_hash)) {
+      if (passwordLoginRejected(account, body.password)) {
         return send(res, 401, { error: "Invalid login or password" });
       }
     } else {
@@ -1322,7 +1338,8 @@ async function handleAuth(req, res, parts, method) {
     if (idx < 0) return send(res, 404, { error: "Account not found" });
     const row = accounts[idx];
     // Require current password when the account already has one (change flow).
-    if (row.pass_hash) {
+    // An account flagged needs_password has no hash to check.
+    if (row.pass_hash && row.needs_password !== true) {
       if (!body.current_password) {
         return send(res, 400, { error: "Current password required" });
       }
@@ -1333,6 +1350,7 @@ async function handleAuth(req, res, parts, method) {
     const { salt, hash } = hashPassword(body.password);
     accounts[idx].pass_hash = hash;
     accounts[idx].pass_salt = salt;
+    accounts[idx].needs_password = false;
     writeCollection("accounts", accounts);
     return send(res, 200, { ok: true });
   }
@@ -1561,7 +1579,165 @@ async function handleAuth(req, res, parts, method) {
     });
   }
 
+  if (action === "password-resets" && method === "GET" && !parts[2]) {
+    return listPasswordResets(req, res);
+  }
+  if (action === "password-resets" && method === "POST" && !parts[2]) {
+    return createPasswordReset(req, res);
+  }
+  if (action === "password-resets" && method === "POST" && parts[2] === "redeem" && !parts[3]) {
+    return redeemPasswordReset(req, res);
+  }
+
   return send(res, 404, { error: "Unknown auth action" });
+}
+
+function passwordResetTtlMs() {
+  const raw = Number(process.env.PASSWORD_RESET_TTL_MS);
+  if (Number.isFinite(raw) && raw >= 1000) return Math.min(Math.floor(raw), 30 * 24 * 60 * 60 * 1000);
+  return 72 * 60 * 60 * 1000;
+}
+
+function accountNeedsPassword(account) {
+  return !account || !account.pass_hash || !account.pass_salt || account.needs_password === true;
+}
+
+function hashResetCode(code) {
+  return crypto.createHash("sha256").update(normalizeInviteCode(code)).digest("hex");
+}
+
+function resetHashesEqual(stored, computed) {
+  if (typeof stored !== "string" || typeof computed !== "string" || stored.length !== computed.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(stored, "hex"), Buffer.from(computed, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+function passwordResetStatus(row, now = Date.now()) {
+  if (!row) return "invalid";
+  if (row.used_at) return "used";
+  const expires = row.expires_at ? Date.parse(row.expires_at) : NaN;
+  if (!Number.isFinite(expires) || expires <= now) return "expired";
+  return "active";
+}
+
+function publicPasswordAccount(account, players) {
+  const player = players.find((row) => Number(row.player_id) === Number(account.player_id));
+  return {
+    account_id: account.account_id,
+    player_id: account.player_id == null ? null : account.player_id,
+    login: account.login || null,
+    label: account.label || null,
+    role: account.role,
+    needs_password: accountNeedsPassword(account),
+    display_name: player ? player.display_name || player.player_name || null : null
+  };
+}
+
+function listPasswordResets(req, res) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const players = readCollection("players");
+  const accounts = readCollection("accounts")
+    .filter((account) => accountNeedsPassword(account))
+    .map((account) => publicPasswordAccount(account, players));
+  return send(res, 200, { accounts });
+}
+
+async function createPasswordReset(req, res) {
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  const body = (await readBody(req)) || {};
+  const accounts = readCollection("accounts");
+  let account = null;
+  if (body.player_id != null && body.player_id !== "") {
+    const playerId = Number(body.player_id);
+    if (!playerId) return send(res, 400, { error: "player_id is not valid" });
+    const player = readCollection("players").find((row) => Number(row.player_id) === playerId);
+    if (!player) return send(res, 404, { error: "Player not found" });
+    account = accounts.find((row) => Number(row.player_id) === playerId);
+    if (!account) return send(res, 400, { error: "This player has no login to reset" });
+  } else if (body.account_id != null && body.account_id !== "") {
+    const accountId = Number(body.account_id);
+    account = accounts.find((row) => Number(row.account_id) === accountId);
+    if (!account) return send(res, 404, { error: "Account not found" });
+  } else {
+    return send(res, 400, { error: "player_id is required" });
+  }
+  if (!accountNeedsPassword(account)) {
+    return send(res, 400, { error: "This account already has a password" });
+  }
+  const code = randomInvite();
+  const now = new Date().toISOString();
+  const expires = new Date(Date.now() + passwordResetTtlMs()).toISOString();
+  const resets = readCollection("password_resets");
+  resets.forEach((row) => {
+    if (Number(row.account_id) === Number(account.account_id) && !row.used_at) row.used_at = now;
+  });
+  resets.push({
+    reset_id: nextId(resets, "reset_id"),
+    account_id: account.account_id,
+    code_hash: hashResetCode(code),
+    expires_at: expires,
+    used_at: null,
+    created_at: now,
+    created_by: auth.account.account_id
+  });
+  writeCollection("password_resets", resets);
+  const display = formatInviteCode(code);
+  return send(res, 201, {
+    ok: true,
+    code: display,
+    login: account.login || null,
+    player_id: account.player_id == null ? null : account.player_id,
+    account_id: account.account_id,
+    expires_at: expires,
+    path: "/login.html?reset=" + encodeURIComponent(display)
+  });
+}
+
+async function redeemPasswordReset(req, res) {
+  const limited = rateLimitAuth(req, "password_reset");
+  if (limited) return sendRateLimited(res, limited);
+  const body = (await readBody(req)) || {};
+  const code = normalizeInviteCode(body.code);
+  if (code.length !== 16) return send(res, 400, { error: "That set-password code is not valid" });
+  const password = String(body.password || "");
+  if (password.length < 6) return send(res, 400, { error: "Password must be at least 6 characters" });
+  if (password.length > 128) return send(res, 400, { error: "Password must be at most 128 characters" });
+  if (isProduction() && password === PUBLISHED_ADMIN_PASSWORD) {
+    return send(res, 400, { error: "Choose a different password" });
+  }
+  const resets = readCollection("password_resets");
+  const hash = hashResetCode(code);
+  const row = resets.find((item) => resetHashesEqual(item.code_hash, hash));
+  const status = passwordResetStatus(row);
+  if (status === "used") return send(res, 400, { error: "That set-password code has already been used" });
+  if (status === "expired") return send(res, 400, { error: "That set-password code has expired" });
+  if (status !== "active") return send(res, 400, { error: "That set-password code is not valid" });
+  const accounts = readCollection("accounts");
+  const idx = accounts.findIndex((account) => Number(account.account_id) === Number(row.account_id));
+  if (idx < 0) return send(res, 400, { error: "That set-password code is not valid" });
+  const { salt, hash: passHash } = hashPassword(password);
+  accounts[idx].pass_hash = passHash;
+  accounts[idx].pass_salt = salt;
+  accounts[idx].needs_password = false;
+  row.used_at = new Date().toISOString();
+  writeCollection("accounts", accounts);
+  writeCollection("password_resets", resets);
+  const { token, expires } = createSession(accounts[idx].account_id);
+  return send(res, 200, {
+    ok: true,
+    token,
+    expires_at: expires.toISOString(),
+    ...mePayload(accounts[idx])
+  }, {
+    "Set-Cookie": sessionCookie(req, token, SESSION_DAYS * 86400)
+  });
 }
 
 const PHASES = ["Muster", "Logistics", "Movement", "Battles"];
@@ -5229,7 +5405,12 @@ function validateBackup(payload) {
   return { ok: true, backup: payload };
 }
 
-function backupSummary(payload) {
+function countAccountsNeedingPassword(incoming, sessionAccountId) {
+  const existing = readCollection("accounts");
+  return accountsForRestore(incoming, existing, sessionAccountId).filter((account) => accountNeedsPassword(account)).length;
+}
+
+function backupSummary(payload, extra) {
   const meta = payload.meta || {};
   const turn = meta.turn == null || meta.turn === "" ? null : Number(meta.turn);
   return {
@@ -5242,7 +5423,8 @@ function backupSummary(payload) {
     turn: Number.isFinite(turn) ? turn : null,
     phase: meta.phase ? String(meta.phase) : null,
     accounts: payload.accounts.length,
-    invites: payload.invites.length
+    invites: payload.invites.length,
+    needs_password: extra && Number.isInteger(extra.needs_password) ? extra.needs_password : 0
   };
 }
 
@@ -5315,10 +5497,13 @@ function accountsForRestore(incoming, existing, sessionAccountId) {
       provider: pub.provider || "local",
       created_at: pub.created_at || null
     };
-    if (prev) {
-      if (prev.pass_hash) row.pass_hash = prev.pass_hash;
-      if (prev.pass_salt) row.pass_salt = prev.pass_salt;
+    if (prev && prev.pass_hash && prev.pass_salt) {
+      row.pass_hash = prev.pass_hash;
+      row.pass_salt = prev.pass_salt;
       if (Object.prototype.hasOwnProperty.call(prev, "invite_code")) row.invite_code = prev.invite_code;
+      row.needs_password = false;
+    } else {
+      row.needs_password = true;
     }
     return row;
   });
@@ -5346,7 +5531,8 @@ function applyRestore(sessionAccountId, payload) {
       invites: readCollection("invites"),
       notifications: readCollection("notifications"),
       feedback: readCollection("feedback"),
-      sessions: readCollection("sessions")
+      sessions: readCollection("sessions"),
+      password_resets: readCollection("password_resets")
     };
     const filename = preRestoreFilename();
     const backupFile = resolvedInsideData(path.join(DATA, "backups", filename));
@@ -5368,13 +5554,15 @@ function applyRestore(sessionAccountId, payload) {
           invites: current.invites,
           notifications: current.notifications,
           feedback: current.feedback,
-          sessions: current.sessions
+          sessions: current.sessions,
+          password_resets: current.password_resets
         },
         null,
         2
       ) + "\n"
     );
     const accounts = accountsForRestore(payload.accounts, current.accounts, sessionAccountId);
+    const needsPassword = accounts.filter((account) => accountNeedsPassword(account)).length;
     const keepIds = new Set(accounts.map((account) => account.account_id));
     const sessions = current.sessions.filter((session) => keepIds.has(session.account_id));
     const files = [
@@ -5387,14 +5575,15 @@ function applyRestore(sessionAccountId, payload) {
       ["invites", payload.invites],
       ["notifications", payload.notifications],
       ["feedback", payload.feedback],
-      ["sessions", sessions]
+      ["sessions", sessions],
+      ["password_resets", []]
     ].map(([name, value]) => ({ name: COLLECTIONS[name].file, text: collectionText(value) }));
     writeDataFilesAtomically(files);
     armRestoreQuiet(payload.meta);
     console.log("Restored campaign backup taken " + payload.exported_at + ". Previous data: " + filename);
     return {
       ok: true,
-      preview: backupSummary(payload),
+      preview: backupSummary(payload, { needs_password: needsPassword }),
       pre_restore: filename
     };
   });
@@ -5430,7 +5619,9 @@ async function handleBackupPreview(req, res) {
     ok: true,
     restore_token: pending.restore_token,
     expires_at: pending.expires_at,
-    preview: backupSummary(parsed.backup)
+    preview: backupSummary(parsed.backup, {
+      needs_password: countAccountsNeedingPassword(parsed.backup.accounts, auth.account.account_id)
+    })
   });
 }
 
@@ -5545,7 +5736,7 @@ async function handleApi(req, res, pathname) {
   const collection = parts[0];
   const idPart = parts[1];
 
-  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites" || collection === "notifications" || collection === "feedback") {
+  if (!COLLECTIONS[collection] || collection === "accounts" || collection === "sessions" || collection === "invites" || collection === "notifications" || collection === "feedback" || collection === "password_resets") {
     return send(res, 404, { error: "Unknown collection" });
   }
 

@@ -99,6 +99,7 @@ Free instances, and any service without a disk, lose `data/` on that restart.
 - Keep that file somewhere that is not the Render disk. The disk is the live copy, not an off-site backup. Render snapshots disks daily, but a file you downloaded is the copy you can move.
 - To put one back, Dashboard → **Restore from backup** and choose that JSON file (the control is a normal file input, so it works on a phone). The server shows a summary and does not change anything yet. Type `RESTORE` to replace the live campaign. It first writes `DATA_DIR/backups/pre-restore-<timestamp>.json`, then swaps the campaign files into place.
 - The upload has to be a backup this server produced (`format` `sunset-heresy-backup`, version 1, or the same file from before that version field existed). Anything else is rejected. Password hashes and sessions are not in the file. Accounts that were already on this server keep their passwords, and the admin who restores stays signed in. Restoring does not post a Discord phase message, and a deadline that was already due in the file does not advance the phase by itself.
+- Restoring onto a fresh disk leaves every other account without a password. The preview says how many. They cannot sign in, including with a blank password. On **Players**, generate a one-time set-password code for each flagged player and send the link. It works once, expires after 72 hours, and does not change their forces or Discord ID. The admin login that is already on this server is kept.
 
 To change the admin password and sign every session out:
 

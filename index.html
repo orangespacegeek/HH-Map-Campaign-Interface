@@ -1520,7 +1520,8 @@
         ["Players", String(preview.players)],
         ["Forces", String(preview.forces)],
         ["Systems", String(preview.systems)],
-        ["Battles", String(preview.battles)]
+        ["Battles", String(preview.battles)],
+        ["Need a password", preview.needs_password == null ? "—" : String(preview.needs_password)]
       ];
       restorePreview.replaceChildren();
       lines.forEach(([label, value]) => {

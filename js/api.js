@@ -483,6 +483,51 @@
     return data;
   }
 
+  async function passwordStatus() {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/password-resets", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not load password status");
+    return data;
+  }
+
+  async function createPasswordReset(playerId) {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/password-resets", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify({ player_id: playerId })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not create a set-password code");
+    return data;
+  }
+
+  async function redeemPasswordReset(body) {
+    await probe();
+    const res = await fetch(apiBase() + "/api/auth/password-resets/redeem", {
+      method: "POST",
+      headers: authHeaders(),
+      credentials: "include",
+      body: JSON.stringify(body || {})
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Could not set that password");
+    if (data.token) {
+      token = data.token;
+      try {
+        localStorage.setItem("sh_session_token", token);
+      } catch (_) {}
+    }
+    meCache = data;
+    return data;
+  }
+
   async function confirmGame(id) {
     return postGameAction(id, "confirm");
   }
@@ -1089,6 +1134,9 @@
     markInboxRead,
     refreshWaitingBadge,
     createInvite,
+    passwordStatus,
+    createPasswordReset,
+    redeemPasswordReset,
     listInvites,
     issueInvite,
     revokeInvite,
