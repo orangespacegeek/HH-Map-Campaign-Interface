@@ -51,6 +51,14 @@
  * Env:
  *   PORT, HOST, DATA_DIR (default ./data). A missing systems.json is seeded from
  *     data/baseline/systems.json so sign-up can choose a start system.
+ *     The sample roster (players, forces, games, meta — turn 3, "The Warsmith")
+ *     is not copied into a fresh DATA_DIR. SEED_SAMPLE_CAMPAIGN=1 copies those
+ *     files for local development only; production ignores that flag.
+ *   Production (NODE_ENV=production, or RENDER set) refuses to start when
+ *     DATA_DIR is unset or resolves inside this application directory, because
+ *     that copy is wiped on deploy. ALLOW_EPHEMERAL_DATA=1 overrides the
+ *     refusal and logs a warning. Development keeps the ./data default and
+ *     warns when DATA_DIR is unset.
  *   CAMPAIGN_ADMIN_LOGIN (default admin)
  *   CAMPAIGN_ADMIN_PASSWORD (required for a chosen admin password; if unset on
  *     first boot a random password is generated and printed once)
@@ -80,7 +88,86 @@ const { URL } = require("url");
 const PORT = Number(process.env.PORT) || 3847;
 const HOST = process.env.HOST || "0.0.0.0";
 const ROOT = __dirname;
-const DATA = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : path.join(ROOT, "data");
+
+function explicitDataDir(env) {
+  if (!env || env.DATA_DIR == null) return "";
+  return String(env.DATA_DIR).trim();
+}
+
+function resolveDataDir(env, root) {
+  const raw = explicitDataDir(env);
+  return raw ? path.resolve(raw) : path.join(root, "data");
+}
+
+// Follow the nearest existing ancestor so a not-yet-created disk mount, and a
+// symlink that points back into the repo, are judged by their real location.
+function canonicalPath(input) {
+  let current = path.resolve(input);
+  const suffix = [];
+  while (!fs.existsSync(current)) {
+    const parent = path.dirname(current);
+    if (parent === current) return path.resolve(input);
+    suffix.unshift(path.basename(current));
+    current = parent;
+  }
+  let real = fs.realpathSync(current);
+  for (const part of suffix) real = path.join(real, part);
+  return real;
+}
+
+function isInsideDir(parent, child) {
+  const root = canonicalPath(parent);
+  const target = canonicalPath(child);
+  const rel = path.relative(root, target);
+  if (!rel) return true;
+  return !rel.startsWith("..") && !path.isAbsolute(rel);
+}
+
+function isProductionEnv(env) {
+  if (!env) return false;
+  if (env.NODE_ENV === "production") return true;
+  return env.RENDER != null && String(env.RENDER) !== "";
+}
+
+function evaluateDataDirectory(env = process.env, root = ROOT) {
+  const dataDir = resolveDataDir(env, root);
+  const unset = !explicitDataDir(env);
+  const production = isProductionEnv(env);
+  const inside = isInsideDir(root, dataDir);
+  const ephemeral = unset || inside;
+  const warnings = [];
+  const errors = [];
+  if (production && ephemeral) {
+    const where = unset
+      ? "is unset and defaults to " + dataDir + ", which is inside the application directory"
+      : "resolves inside the application directory (" + dataDir + ")";
+    if (String(env.ALLOW_EPHEMERAL_DATA || "") === "1") {
+      warnings.push("================================================================");
+      warnings.push("WARNING: ALLOW_EPHEMERAL_DATA=1 — campaign data will not survive a restart or deploy.");
+      warnings.push("WARNING: DATA_DIR " + where + ".");
+      warnings.push(
+        "WARNING: Set DATA_DIR to a persistent disk outside the code folder. On Render, mount a disk at /var/data and set DATA_DIR=/var/data."
+      );
+      warnings.push("WARNING: A persistent boot logs: Data directory: /var/data");
+      warnings.push("================================================================");
+    } else {
+      errors.push("Refusing to start: DATA_DIR " + where + ".");
+      errors.push(
+        "Production campaign data must live on a persistent disk outside the code folder, or players, invites, and the campaign are wiped on every deploy. On Render, add a disk mounted at /var/data and set DATA_DIR=/var/data. render.yaml does that only for a service created from the Blueprint. A persistent boot logs: Data directory: /var/data"
+      );
+      errors.push("To start anyway, knowing the data is ephemeral, set ALLOW_EPHEMERAL_DATA=1.");
+    }
+  } else if (!production && unset) {
+    warnings.push(
+      "Warning: DATA_DIR is unset. Using " +
+        dataDir +
+        " inside the application directory. This is fine for local development. Set DATA_DIR to store the campaign somewhere else."
+    );
+  }
+  return { ok: errors.length === 0, dataDir, warnings, errors, unset, inside, production, ephemeral };
+}
+
+const DATA = resolveDataDir(process.env, ROOT);
 const SESSION_DAYS = 14;
 // The old prototype password was published in the repo and on the login page.
 // It is never used as a fallback. In production it is rejected outright.
@@ -142,6 +229,44 @@ function seedBaselineSystems() {
   atomicWrite(dest, JSON.stringify(baseline, null, 2) + "\n");
   console.log("Seeded " + baseline.length + " systems from data/baseline/systems.json");
   return true;
+}
+
+// The checked-in sample campaign (turn 3, "The Warsmith") stays in the repo for
+// local demo use. A fresh DATA_DIR does not receive it. Opt in for development
+// with SEED_SAMPLE_CAMPAIGN=1. Production never copies these files.
+const SAMPLE_CAMPAIGN_FILES = ["players.json", "forces.json", "games.json", "meta.json"];
+
+function seedSampleCampaign() {
+  if (String(process.env.SEED_SAMPLE_CAMPAIGN || "") !== "1") return false;
+  if (isProductionEnv(process.env)) {
+    console.warn(
+      "Warning: SEED_SAMPLE_CAMPAIGN=1 is ignored in production. A fresh data directory starts as an empty campaign. The sample players, forces, games, and meta are not copied. A missing systems.json still comes from data/baseline/systems.json."
+    );
+    return false;
+  }
+  ensureDataDir();
+  const sourceDir = path.join(ROOT, "data");
+  let copied = 0;
+  for (const name of SAMPLE_CAMPAIGN_FILES) {
+    const source = path.join(sourceDir, name);
+    const dest = path.join(DATA, name);
+    if (!fs.existsSync(source) || fs.existsSync(dest)) continue;
+    if (canonicalPath(source) === canonicalPath(dest)) continue;
+    atomicWrite(dest, fs.readFileSync(source));
+    copied += 1;
+  }
+  if (copied) {
+    console.log(
+      "Seeded " +
+        copied +
+        " sample campaign file" +
+        (copied === 1 ? "" : "s") +
+        " into " +
+        DATA +
+        " because SEED_SAMPLE_CAMPAIGN=1. Production does not do this."
+    );
+  }
+  return copied > 0;
 }
 
 function atomicWrite(fp, text) {
@@ -5857,10 +5982,19 @@ function logRequest(req, res, pathname, started) {
   });
 }
 
-ensureDataDir();
-seedBaselineSystems();
-migrateBlackshieldAllegiance();
-migrateStartingForces();
+function bootDataFiles() {
+  const decision = evaluateDataDirectory(process.env, ROOT);
+  decision.warnings.forEach((line) => console.warn(line));
+  if (!decision.ok) {
+    decision.errors.forEach((line) => console.error(line));
+    process.exit(1);
+  }
+  ensureDataDir();
+  seedBaselineSystems();
+  seedSampleCampaign();
+  migrateBlackshieldAllegiance();
+  migrateStartingForces();
+}
 
 const server = http.createServer(async (req, res) => {
   const started = Date.now();
@@ -5912,6 +6046,7 @@ function startServer() {
 }
 
 if (require.main === module) {
+  bootDataFiles();
   const cmd = process.argv[2];
   if (cmd === "reset-campaign") {
     if (process.argv.includes("--keep-systems")) {
@@ -5942,3 +6077,5 @@ if (require.main === module) {
     process.exit(1);
   }
 }
+
+module.exports = { evaluateDataDirectory };
