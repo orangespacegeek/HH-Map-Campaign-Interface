@@ -92,7 +92,7 @@
     ],
     meta: {
       campaign_name: "Sunset Heresy",
-      subsector: "Port Maw",
+      subsector: "",
       turn: 3,
       phase: "Battles",
       loyal_score: 14,
@@ -104,6 +104,53 @@
   let probed = false;
   let token = null;
   let meCache = { authenticated: false, role: "visitor" };
+  let publicMetaCache = null;
+
+  function sectorName(meta) {
+    if (!meta || meta.subsector == null) return "";
+    return String(meta.subsector).replace(/\s+/g, " ").trim();
+  }
+
+  // Keep in step with sectorCopy() in server.js.
+  function sectorCopy(meta) {
+    const name = sectorName(meta);
+    const description = name
+      ? "Sunset Heresy campaign tracker for the " + name + " sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code."
+      : "Sunset Heresy campaign tracker. Visitors can open the map and battle log. Players sign in or sign up with an invite code.";
+    return {
+      description: description,
+      socialTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy",
+      mapTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy – Campaign Map",
+      headerSub: name ? name + " sub-sector" : "Campaign sector",
+      mapHeader: name || "Campaign sector",
+      mapBlurb: name
+        ? "Interactive " + name + " map with control colours, force presence, and system details."
+        : "Interactive campaign map with control colours, force presence, and system details.",
+      keepMapHint: name
+        ? "Unchecked, the " + name + " starting map is restored, including links, positions, power, durability, and control."
+        : "Unchecked, the starting map is restored, including links, positions, power, durability, and control."
+    };
+  }
+
+  function applySectorChrome(meta) {
+    const source = meta || publicMetaCache || {};
+    const copy = sectorCopy(source);
+    document.querySelectorAll("[data-sh-copy]").forEach((el) => {
+      const key = el.getAttribute("data-sh-copy");
+      const text = copy[key];
+      if (text == null) return;
+      if (key === "mapHeader") {
+        const current = (el.textContent || "").trim();
+        if (current && current.indexOf("__SH_") !== 0) return;
+      }
+      if (key === "keepMapHint") {
+        const box = document.getElementById("keep-map");
+        if (box && box.checked) return;
+      }
+      if (el.tagName === "META") el.setAttribute("content", text);
+      else el.textContent = text;
+    });
+  }
 
   try {
     token = localStorage.getItem("sh_session_token") || null;
@@ -144,6 +191,7 @@
         clearTimeout(t);
         if (res.ok) {
           mode = "server";
+          publicMetaCache = await res.json().catch(() => ({}));
           await refreshMe();
           return mode;
         }
@@ -1070,6 +1118,11 @@
     const badge = document.getElementById("mode-badge");
     if (badge) badge.innerHTML = statusBadgeHtml();
     refreshWaitingBadge();
+    let sectorMeta = publicMetaCache;
+    if (!sectorMeta) {
+      try { sectorMeta = await getMeta(); } catch (_) { sectorMeta = {}; }
+    }
+    applySectorChrome(sectorMeta || {});
   }
 
   async function refreshWaitingBadge() {
@@ -1163,6 +1216,8 @@
     statusBadgeHtml,
     navAuthHtml,
     applyNavPermissions,
+    sectorCopy,
+    applySectorChrome,
     canEditPlayers,
     canEditSystems,
     canEditForce,

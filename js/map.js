@@ -233,7 +233,7 @@
   function updateHeader() {
     const sub = document.getElementById("header-sub");
     if (sub) {
-      const sector = meta.subsector || "Port Maw";
+      const sector = window.SH && SH.sectorCopy ? SH.sectorCopy(meta).mapHeader : "Campaign sector";
       const phase = meta.phase || "";
       const turn = phase === "Muster" ? "" : (meta.turn != null ? "Turn " + meta.turn : "");
       sub.textContent = [sector, turn, phase].filter(Boolean).join(" · ");

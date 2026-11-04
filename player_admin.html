@@ -4,18 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0e0e18" />
-  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
   <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Sunset Heresy" />
   <meta property="og:title" content="Sunset Heresy – Players" />
-  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta property="og:image" content="__OG_IMAGE__" />
   <meta property="og:url" content="__OG_URL__" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="Sunset Heresy – Players" />
-  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Player Admin</title>
   <style>
@@ -575,6 +575,7 @@
       color: var(--muted);
       margin-top: 0.25rem;
     }
+    .form-hint.is-error { color: #f0a0a0; }
 
     .detail-section {
       margin-top: 1.2rem;
@@ -854,9 +855,10 @@
           </div>
           <div class="form-group">
             <label for="f-start-sys">Starting System</label>
-            <select id="f-start-sys">
-              <option value="">— None —</option>
+            <select id="f-start-sys" aria-busy="true" disabled>
+              <option value="">Loading systems…</option>
             </select>
+            <p class="form-hint" id="f-start-sys-status">Loading systems…</p>
           </div>
         </div>
         <div class="form-group">
@@ -890,21 +892,8 @@
   <script src="js/api.js"></script>
   <script>
     // Shared storage via SH (server when available, localStorage fallback)
-    const SYSTEMS = [
-      { id: 1, name: "Port Maw" },
-      { id: 2, name: "Aeolus" },
-      { id: 3, name: "Marinas" },
-      { id: 4, name: "Mezoa" },
-      { id: 5, name: "Electris" },
-      { id: 6, name: "Acre" },
-      { id: 7, name: "Bretz" },
-      { id: 8, name: "TR/0524" },
-      { id: 9, name: "Kueghan" },
-      { id: 10, name: "Ortho" },
-      { id: 11, name: "Lethe" },
-      { id: 12, name: "Kiliman IV" },
-      { id: 13, name: "Walpurgia" }
-    ];
+    let systems = [];
+    let systemsState = "loading";
 
     let players = [];
     let forces = [];
@@ -916,8 +905,13 @@
     let editingId = null;
 
     async function reload() {
-      players = await SH.list("players");
-      forces = await SH.list("forces");
+      const [playerRows, forceRows] = await Promise.all([
+        SH.list("players"),
+        SH.list("forces"),
+        loadSystems()
+      ]);
+      players = playerRows;
+      forces = forceRows;
       try {
         const data = await SH.listInvites();
         invites = data.invites || [];
@@ -959,19 +953,71 @@
     const btnDelete = document.getElementById("btn-delete");
     const toast = document.getElementById("toast");
 
-    // Populate system select
-    const sysSelect = document.getElementById("f-start-sys");
-    SYSTEMS.forEach(s => {
-      const opt = document.createElement("option");
-      opt.value = s.id;
-      opt.textContent = s.name;
-      sysSelect.appendChild(opt);
-    });
+    function fillStartSystemSelect(preferred) {
+      const sel = document.getElementById("f-start-sys");
+      const status = document.getElementById("f-start-sys-status");
+      const keep = preferred != null ? String(preferred) : String(sel.value || "");
+      sel.innerHTML = "";
+      const blank = document.createElement("option");
+      blank.value = "";
+      if (systemsState === "loading") blank.textContent = "Loading systems…";
+      else if (systemsState === "error") blank.textContent = "Could not load systems";
+      else blank.textContent = "— None —";
+      sel.appendChild(blank);
+      systems.slice().sort((a, b) => String(a.sys_name || "").localeCompare(String(b.sys_name || ""), undefined, { numeric: true })).forEach((system) => {
+        const opt = document.createElement("option");
+        opt.value = system.sys_id;
+        opt.textContent = system.sys_name || ("System " + system.sys_id);
+        sel.appendChild(opt);
+      });
+      if (keep && ![...sel.options].some((opt) => opt.value === keep)) {
+        const opt = document.createElement("option");
+        opt.value = keep;
+        opt.textContent = "System " + keep;
+        sel.appendChild(opt);
+      }
+      if (keep) sel.value = keep;
+      const loading = systemsState === "loading";
+      sel.disabled = loading;
+      sel.setAttribute("aria-busy", loading ? "true" : "false");
+      if (status) {
+        status.classList.toggle("is-error", systemsState === "error");
+        if (loading) {
+          status.hidden = false;
+          status.textContent = "Loading systems…";
+        } else if (systemsState === "error") {
+          status.hidden = false;
+          status.textContent = "System list failed to load. The current starting system is kept if one was already chosen. Refresh to try again.";
+        } else if (!systems.length) {
+          status.hidden = false;
+          status.textContent = "No systems yet.";
+        } else {
+          status.hidden = true;
+          status.textContent = "";
+        }
+      }
+    }
+
+    async function loadSystems() {
+      try {
+        const rows = await SH.list("systems");
+        systems = Array.isArray(rows) ? rows : [];
+        systemsState = "ready";
+      } catch (err) {
+        systemsState = systems.length ? "ready" : "error";
+        showToast(err.message || "Could not load systems");
+      }
+      fillStartSystemSelect();
+    }
+
+    fillStartSystemSelect();
 
     function systemName(id) {
       if (!id) return "—";
-      const s = SYSTEMS.find(x => x.id === Number(id));
-      return s ? s.name : `#${id}`;
+      const system = systems.find((row) => Number(row.sys_id) === Number(id));
+      if (system) return system.sys_name || ("System " + system.sys_id);
+      if (systemsState === "loading") return "Loading…";
+      return "System " + id;
     }
 
     function nextId() {
@@ -1207,7 +1253,7 @@
       document.getElementById("f-status").value = player ? player.status : "active";
       document.getElementById("f-role").value = player ? player.role : "player";
       syncAllegianceSelect(player);
-      document.getElementById("f-start-sys").value = player && player.start_sys_id ? player.start_sys_id : "";
+      fillStartSystemSelect(player && player.start_sys_id ? player.start_sys_id : "");
       document.getElementById("f-joined").value = player ? (player.joined_at || "") : new Date().toISOString().slice(0, 10);
       document.getElementById("f-notes").value = player ? (player.notes || "") : "";
 
