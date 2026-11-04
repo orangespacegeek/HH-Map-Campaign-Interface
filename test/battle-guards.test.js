@@ -105,7 +105,8 @@ test("battle guards and fresh-map seeding", async () => {
     const baseline = JSON.parse(fs.readFileSync(path.join(ROOT, "data", "baseline", "systems.json"), "utf8"));
     const seeded = JSON.parse(fs.readFileSync(path.join(ctx.dataDir, "systems.json"), "utf8"));
     assert.equal(seeded.length, baseline.length);
-    assert.equal(seeded[0].sys_name, "Port Maw");
+    assert.equal(seeded[0].sys_id, baseline[0].sys_id);
+    assert.equal(seeded[0].sys_name, baseline[0].sys_name);
 
     const pub = await api(ctx, null, "GET", "/api/public/systems");
     assert.equal(pub.status, 200);
@@ -149,14 +150,14 @@ test("battle guards and fresh-map seeding", async () => {
     const loyalChosen = homes(loyalHome.player_id);
     const traitorNextHomes = homes(traitorNext.player_id);
     assert.deepEqual(loyalChosen, [9, 9]);
-    assert.equal(loyalHomes.every((id) => id !== 1), true, "loyalist forces must not start in Port Maw");
-    assert.equal(traitorHomes.every((id) => id !== 1), true, "traitor forces must not start in Port Maw");
     assert.notDeepEqual(loyalHomes[0], traitorHomes[0]);
     assert.notEqual(traitorHomes[0], traitorNextHomes[0]);
     const systems = (await api(ctx, admin, "GET", "/api/systems")).json;
     function controller(id) {
       return systems.find((s) => s.sys_id === id).sys_controller;
     }
+    assert.equal(loyalHomes.every((id) => controller(id) === "Loyalist"), true, "loyalist forces must start in a Loyalist system");
+    assert.equal(traitorHomes.every((id) => controller(id) === "Traitor"), true, "traitor forces must start in a Traitor system");
     assert.equal(controller(loyalHomes[0]), "Loyalist");
     assert.equal(controller(traitorHomes[0]), "Traitor");
     assert.equal(controller(traitorNextHomes[0]), "Traitor");

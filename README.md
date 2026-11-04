@@ -1,6 +1,6 @@
 # Sunset Heresy Campaign Tracker
 
-Horus Heresy-style map campaign for the Port Maw sub-sector. Players open it from Discord, mostly on phones. A campaign admin runs the turn. Everyone else can look at the map, and signed-in players move forces, log battles, and confirm results.
+Horus Heresy-style map campaign. The sector name is the campaign's `subsector` field. Players open it from Discord, mostly on phones. A campaign admin runs the turn. Everyone else can look at the map, and signed-in players move forces, log battles, and confirm results.
 
 ## Features
 
@@ -57,7 +57,7 @@ The restart re-hashes the admin account and deletes `data/sessions.json`. Sign i
 | `MAX_BODY_BYTES` | No | Request body limit. Default `1048576` (1 MB). |
 | `TRUST_PROXY` | No | Leave unset when Node sees the client directly. The rate limiter then ignores `X-Forwarded-For`. Render's proxy is one hop and appends the real client IP, so set this to `1` there. A number is how many proxy hops to trust, counting from the right. |
 
-`data/accounts.json`, `data/sessions.json`, `data/invites.json`, `data/notifications.json`, and `data/feedback.json` are created on first use and are gitignored. Do not commit them. The sample players, forces, systems, games, and meta in `data/` are the demo campaign and are tracked. `data/baseline/systems.json` is the Port Maw map a reset restores. A fresh `DATA_DIR` with no `systems.json` is seeded from that file on first boot, so sign-up can offer a starting system before anyone resets.
+`data/accounts.json`, `data/sessions.json`, `data/invites.json`, `data/notifications.json`, and `data/feedback.json` are created on first use and are gitignored. Do not commit them. The sample players, forces, systems, games, and meta in `data/` are the demo campaign and are tracked. `data/baseline/systems.json` is the starting map a reset restores. The copy in this repo is a sample sector, and `data/meta.json` names that sample in `subsector`. A fresh `DATA_DIR` with no `systems.json` is seeded from the baseline on first boot, so sign-up can offer a starting system before anyone resets. Meta on a fresh disk is empty. Headers then say “Campaign sector”, the map title stays “Sunset Heresy – Campaign Map”, and the shared description names Sunset Heresy without a place. Set `subsector` and those spots use that name. An existing data directory that already has a name keeps showing that name.
 
 The static server only serves HTML pages, `js/`, `css/`, and images. `data/`, `schema/`, server source, and dotfiles are not on the web.
 
@@ -78,7 +78,7 @@ The invite table shows whether each code is active, used, revoked, or expired, w
 
 ## Starting a fresh campaign
 
-The files in `data/` are a sample already in progress (turn 3, Battles, one force). A fresh campaign is turn 1, Logistics, with two strength-3 forces per player. Each force is placed in that player's starting system. If they never chose one, reset spreads that side across the systems their allegiance already controls (Loyalist forces in Loyalist systems, Traitor forces in Traitor systems) instead of stacking everyone in Port Maw. Accounts are kept.
+The files in `data/` are a sample already in progress (turn 3, Battles, one force). A fresh campaign is turn 1, Logistics, with two strength-3 forces per player. Each force is placed in that player's starting system. If they never chose one, reset spreads that side across the systems their allegiance already controls (Loyalist forces in Loyalist systems, Traitor forces in Traitor systems). Accounts are kept. Reset keeps the current `subsector`, so the sector name stays whatever the campaign already had.
 
 From the dashboard, as campaign admin, choose **Reset campaign** and type `RESET`. Two checkboxes sit in that dialog. **Keep current map** comes first. **Keep current system control** stays disabled until the map is kept.
 

@@ -4,18 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0e0e18" />
-  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
   <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Sunset Heresy" />
   <meta property="og:title" content="Sunset Heresy – Forces" />
-  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta property="og:image" content="__OG_IMAGE__" />
   <meta property="og:url" content="__OG_URL__" />
   <meta name="twitter:card" content="summary" />
   <meta name="twitter:title" content="Sunset Heresy – Forces" />
-  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Forces</title>
   <style>
@@ -128,6 +128,8 @@
     .form-group label { display: block; font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem; }
     .form-group input, .form-group select, .form-group textarea { width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); padding: 0.55rem 0.7rem; border-radius: 8px; font-size: 0.9rem; font-family: inherit; }
     .form-group input:focus, .form-group select:focus, .form-group textarea:focus { outline: none; border-color: var(--accent); }
+    .field-note { margin: 0.35rem 0 0; font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+    .field-note.is-error { color: #f0a0a0; }
     .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
     .toast { position: fixed; bottom: calc(1.2rem + var(--safe-bottom)); left: 50%; transform: translateX(-50%) translateY(120%); background: var(--panel-2); border: 1px solid var(--accent); color: var(--text); padding: 0.65rem 1.1rem; border-radius: 8px; font-size: 0.85rem; z-index: 60; transition: transform 0.25s; }
     .toast.show { transform: translateX(-50%) translateY(0); }
@@ -319,7 +321,8 @@
         <div class="form-row">
           <div class="form-group">
             <label for="f-sys">Current System</label>
-            <select id="f-sys"><option value="">—</option></select>
+            <select id="f-sys" aria-busy="true" disabled><option value="">Loading systems…</option></select>
+            <p class="field-note" id="f-sys-status">Loading systems…</p>
           </div>
           <div class="form-group">
             <label for="f-points">Points</label>
@@ -341,14 +344,6 @@
 
   <script src="js/api.js"></script>
   <script>
-    const SYSTEMS = [
-      { id: 1, name: "Port Maw" }, { id: 2, name: "Aeolus" }, { id: 3, name: "Marinas" },
-      { id: 4, name: "Mezoa" }, { id: 5, name: "Electris" }, { id: 6, name: "Acre" },
-      { id: 7, name: "Bretz" }, { id: 8, name: "TR/0524" }, { id: 9, name: "Kueghan" },
-      { id: 10, name: "Ortho" }, { id: 11, name: "Lethe" }, { id: 12, name: "Kiliman IV" },
-      { id: 13, name: "Walpurgia" }
-    ];
-
     let forces = [];
     let players = [];
     let filter = "all", searchQ = "", editingId = null;
@@ -360,7 +355,6 @@
     const toast = document.getElementById("toast");
 
     const playerSel = document.getElementById("f-player");
-    const sysSel = document.getElementById("f-sys");
 
     function syncSideReadout() {
       const side = document.getElementById("f-side");
@@ -378,16 +372,81 @@
       side.textContent = name + " still needs a side. The campaign admin must assign Loyalist or Traitor before this force can be saved.";
     }
 
+    let systems = [];
+    let systemsState = "loading";
+
+    function systemOptionLabel(system) {
+      return system.sys_name || ("System " + system.sys_id);
+    }
+
+    function fillForceSystemSelect(preferred) {
+      const sel = document.getElementById("f-sys");
+      const status = document.getElementById("f-sys-status");
+      const keep = preferred != null ? String(preferred) : String(sel.value || "");
+      sel.innerHTML = "";
+      const blank = document.createElement("option");
+      blank.value = "";
+      if (systemsState === "loading") blank.textContent = "Loading systems…";
+      else if (systemsState === "error") blank.textContent = "Could not load systems";
+      else blank.textContent = "—";
+      sel.appendChild(blank);
+      systems.slice().sort((a, b) => String(a.sys_name || "").localeCompare(String(b.sys_name || ""), undefined, { numeric: true })).forEach((system) => {
+        const opt = document.createElement("option");
+        opt.value = system.sys_id;
+        opt.textContent = systemOptionLabel(system);
+        sel.appendChild(opt);
+      });
+      if (keep && ![...sel.options].some((opt) => opt.value === keep)) {
+        const opt = document.createElement("option");
+        opt.value = keep;
+        opt.textContent = "System " + keep;
+        sel.appendChild(opt);
+      }
+      if (keep) sel.value = keep;
+      const loading = systemsState === "loading";
+      sel.disabled = loading;
+      sel.setAttribute("aria-busy", loading ? "true" : "false");
+      if (status) {
+        status.classList.toggle("is-error", systemsState === "error");
+        if (loading) {
+          status.hidden = false;
+          status.textContent = "Loading systems…";
+        } else if (systemsState === "error") {
+          status.hidden = false;
+          status.textContent = "System list failed to load. The current system is kept if one was already chosen. Refresh to try again.";
+        } else if (!systems.length) {
+          status.hidden = false;
+          status.textContent = "No systems yet.";
+        } else {
+          status.hidden = true;
+          status.textContent = "";
+        }
+      }
+    }
+
+    async function loadSystems() {
+      try {
+        const rows = await SH.list("systems");
+        systems = Array.isArray(rows) ? rows : [];
+        systemsState = "ready";
+      } catch (err) {
+        systemsState = systems.length ? "ready" : "error";
+        showToast(err.message || "Could not load systems");
+      }
+      fillForceSystemSelect();
+    }
+
     playerSel.addEventListener("change", syncSideReadout);
-    SYSTEMS.forEach(s => {
-      const o = document.createElement("option");
-      o.value = s.id; o.textContent = s.name;
-      sysSel.appendChild(o);
-    });
+    fillForceSystemSelect();
 
     async function reload() {
-      forces = await SH.list("forces");
-      players = await SH.list("players");
+      const [forceRows, playerRows] = await Promise.all([
+        SH.list("forces"),
+        SH.list("players"),
+        loadSystems()
+      ]);
+      forces = forceRows;
+      players = playerRows;
       const cur = playerSel.value;
       playerSel.innerHTML = "";
       players.forEach(p => {
@@ -416,8 +475,10 @@
     }
     function systemName(id) {
       if (!id) return "—";
-      const s = SYSTEMS.find(x => x.id === Number(id));
-      return s ? s.name : `#${id}`;
+      const system = systems.find((row) => Number(row.sys_id) === Number(id));
+      if (system) return system.sys_name || ("System " + system.sys_id);
+      if (systemsState === "loading") return "Loading…";
+      return "System " + id;
     }
     function nextId() { return forces.reduce((m, f) => Math.max(m, f.force_id), 0) + 1; }
     function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
@@ -505,7 +566,7 @@
       document.getElementById("f-warlord").value = force ? (force.warlord_name || "") : "";
       document.getElementById("f-strength").value = force ? String(force.strength ?? 3) : "3";
       document.getElementById("f-status").value = force ? force.status : "active";
-      document.getElementById("f-sys").value = force && force.sys_id ? force.sys_id : "";
+      fillForceSystemSelect(force && force.sys_id ? force.sys_id : "");
       document.getElementById("f-points").value = force ? (force.points || "") : "";
       document.getElementById("f-notes").value = force ? (force.notes || "") : "";
       document.getElementById("btn-delete").hidden = !force;

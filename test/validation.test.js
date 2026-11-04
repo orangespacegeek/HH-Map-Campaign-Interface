@@ -187,7 +187,7 @@ test("phase, victory timing, proxy, victory points, notices, and hold", async ()
 
     await api(ctx, admin, "PUT", "/api/meta", {
       campaign_name: "Sunset Heresy",
-      subsector: "Port Maw",
+      subsector: "",
       turn: 2,
       phase: "Battles",
       loyal_score: 100,
@@ -202,7 +202,7 @@ test("phase, victory timing, proxy, victory points, notices, and hold", async ()
 
     await api(ctx, admin, "PUT", "/api/meta", {
       campaign_name: "Sunset Heresy",
-      subsector: "Port Maw",
+      subsector: "",
       turn: 3,
       phase: "Battles",
       loyal_score: 112,
