@@ -112,19 +112,20 @@
   }
 
   // Keep in step with sectorCopy() in server.js.
+  // The stored name is shown as written, so a name that already says Sector is not given another "sub-sector".
   function sectorCopy(meta) {
     const name = sectorName(meta);
     const description = name
-      ? "Sunset Heresy campaign tracker for the " + name + " sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code."
+      ? "Sunset Heresy campaign tracker for the " + name + ". Visitors can open the map and battle log. Players sign in or sign up with an invite code."
       : "Sunset Heresy campaign tracker. Visitors can open the map and battle log. Players sign in or sign up with an invite code.";
     return {
       description: description,
       socialTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy",
       mapTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy – Campaign Map",
-      headerSub: name ? name + " sub-sector" : "Campaign sector",
+      headerSub: name || "Campaign sector",
       mapHeader: name || "Campaign sector",
       mapBlurb: name
-        ? "Interactive " + name + " map with control colours, force presence, and system details."
+        ? "Interactive map of the " + name + ", with control colours, force presence, and system details."
         : "Interactive campaign map with control colours, force presence, and system details.",
       keepMapHint: name
         ? "Unchecked, the " + name + " starting map is restored, including links, positions, power, durability, and control."
