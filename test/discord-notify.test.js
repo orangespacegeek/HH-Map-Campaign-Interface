@@ -668,7 +668,9 @@ test("a Battles reminder mentions only players with unreported battles", async (
     assert.match(reminder.content, /Unreported battles:/);
     assert.ok(reminder.content.includes("<@" + LOYAL_ID + "> (Loyalist, " + loyalForce.force_name + ")"));
     assert.ok(reminder.content.includes("<@" + TRAITOR_ID + "> (Traitor, " + traitorForce.force_name + ")"));
-    assert.match(reminder.content, / at Port Maw/);
+    const battleSystem = (await api(ctx, admin, "GET", "/api/systems")).json.find((row) => row.sys_id === 1);
+    assert.ok(battleSystem && battleSystem.sys_name);
+    assert.match(reminder.content, new RegExp(" at " + battleSystem.sys_name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     assert.equal(reminder.content.includes("ping_done"), false);
     assert.equal(reminder.content.includes("<@" + THIRD_ID + ">"), false);
     assert.deepEqual(reminder.allowed_mentions.parse, []);

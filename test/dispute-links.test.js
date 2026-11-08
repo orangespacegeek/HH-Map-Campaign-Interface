@@ -132,7 +132,9 @@ test("a dispute carries the battle summary and a game ref", async () => {
     const card = inbox.json.actions.find((item) => item.game_id === gameId && item.result_state === "disputed");
     assert.ok(card, JSON.stringify(inbox.json.actions));
     assert.equal(card.duty, "admin");
-    assert.equal(card.system_name, "Port Maw");
+    const battleSystem = (await api(ctx, admin, "GET", "/api/systems")).json.find((row) => row.sys_id === 1);
+    assert.ok(battleSystem && battleSystem.sys_name);
+    assert.equal(card.system_name, battleSystem.sys_name);
     assert.equal(card.attacker_name, "link_loyal");
     assert.equal(card.defender_name, "link_traitor");
     assert.equal(card.attacker_force, lForce.force_name);
@@ -150,7 +152,7 @@ test("a dispute carries the battle summary and a game ref", async () => {
     const proposer = await api(ctx, loyal.token, "GET", "/api/inbox");
     const mine = proposer.json.mine.find((item) => item.game_id === gameId);
     assert.equal(mine.result_state, "disputed");
-    assert.equal(mine.system_name, "Port Maw");
+    assert.equal(mine.system_name, battleSystem.sys_name);
     assert.equal(mine.attacker_force, lForce.force_name);
     const playerNote = proposer.json.notifications.find((n) => n.kind === "battle_result_disputed");
     assert.equal(playerNote.ref.game_id, gameId);

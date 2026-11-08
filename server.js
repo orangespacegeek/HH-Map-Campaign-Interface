@@ -1303,6 +1303,58 @@ function isPublicAsset(parts) {
   return false;
 }
 
+function sectorName(meta) {
+  if (!meta || meta.subsector == null) return "";
+  return String(meta.subsector).replace(/\s+/g, " ").trim();
+}
+
+// Wording shared with sectorCopy() in js/api.js. A blank subsector stays neutral.
+function sectorCopy(meta) {
+  const name = sectorName(meta);
+  const description = name
+    ? "Sunset Heresy campaign tracker for the " + name + " sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code."
+    : "Sunset Heresy campaign tracker. Visitors can open the map and battle log. Players sign in or sign up with an invite code.";
+  return {
+    description: description,
+    socialTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy",
+    mapTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy – Campaign Map",
+    headerSub: name ? name + " sub-sector" : "Campaign sector",
+    mapHeader: name || "Campaign sector",
+    mapBlurb: name
+      ? "Interactive " + name + " map with control colours, force presence, and system details."
+      : "Interactive campaign map with control colours, force presence, and system details.",
+    keepMapHint: name
+      ? "Unchecked, the " + name + " starting map is restored, including links, positions, power, durability, and control."
+      : "Unchecked, the starting map is restored, including links, positions, power, durability, and control."
+  };
+}
+
+function escapeHtmlText(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function applySectorPlaceholders(html, meta) {
+  const copy = sectorCopy(meta);
+  const tokens = {
+    __SH_DESCRIPTION__: copy.description,
+    __SH_SOCIAL_TITLE__: copy.socialTitle,
+    __SH_MAP_TITLE__: copy.mapTitle,
+    __SH_HEADER_SUB__: copy.headerSub,
+    __SH_MAP_HEADER__: copy.mapHeader,
+    __SH_MAP_BLURB__: copy.mapBlurb,
+    __SH_KEEP_MAP_HINT__: copy.keepMapHint
+  };
+  return String(html).replace(/__SH_[A-Z_]+__/g, (token) => {
+    if (!Object.prototype.hasOwnProperty.call(tokens, token)) return token;
+    return escapeHtmlText(tokens[token]);
+  });
+}
+
 function serveStatic(req, res, pathname) {
   let rel = pathname === "/" ? "/index.html" : String(pathname || "/");
   rel = path.posix.normalize(rel);
@@ -1338,6 +1390,7 @@ function serveStatic(req, res, pathname) {
     const origin = proto + "://" + host;
     const pathOnly = String(req.url || "/").split("?")[0];
     let html = fs.readFileSync(fp, "utf8");
+    html = applySectorPlaceholders(html, readCollection("meta"));
     html = html.replaceAll("__OG_IMAGE__", origin + "/Sunset%20Heresy-ff-02.png").replaceAll("__OG_URL__", origin + pathOnly);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",

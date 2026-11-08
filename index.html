@@ -4,18 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="theme-color" content="#0e0e18" />
-  <meta name="description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
   <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Sunset Heresy" />
-  <meta property="og:title" content="Sunset Heresy – Port Maw" />
-  <meta property="og:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta property="og:title" data-sh-copy="socialTitle" content="__SH_SOCIAL_TITLE__" />
+  <meta property="og:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta property="og:image" content="__OG_IMAGE__" />
   <meta property="og:url" content="__OG_URL__" />
   <meta name="twitter:card" content="summary" />
-  <meta name="twitter:title" content="Sunset Heresy – Port Maw" />
-  <meta name="twitter:description" content="Sunset Heresy campaign tracker for the Port Maw sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code." />
+  <meta name="twitter:title" data-sh-copy="socialTitle" content="__SH_SOCIAL_TITLE__" />
+  <meta name="twitter:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Campaign Tracker</title>
   <style>
@@ -795,7 +795,7 @@
       <span class="titles">
         <span class="brand-kicker">Sunset Heresy</span>
         <h1>Dashboard</h1>
-        <span class="sub" id="header-sub">Port Maw Sub-Sector</span>
+        <span class="sub" id="header-sub" data-sh-copy="headerSub">__SH_HEADER_SUB__</span>
       </span>
     </a>
     <div class="header-end">
@@ -926,7 +926,7 @@
       <a class="card" href="campaign_map.html">
         <div class="icon">🗺️</div>
         <h3>Sector Map</h3>
-        <p>Interactive Port Maw map with control colours, force presence, and system details.</p>
+        <p data-sh-copy="mapBlurb">__SH_MAP_BLURB__</p>
       </a>
       <a class="card" href="rules.html">
         <div class="icon">📖</div>
@@ -974,7 +974,7 @@
       <h3 id="reset-title">Reset campaign</h3>
       <p>Clears battles, returns the campaign to Muster, zeroes the campaign score, and gives every player two strength-3 forces. Accounts stay. Battles and campaign actions stay closed until you begin the campaign.</p>
       <label class="keep-sys" for="keep-map"><input type="checkbox" id="keep-map" /> Keep current map</label>
-      <p class="field-hint" id="keep-map-hint">Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.</p>
+      <p class="field-hint" id="keep-map-hint" data-sh-copy="keepMapHint">__SH_KEEP_MAP_HINT__</p>
       <label class="keep-sys is-disabled" id="keep-control-label" for="keep-control"><input type="checkbox" id="keep-control" disabled /> Keep current system control</label>
       <p class="field-hint">Available only when the current map is kept. That leaves each system's loyal and traitor scores as they are. Otherwise those scores return to their starting values on this map.</p>
       <label class="confirm-label" for="reset-confirm">Type RESET to confirm</label>
@@ -1037,6 +1037,7 @@
       if (traitorVal) traitorVal.textContent = traitor;
     }
 
+    let dashboardMeta = null;
     let phaseDeadline = null;
 
     function formatRemain(ms) {
@@ -1215,6 +1216,8 @@
         SH.list("systems"),
         SH.getMeta()
       ]);
+      dashboardMeta = meta || {};
+      if (window.SH && SH.applySectorChrome) SH.applySectorChrome(dashboardMeta);
       const statCard = (href, num, label, numStyle) => {
         const style = numStyle ? ` style="${numStyle}"` : "";
         const inner = `<div class="num"${style}>${num}</div><div class="label">${label}</div>`;
@@ -1617,7 +1620,9 @@
         keepControlInput.checked = false;
         keepControlInput.disabled = true;
         keepControlLabel.classList.add("is-disabled");
-        keepMapHint.textContent = "Unchecked, the Port Maw baseline map is restored, including links, positions, power, durability, and control.";
+        keepMapHint.textContent = window.SH && dashboardMeta
+          ? SH.sectorCopy(dashboardMeta).keepMapHint
+          : keepMapHint.textContent;
       } else {
         keepControlInput.disabled = false;
         keepControlLabel.classList.remove("is-disabled");
