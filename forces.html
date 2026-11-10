@@ -137,6 +137,34 @@
     @media (max-width: 640px) { th.hide-sm, td.hide-sm { display: none; } .form-row { grid-template-columns: 1fr; } }
   </style>
   <link rel="stylesheet" href="css/site-nav.css" />
+  <style>
+    .form-group.check label {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 0.9rem;
+      color: var(--text);
+    }
+    .form-group.check input[type="checkbox"] {
+      width: 1.25rem;
+      height: 1.25rem;
+      min-height: 1.25rem;
+      flex: 0 0 auto;
+      accent-color: var(--accent);
+    }
+    @media (max-width: 719px) {
+      .table-wrap td.force-cell {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        text-align: left;
+      }
+      .table-wrap td.force-cell strong,
+      .table-wrap td.force-cell .force-detail { text-align: left; }
+    }
+    .force-detail { margin-top: 0.2rem; font-size: 0.78rem; color: var(--muted); line-height: 1.35; }
+  </style>
 </head>
 <body>
   <header class="site-header">
@@ -249,6 +277,7 @@
     <div class="drawer-body">
       <form id="form">
         <input type="hidden" id="f-id" />
+        <p class="field-note" id="f-lock-note" hidden></p>
         <div class="form-group">
           <label for="f-name">Force Name *</label>
           <input id="f-name" required maxlength="100" placeholder="14th Grand Battalion" />
@@ -300,6 +329,27 @@
           <label for="f-warlord">Warlord</label>
           <input id="f-warlord" maxlength="60" placeholder="Warsmith Voss" />
         </div>
+        <div class="form-group">
+          <label for="f-subfaction">Subfaction</label>
+          <input id="f-subfaction" maxlength="60" placeholder="House, Legio, cohort, forge world" />
+        </div>
+        <div class="form-group">
+          <label for="f-organisation">Organisation</label>
+          <input id="f-organisation" maxlength="80" placeholder="Rite of War, maniple, formation" />
+        </div>
+        <div class="form-group">
+          <label for="f-allies">Allies</label>
+          <input id="f-allies" maxlength="120" placeholder="Custodes, Daemons, …" />
+          <p class="field-note">Allies and notes are visible only to you and the campaign admin.</p>
+        </div>
+        <div class="form-row">
+          <div class="form-group check">
+            <label for="f-primarch"><input type="checkbox" id="f-primarch" /> Primarch present</label>
+          </div>
+          <div class="form-group check">
+            <label for="f-titan"><input type="checkbox" id="f-titan" /> Titan support (28mm)</label>
+          </div>
+        </div>
         <div class="form-row">
           <div class="form-group">
             <label for="f-strength">Strength (1–3)</label>
@@ -323,6 +373,7 @@
             <label for="f-sys">Current System</label>
             <select id="f-sys" aria-busy="true" disabled><option value="">Loading systems…</option></select>
             <p class="field-note" id="f-sys-status">Loading systems…</p>
+            <p class="field-note" id="f-sys-lock" hidden></p>
           </div>
           <div class="form-group">
             <label for="f-points">Points</label>
@@ -374,6 +425,7 @@
 
     let systems = [];
     let systemsState = "loading";
+    let actionStatus = null;
 
     function systemOptionLabel(system) {
       return system.sys_name || ("System " + system.sys_id);
@@ -406,6 +458,7 @@
       const loading = systemsState === "loading";
       sel.disabled = loading;
       sel.setAttribute("aria-busy", loading ? "true" : "false");
+      applyForceFieldLocks();
       if (status) {
         status.classList.toggle("is-error", systemsState === "error");
         if (loading) {
@@ -458,6 +511,8 @@
       if (cur) playerSel.value = cur;
       syncSideReadout();
       render();
+      try { await refreshActionPanel(); } catch (_) {}
+      openFromHash();
       let badge = document.getElementById("mode-badge");
       if (!badge) {
         badge = document.createElement("span");
@@ -465,7 +520,6 @@
         document.querySelector(".site-header-inner").appendChild(badge);
       }
       badge.innerHTML = SH.statusBadgeHtml();
-      try { await refreshActionPanel(); } catch (_) {}
     }
 
     function playerName(f) {
@@ -482,6 +536,57 @@
     }
     function nextId() { return forces.reduce((m, f) => Math.max(m, f.force_id), 0) + 1; }
     function esc(s) { return String(s ?? "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+    function forceDetail(f) {
+      const bits = [];
+      if (f.game_system) bits.push(f.game_system);
+      if (f.force_type) bits.push(f.force_type);
+      if (f.legion) bits.push(f.legion);
+      if (f.subfaction) bits.push(f.subfaction);
+      if (f.organisation) bits.push(f.organisation);
+      if (f.warlord_name) bits.push(f.warlord_name);
+      if (f.allies) bits.push(f.allies);
+      if (f.primarch_present) bits.push("Primarch");
+      if (f.titan_support) bits.push("Titan support");
+      if (f.points != null && f.points !== "") bits.push(f.points + " pts");
+      return bits.join(" · ");
+    }
+    function campaignPhase() {
+      return (actionStatus && actionStatus.phase) || "";
+    }
+    function textOrNull(id) {
+      const value = document.getElementById(id).value.trim();
+      return value || null;
+    }
+    function applyForceFieldLocks() {
+      const player = SH.role === "player";
+      const muster = campaignPhase() === "Muster";
+      const lock = (id, locked) => {
+        const el = document.getElementById(id);
+        if (el) el.disabled = !!locked;
+      };
+      lock("f-player", player);
+      lock("f-strength", player);
+      lock("f-status", player);
+      const sys = document.getElementById("f-sys");
+      if (sys && systemsState !== "loading") sys.disabled = player && !muster;
+      const note = document.getElementById("f-lock-note");
+      const sysLock = document.getElementById("f-sys-lock");
+      if (note) {
+        if (!player) note.hidden = true;
+        else {
+          note.hidden = false;
+          note.textContent = muster
+            ? "Muster: record the legion or faction, warlord, game system, and the other details, and choose the home system. Strength and movement stay locked until their phases."
+            : "You can update the description of your own force. The home system was chosen in Muster. Strength and movement stay with their phases.";
+        }
+      }
+      if (sysLock) {
+        sysLock.hidden = !player;
+        sysLock.textContent = muster
+          ? "Home system for this force. It locks when the campaign begins."
+          : "Home system stays where it was set in Muster.";
+      }
+    }
     function showToast(msg) {
       toast.textContent = msg; toast.classList.add("show");
       clearTimeout(showToast._t); showToast._t = setTimeout(() => toast.classList.remove("show"), 2200);
@@ -528,9 +633,9 @@
         const all = (f.allegiance || "").toLowerCase();
         tr.innerHTML = `
           <td>${f.force_id}</td>
-          <td>
+          <td class="force-cell">
             <strong>${esc(f.force_name)}</strong>
-            <div style="font-size:0.72rem;color:var(--muted)">${esc(f.legion || f.force_type || "")}${f.warlord_name ? " · " + esc(f.warlord_name) : ""}</div>
+            <div class="force-detail">${esc(forceDetail(f))}</div>
           </td>
           <td class="hide-sm">${esc(playerName(f))}</td>
           <td><span class="badge ${all}">${esc(f.allegiance)}</span></td>
@@ -564,12 +669,18 @@
       document.getElementById("f-type").value = force ? (force.force_type || "") : "";
       document.getElementById("f-legion").value = force ? (force.legion || "") : "";
       document.getElementById("f-warlord").value = force ? (force.warlord_name || "") : "";
+      document.getElementById("f-subfaction").value = force ? (force.subfaction || "") : "";
+      document.getElementById("f-organisation").value = force ? (force.organisation || "") : "";
+      document.getElementById("f-allies").value = force ? (force.allies || "") : "";
+      document.getElementById("f-primarch").checked = !!(force && force.primarch_present);
+      document.getElementById("f-titan").checked = !!(force && force.titan_support);
       document.getElementById("f-strength").value = force ? String(force.strength ?? 3) : "3";
       document.getElementById("f-status").value = force ? force.status : "active";
       fillForceSystemSelect(force && force.sys_id ? force.sys_id : "");
-      document.getElementById("f-points").value = force ? (force.points || "") : "";
+      document.getElementById("f-points").value = force && force.points != null ? force.points : "";
       document.getElementById("f-notes").value = force ? (force.notes || "") : "";
-      document.getElementById("btn-delete").hidden = !force;
+      document.getElementById("btn-delete").hidden = !force || SH.role !== "campaign_admin";
+      applyForceFieldLocks();
       overlay.classList.add("open");
       drawer.classList.add("open");
     }
@@ -595,18 +706,27 @@
       }
       const payload = {
         force_id: idVal ? Number(idVal) : undefined,
-        player_id: Number(document.getElementById("f-player").value),
         force_name: document.getElementById("f-name").value.trim(),
         game_system: document.getElementById("f-system").value,
-        force_type: document.getElementById("f-type").value.trim() || null,
-        legion: document.getElementById("f-legion").value.trim() || null,
-        warlord_name: document.getElementById("f-warlord").value.trim() || null,
-        strength: Number(document.getElementById("f-strength").value),
-        status: document.getElementById("f-status").value,
-        sys_id: document.getElementById("f-sys").value ? Number(document.getElementById("f-sys").value) : null,
+        force_type: textOrNull("f-type"),
+        legion: textOrNull("f-legion"),
+        warlord_name: textOrNull("f-warlord"),
+        subfaction: textOrNull("f-subfaction"),
+        organisation: textOrNull("f-organisation"),
+        allies: textOrNull("f-allies"),
+        primarch_present: document.getElementById("f-primarch").checked,
+        titan_support: document.getElementById("f-titan").checked,
         points: document.getElementById("f-points").value ? Number(document.getElementById("f-points").value) : null,
-        notes: document.getElementById("f-notes").value.trim() || null
+        notes: textOrNull("f-notes")
       };
+      if (SH.role === "campaign_admin") {
+        payload.player_id = Number(document.getElementById("f-player").value);
+        payload.strength = Number(document.getElementById("f-strength").value);
+        payload.status = document.getElementById("f-status").value;
+        payload.sys_id = document.getElementById("f-sys").value ? Number(document.getElementById("f-sys").value) : null;
+      } else if (campaignPhase() === "Muster") {
+        payload.sys_id = document.getElementById("f-sys").value ? Number(document.getElementById("f-sys").value) : null;
+      }
       try {
         await SH.save("forces", payload);
         await reload();
@@ -657,7 +777,6 @@
     document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawer(); });
 
     let systemsLive = [];
-    let actionStatus = null;
 
     function parseLinks(sys) {
       if (!sys || sys.sys_links == null || sys.sys_links === "") return [];
@@ -742,7 +861,7 @@
       });
 
       if (phase === "Muster") {
-        hint.textContent = "Muster: name your forces and choose home systems. Campaign actions start when the admin begins the campaign.";
+        hint.textContent = "Muster: edit each of your forces and record the legion or faction, warlord, game system, and home system. Campaign actions start when the admin begins the campaign.";
         forms.hidden = true;
       } else if (phase === "Logistics") {
         hint.textContent = "Logistics: Reinforce (1), Fortify (1), or Generate Force (2). Max 2 actions per turn.";
@@ -783,6 +902,17 @@
         "Select system"
       );
       refreshMoveDests();
+      if (document.getElementById("drawer").classList.contains("open")) applyForceFieldLocks();
+    }
+
+    let openedForceHash = false;
+    function openFromHash() {
+      if (openedForceHash) return;
+      openedForceHash = true;
+      const match = /^#force-(\d+)$/.exec(location.hash || "");
+      if (!match) return;
+      const force = forces.find((f) => Number(f.force_id) === Number(match[1]));
+      if (force) openDrawer(force);
     }
 
     document.getElementById("act-move-force").addEventListener("change", refreshMoveDests);

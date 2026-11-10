@@ -272,14 +272,24 @@
       fl.innerHTML = `<li style="border:none;background:none;color:var(--muted)">No forces currently present.</li>`;
     } else {
       fl.innerHTML = present
-        .map(
-          (f) => `
+        .map((f) => {
+          const bits = [playerName(f.player_id), f.allegiance, f.game_system, f.legion || f.force_type, f.warlord_name];
+          if (f.primarch_present) bits.push("Primarch");
+          if (f.titan_support) bits.push("Titan support");
+          bits.push("Str " + (f.strength ?? ""));
+          const detail = bits.filter((bit) => bit != null && String(bit) !== "").map((bit) => esc(bit)).join(" · ");
+          const canEdit = window.SH && SH.canEditForce && SH.canEditForce(f);
+          const edit = canEdit
+            ? `<a class="edit-details" href="forces.html#force-${encodeURIComponent(f.force_id)}">Edit details</a>`
+            : "";
+          return `
         <li>
           <div class="name">${esc(f.force_name)}</div>
-          <div class="detail">${esc(playerName(f.player_id))} · ${esc(f.allegiance)} · ${esc(f.legion || f.force_type || "")} · Str ${esc(f.strength)}</div>
+          <div class="detail">${detail}</div>
           ${f.notes ? `<div class="detail">${esc(f.notes)}</div>` : ""}
-        </li>`
-        )
+          ${edit}
+        </li>`;
+        })
         .join("");
     }
 
