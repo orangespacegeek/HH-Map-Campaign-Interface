@@ -2,7 +2,7 @@
 
 **Muster**
 
-Before the first campaign turn, players join, choose Loyalist or Traitor, name their two starting forces, and pick a home system for each force. No battles are fought and no campaign actions are spent. The campaign admin begins the campaign, which locks that roster and starts Turn 1 in Logistics. A player who joins after Muster still receives two starting forces. (added as part of web app build)
+Before the first campaign turn, players join, choose Loyalist or Traitor, name their two starting forces, and pick a home system for each force. No battles are fought and no campaign actions are spent. The campaign admin begins the campaign, which locks that roster and starts Turn 1 in Logistics. A player who joins after Muster still receives two starting forces. While mustering, and afterwards, a player can record and correct the descriptive details of a force they own: game system, force type, legion or faction, subfaction, organisation, allies, warlord, whether a Primarch is present, whether the army has 28mm titan support, points, and notes. Those details are not a campaign action. The home system can only be chosen during Muster. Strength does not change from that edit: it changes by Reinforce, battle results, or recovery. A movement order is only given in the Movement phase. A player cannot edit a force they do not own. (added as part of web app build)
 
 *Discord*
 

@@ -335,4 +335,195 @@ test("Muster rules are in the campaign text, and the player page omits the build
   assert.match(server, /auto_advance_muster === true/);
   assert.match(server, /Battles are not available during Muster/);
   assert.match(server, /Campaign actions are not available during Muster/);
+  assert.match(rulesMd, /a player can record and correct the descriptive details of a force they own/);
+  assert.match(rulesMd, /A player cannot edit a force they do not own\. \(added as part of web app build\)/);
+  assert.match(rulesHtml, /A player cannot edit a force they do not own\./);
+  const forcesHtml = fs.readFileSync(path.join(ROOT, "forces.html"), "utf8");
+  for (const id of ["f-legion", "f-warlord", "f-system", "f-subfaction", "f-organisation", "f-allies", "f-primarch", "f-titan"]) {
+    assert.match(forcesHtml, new RegExp('id="' + id + '"'));
+  }
+  assert.match(forcesHtml, /else if \(campaignPhase\(\) === "Muster"\)/);
+  assert.match(forcesHtml, /payload\.strength = Number/);
+  assert.match(forcesHtml, /SH\.role === "campaign_admin"/);
+});
+
+test("a player edits their own force details in Muster, and only their own", async () => {
+  const ctx = startServer();
+  try {
+    await ctx.ready;
+    const admin = await adminToken(ctx);
+    const loyal = await signup(ctx, admin, "detail_loyal", "Loyalist", {
+      starting_forces: [
+        {
+          force_name: "First Company",
+          sys_id: 2,
+          game_system: "AT",
+          force_type: "Legio Titanicus",
+          legion: "IV Iron Warriors",
+          warlord_name: "Warsmith Voss",
+          subfaction: "Stor-Bezashk",
+          organisation: "The Ironfire",
+          allies: "Custodes",
+          primarch_present: false,
+          titan_support: true,
+          points: 2500
+        },
+        { force_name: "Second Company", sys_id: 4, legion: "XIII Ultramarines", warlord_name: "Gage" }
+      ]
+    });
+    const other = await signup(ctx, admin, "detail_other", "Traitor", { start_sys_id: 4 });
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/reset", { confirm: "RESET" })).status, 200);
+    const status = await api(ctx, null, "GET", "/api/campaign/status");
+    assert.equal(status.json.phase, "Muster");
+
+    const mine = owned((await api(ctx, loyal.token, "GET", "/api/forces")).json, loyal.player_id);
+    assert.equal(mine.length, 2);
+    assert.equal(mine[0].legion, "IV Iron Warriors");
+    assert.equal(mine[0].warlord_name, "Warsmith Voss");
+    assert.equal(mine[0].game_system, "AT");
+    assert.equal(mine[0].force_type, "Legio Titanicus");
+    assert.equal(mine[0].subfaction, "Stor-Bezashk");
+    assert.equal(mine[0].organisation, "The Ironfire");
+    assert.equal(mine[0].allies, "Custodes");
+    assert.equal(mine[0].titan_support, true);
+    assert.equal(mine[0].primarch_present, false);
+    assert.equal(mine[0].points, 2500);
+    assert.equal(mine[0].strength, 3);
+    assert.equal(mine[1].legion, "XIII Ultramarines");
+    assert.equal(mine[1].warlord_name, "Gage");
+
+    const theirs = owned((await api(ctx, other.token, "GET", "/api/forces")).json, other.player_id)[0];
+    const stolen = await api(ctx, loyal.token, "PUT", "/api/forces/" + theirs.force_id, {
+      legion: "Stolen",
+      warlord_name: "Stolen",
+      game_system: "AI"
+    });
+    assert.equal(stolen.status, 403);
+    assert.match(stolen.json.error, /Cannot edit this force/);
+    assert.equal((await api(ctx, other.token, "GET", "/api/forces/" + theirs.force_id)).json.legion, "");
+
+    const edited = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, {
+      force_name: "First Company",
+      game_system: "LI",
+      force_type: "Solar Auxilia",
+      legion: "XIII Ultramarines",
+      warlord_name: "Captain Gage",
+      subfaction: "Cohort",
+      organisation: "Tercio",
+      allies: "Knights-Errant",
+      primarch_present: true,
+      titan_support: false,
+      points: 2000,
+      notes: "Muster list",
+      strength: 0,
+      status: "destroyed",
+      player_id: other.player_id,
+      dest_sys_id: 1,
+      sys_id: mine[0].sys_id
+    });
+    assert.equal(edited.status, 200, JSON.stringify(edited.json));
+    assert.equal(edited.json.legion, "XIII Ultramarines");
+    assert.equal(edited.json.warlord_name, "Captain Gage");
+    assert.equal(edited.json.game_system, "LI");
+    assert.equal(edited.json.force_type, "Solar Auxilia");
+    assert.equal(edited.json.subfaction, "Cohort");
+    assert.equal(edited.json.organisation, "Tercio");
+    assert.equal(edited.json.allies, "Knights-Errant");
+    assert.equal(edited.json.primarch_present, true);
+    assert.equal(edited.json.titan_support, false);
+    assert.equal(edited.json.points, 2000);
+    assert.equal(edited.json.notes, "Muster list");
+    assert.equal(edited.json.strength, 3);
+    assert.equal(edited.json.status, "active");
+    assert.equal(edited.json.player_id, loyal.player_id);
+    assert.equal(edited.json.dest_sys_id, null);
+    assert.equal(edited.json.sys_id, mine[0].sys_id);
+
+    const home = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, {
+      legion: "XIII Ultramarines",
+      sys_id: 5
+    });
+    assert.equal(home.status, 200, JSON.stringify(home.json));
+    assert.equal(home.json.sys_id, 5);
+    assert.equal(home.json.home_sys_id, 5);
+    assert.equal(home.json.strength, 3);
+
+    const moved = await api(ctx, loyal.token, "POST", "/api/actions/move", { force_id: mine[0].force_id, dest_sys_id: 1 });
+    assert.equal(moved.status, 409);
+    assert.match(moved.json.error, /Campaign actions are not available during Muster/);
+    const reinforced = await api(ctx, loyal.token, "POST", "/api/actions/reinforce", { force_id: mine[0].force_id });
+    assert.equal(reinforced.status, 409);
+
+    const shown = (await api(ctx, loyal.token, "GET", "/api/forces/" + mine[0].force_id)).json;
+    assert.equal(shown.legion, "XIII Ultramarines");
+    assert.equal(shown.warlord_name, "Captain Gage");
+    assert.equal(shown.game_system, "LI");
+    const hidden = (await api(ctx, other.token, "GET", "/api/forces/" + mine[0].force_id)).json;
+    assert.equal(hidden.legion, "XIII Ultramarines");
+    assert.equal(hidden.allies, undefined);
+    assert.equal(hidden.notes, undefined);
+
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/begin", {})).status, 200);
+    const beforeLogistics = (await api(ctx, loyal.token, "GET", "/api/forces/" + mine[0].force_id)).json;
+    const logistics = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, {
+      legion: "I Dark Angels",
+      warlord_name: "Corswain",
+      game_system: "HH",
+      force_type: "Legion",
+      strength: 1,
+      status: "destroyed",
+      sys_id: beforeLogistics.sys_id
+    });
+    assert.equal(logistics.status, 200, JSON.stringify(logistics.json));
+    assert.equal(logistics.json.legion, "I Dark Angels");
+    assert.equal(logistics.json.warlord_name, "Corswain");
+    assert.equal(logistics.json.game_system, "HH");
+    assert.equal(logistics.json.strength, 3);
+    assert.equal(logistics.json.status, "active");
+    assert.equal(logistics.json.sys_id, beforeLogistics.sys_id);
+
+    const blockedHome = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, {
+      legion: "Should not stick",
+      sys_id: 2
+    });
+    assert.equal(blockedHome.status, 409);
+    assert.match(blockedHome.json.error, /Home systems can only be chosen during Muster/);
+    assert.equal((await api(ctx, loyal.token, "GET", "/api/forces/" + mine[0].force_id)).json.legion, "I Dark Angels");
+
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/set-phase", { phase: "Movement", turn: 1 })).status, 200);
+    const march = await api(ctx, loyal.token, "POST", "/api/actions/move", { force_id: mine[0].force_id, dest_sys_id: 2 });
+    assert.equal(march.status, 200, JSON.stringify(march.json));
+    const described = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, {
+      warlord_name: "Still Corswain",
+      sys_id: beforeLogistics.sys_id
+    });
+    assert.equal(described.status, 200, JSON.stringify(described.json));
+    assert.equal(described.json.warlord_name, "Still Corswain");
+    assert.equal(described.json.dest_sys_id, 2);
+    assert.equal(described.json.sys_id, beforeLogistics.sys_id);
+    const sneak = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, { dest_sys_id: 9, strength: 1 });
+    assert.equal(sneak.status, 200, JSON.stringify(sneak.json));
+    assert.equal(sneak.json.dest_sys_id, 2);
+    assert.equal(sneak.json.strength, 3);
+
+    assert.equal((await api(ctx, admin, "POST", "/api/campaign/set-phase", { phase: "Battles", turn: 1 })).status, 200);
+    const battles = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, {
+      game_system: "AI",
+      legion: "X Iron Hands",
+      strength: 2
+    });
+    assert.equal(battles.status, 200, JSON.stringify(battles.json));
+    assert.equal(battles.json.game_system, "AI");
+    assert.equal(battles.json.legion, "X Iron Hands");
+    assert.equal(battles.json.strength, 3);
+    const adminStrength = await api(ctx, admin, "PUT", "/api/forces/" + mine[0].force_id, { strength: 2, status: "active" });
+    assert.equal(adminStrength.status, 200, JSON.stringify(adminStrength.json));
+    assert.equal(adminStrength.json.strength, 2);
+
+    const badFlag = await api(ctx, loyal.token, "PUT", "/api/forces/" + mine[0].force_id, { primarch_present: "maybe" });
+    assert.equal(badFlag.status, 400);
+    assert.match(badFlag.json.error, /Primarch present/);
+  } finally {
+    await ctx.stop();
+  }
 });

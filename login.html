@@ -222,6 +222,7 @@
           <div class="hint">Used when a force below has no home of its own.</div>
         </div>
       </div>
+      <p class="hint">Each force can record its game system, type, legion or faction, and warlord now. Subfaction, organisation, allies, and the other details can be edited on Forces during Muster.</p>
       <div class="form-row">
         <div class="form-group">
           <label for="su-force-1">First force</label>
@@ -236,6 +237,31 @@
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label for="su-system-1">Game system</label>
+          <select id="su-system-1">
+            <option value="HH">HH (Age of Darkness)</option>
+            <option value="AT">Adeptus Titanicus</option>
+            <option value="AI">Aeronautica Imperialis</option>
+            <option value="LI">Legions Imperialis</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="su-type-1">Force type</label>
+          <input id="su-type-1" list="signup-force-types" maxlength="40" placeholder="Legion" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-legion-1">Legion / faction</label>
+          <input id="su-legion-1" maxlength="60" placeholder="XIII Ultramarines" />
+        </div>
+        <div class="form-group">
+          <label for="su-warlord-1">Warlord</label>
+          <input id="su-warlord-1" maxlength="60" placeholder="Captain Gage" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
           <label for="su-force-2">Second force</label>
           <input id="su-force-2" maxlength="100" placeholder="Force name" />
         </div>
@@ -246,6 +272,45 @@
           </select>
         </div>
       </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-system-2">Game system</label>
+          <select id="su-system-2">
+            <option value="HH">HH (Age of Darkness)</option>
+            <option value="AT">Adeptus Titanicus</option>
+            <option value="AI">Aeronautica Imperialis</option>
+            <option value="LI">Legions Imperialis</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="su-type-2">Force type</label>
+          <input id="su-type-2" list="signup-force-types" maxlength="40" placeholder="Legion" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="su-legion-2">Legion / faction</label>
+          <input id="su-legion-2" maxlength="60" placeholder="IV Iron Warriors" />
+        </div>
+        <div class="form-group">
+          <label for="su-warlord-2">Warlord</label>
+          <input id="su-warlord-2" maxlength="60" placeholder="Warsmith Voss" />
+        </div>
+      </div>
+      <datalist id="signup-force-types">
+        <option value="Legion"></option>
+        <option value="Solar Auxilia"></option>
+        <option value="Mechanicum"></option>
+        <option value="Dark Mechanicum"></option>
+        <option value="Questoris"></option>
+        <option value="Legio Titanicus"></option>
+        <option value="Custodes"></option>
+        <option value="Silent Sisterhood"></option>
+        <option value="Militia"></option>
+        <option value="Blackshields"></option>
+        <option value="Daemons"></option>
+        <option value="Knights-Errant"></option>
+      </datalist>
       <div class="form-group">
         <label for="su-notes">Notes</label>
         <textarea id="su-notes" maxlength="500" placeholder="When you can play, list preferences…"></textarea>
@@ -308,6 +373,22 @@
   <script src="js/api.js"></script>
   <script>
     const msg = document.getElementById("msg");
+    function startingForce(n, home) {
+      const text = (id) => document.getElementById(id).value.trim();
+      const row = {
+        force_name: text("su-force-" + n),
+        sys_id: home ? Number(home) : null,
+        game_system: document.getElementById("su-system-" + n).value,
+        force_type: text("su-type-" + n),
+        legion: text("su-legion-" + n),
+        warlord_name: text("su-warlord-" + n)
+      };
+      if (!row.force_type) delete row.force_type;
+      if (!row.legion) delete row.legion;
+      if (!row.warlord_name) delete row.warlord_name;
+      return row;
+    }
+
     function showMsg(text, ok) {
       msg.textContent = text;
       msg.className = "msg " + (ok ? "ok" : "error");
@@ -371,16 +452,7 @@
           allegiance: document.getElementById("su-allegiance").value,
           start_sys_id: sys ? Number(sys) : null,
           notes: document.getElementById("su-notes").value.trim(),
-          starting_forces: [
-            {
-              force_name: document.getElementById("su-force-1").value.trim(),
-              sys_id: home1 ? Number(home1) : null
-            },
-            {
-              force_name: document.getElementById("su-force-2").value.trim(),
-              sys_id: home2 ? Number(home2) : null
-            }
-          ]
+          starting_forces: [startingForce(1, home1), startingForce(2, home2)]
         });
         showMsg("Account created. Signed in as " + (me.label || me.login) + ".", true);
         setTimeout(() => { location.href = "index.html"; }, 600);

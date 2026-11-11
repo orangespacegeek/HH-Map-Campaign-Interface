@@ -590,6 +590,37 @@ function forceWithOwnerSide(force) {
   return { ok: true, force: applyOwnerSide(force, side) };
 }
 
+function readForceFlag(value, label) {
+  if (value === true || value === false) return { ok: true, value };
+  if (value === "true" || value === "false") return { ok: true, value: value === "true" };
+  if (value == null || value === "") return { ok: true, value: false };
+  return { ok: false, error: label + " must be yes or no" };
+}
+
+function readForcePoints(value) {
+  if (value == null || value === "") return { ok: true, points: null };
+  const points = Number(value);
+  if (!Number.isFinite(points) || points < 0 || points > 100000) {
+    return { ok: false, error: "Points must be a number from 0 to 100000" };
+  }
+  return { ok: true, points };
+}
+
+// A blank home, or the home the force already has, is not a move.
+// Sending the current system with a legion edit must not be rejected.
+function playerHomeChange(body, existing) {
+  if (body.sys_id === undefined && body.home_sys_id === undefined) return { change: false };
+  const raw = body.home_sys_id != null && body.home_sys_id !== "" ? body.home_sys_id : body.sys_id;
+  if (raw == null || raw === "") return { change: false };
+  const home = Number(raw);
+  if (!Number.isFinite(home) || home <= 0) return { change: true, home: 0 };
+  const samePlace = home === Number(existing.sys_id);
+  const sameHome =
+    body.home_sys_id == null || body.home_sys_id === "" || home === Number(existing.home_sys_id);
+  if (samePlace && sameHome) return { change: false };
+  return { change: true, home };
+}
+
 /**
  * Idempotent load migration. Blackshield was never a third side.
  * Players marked Blackshield become "needs side" until an admin assigns one.
@@ -4757,27 +4788,66 @@ function parseStartingForceSpecs(body, systems) {
         return { ok: false, error: "Home system is not valid" };
       }
     }
-    forces.push({ force_name: forceName || null, sys_id: sysId });
+    const detail = startingForceDetail(row);
+    if (!detail.ok) return detail;
+    forces.push({ force_name: forceName || null, sys_id: sysId, ...detail.detail });
   }
   return { ok: true, forces };
 }
 
-function makeStartingForce(player, home, name, forceId) {
+const STARTING_FORCE_DETAIL_KEYS = [
+  "game_system",
+  "force_type",
+  "legion",
+  "warlord_name",
+  "subfaction",
+  "organisation",
+  "allies",
+  "notes"
+];
+
+function startingForceDetail(row) {
+  const detail = {};
+  STARTING_FORCE_DETAIL_KEYS.forEach((key) => {
+    if (row[key] != null && row[key] !== "") detail[key] = row[key];
+  });
+  const textError = textLimitError(detail, FORCE_TEXT_LIMITS);
+  if (textError) return { ok: false, error: textError };
+  if (Object.prototype.hasOwnProperty.call(row, "primarch_present")) {
+    const flag = readForceFlag(row.primarch_present, "Primarch present");
+    if (!flag.ok) return flag;
+    detail.primarch_present = flag.value;
+  }
+  if (Object.prototype.hasOwnProperty.call(row, "titan_support")) {
+    const flag = readForceFlag(row.titan_support, "Titan support");
+    if (!flag.ok) return flag;
+    detail.titan_support = flag.value;
+  }
+  if (row.points != null && row.points !== "") {
+    const points = readForcePoints(row.points);
+    if (!points.ok) return points;
+    detail.points = points.points;
+  }
+  return { ok: true, detail };
+}
+
+function makeStartingForce(player, home, name, forceId, detail) {
+  const extra = detail && typeof detail === "object" ? detail : {};
   return {
     force_id: forceId,
     player_id: player.player_id,
     force_name: name,
-    game_system: "HH",
-    force_type: "Legion",
+    game_system: extra.game_system || "HH",
+    force_type: extra.force_type || "Legion",
     allegiance: sideOf(player) || "",
-    legion: "",
-    subfaction: "",
-    allies: "",
-    organisation: "",
-    warlord_name: "",
-    primarch_present: false,
-    titan_support: false,
-    points: 3000,
+    legion: extra.legion || "",
+    subfaction: extra.subfaction || "",
+    allies: extra.allies || "",
+    organisation: extra.organisation || "",
+    warlord_name: extra.warlord_name || "",
+    primarch_present: extra.primarch_present === true,
+    titan_support: extra.titan_support === true,
+    points: extra.points != null ? extra.points : 3000,
     home_sys_id: home,
     sys_id: home,
     dest_sys_id: null,
@@ -4814,7 +4884,7 @@ function appendStartingForces(players, forces, systems, specsByPlayer) {
       const spec = specs[n] || {};
       const home = spec.sys_id || defaultHomeSystem(player, systems, index);
       const fallback = (player.display_name || player.player_name || "Force") + (n === 0 ? " I" : " II");
-      out.push(makeStartingForce(player, home, spec.force_name || fallback, next++));
+      out.push(makeStartingForce(player, home, spec.force_name || fallback, next++, spec));
       added += 1;
       helped.add(Number(player.player_id));
     }
@@ -4848,8 +4918,8 @@ function buildStartingForces(players, existingForces, systems) {
         allies: (prev && prev.allies) || "",
         organisation: (prev && prev.organisation) || "",
         warlord_name: (prev && prev.warlord_name) || "",
-        primarch_present: false,
-        titan_support: false,
+        primarch_present: !!(prev && prev.primarch_present),
+        titan_support: !!(prev && prev.titan_support),
         points: prev && prev.points != null ? prev.points : 3000,
         home_sys_id: home,
         sys_id: home,
@@ -6193,30 +6263,45 @@ async function handleApi(req, res, pathname) {
         // Flavour / list fields only — campaign position & strength go through /api/actions.
         // During Muster the player may still name a force and choose its home system.
         const allowed = [
-          "force_name", "notes", "warlord_name", "points", "game_system",
+          "force_name", "notes", "warlord_name", "game_system",
           "force_type", "legion", "subfaction", "organisation", "allies"
         ];
         const safe = { ...existing };
         allowed.forEach((k) => {
           if (body[k] !== undefined) safe[k] = body[k];
         });
-        if (body.sys_id !== undefined || body.home_sys_id !== undefined) {
+        if (body.points !== undefined) {
+          const points = readForcePoints(body.points);
+          if (!points.ok) return send(res, 400, { error: points.error });
+          safe.points = points.points;
+        }
+        for (const [key, label] of [
+          ["primarch_present", "Primarch present"],
+          ["titan_support", "Titan support"]
+        ]) {
+          if (!Object.prototype.hasOwnProperty.call(body, key)) continue;
+          const flag = readForceFlag(body[key], label);
+          if (!flag.ok) return send(res, 400, { error: flag.error });
+          safe[key] = flag.value;
+        }
+        // Strength, status, owner, and pending moves stay on their own rules.
+        const homeMove = playerHomeChange(body, existing);
+        if (homeMove.change) {
           const metaNow = readCollection("meta");
           if ((metaNow.phase || "Logistics") !== "Muster" || metaNow.roster_locked === true) {
             return send(res, 409, { error: "Home systems can only be chosen during Muster" });
           }
-          const home = Number(
-            body.home_sys_id != null && body.home_sys_id !== "" ? body.home_sys_id : body.sys_id
-          );
           const systems = readCollection("systems");
-          if (!home || !systems.some((system) => Number(system.sys_id) === home)) {
+          if (!homeMove.home || !systems.some((system) => Number(system.sys_id) === homeMove.home)) {
             return send(res, 400, { error: "Home system is not valid" });
           }
-          safe.sys_id = home;
-          safe.home_sys_id = home;
+          safe.sys_id = homeMove.home;
+          safe.home_sys_id = homeMove.home;
           safe.dest_sys_id = null;
         }
         safe.player_id = existing.player_id;
+        safe.strength = existing.strength;
+        safe.status = existing.status;
         const assigned = forceWithOwnerSide(safe);
         if (!assigned.ok) return send(res, 400, { error: assigned.error });
         list[idx] = assigned.force;
