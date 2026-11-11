@@ -103,7 +103,7 @@ Download a backup from the dashboard first if anyone has already entered real re
 
 ## 7. Updating
 
-Push to the branch Render deploys. Render rebuilds and restarts. With the disk mounted at `DATA_DIR`, accounts, invites, and campaign JSON stay. A service with a disk does a short restart instead of a zero-downtime swap, because two copies must not write the disk at once. That is Render's rule for disks.
+Push to the branch Render deploys. Render rebuilds and restarts. With the disk mounted at `DATA_DIR`, accounts, invites, and campaign JSON stay. On that boot, a sector label or system display name that is still exactly `Port Maw` is renamed to Ajale Sector. Ids, links, positions, control, scores, accounts, notes, and every other name stay. A different spelling is left for you to edit in `subsector` or `sys_name`. The previous meta and systems are copied to `DATA_DIR/backups/pre-ajale-sector-<timestamp>.json` only when a label changes. A fresh disk has nothing to rename: its meta is empty, so the pages say “Campaign sector” until you set `subsector`, and the seeded map’s capital system is named Ajale Sector. A service with a disk does a short restart instead of a zero-downtime swap, because two copies must not write the disk at once. That is Render's rule for disks.
 
 Free instances, and any service without a disk, lose `data/` on that restart.
 

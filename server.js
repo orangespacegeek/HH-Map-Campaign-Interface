@@ -57,6 +57,10 @@
  *     The sample roster (players, forces, games, meta — turn 3, "The Warsmith")
  *     is not copied into a fresh DATA_DIR. SEED_SAMPLE_CAMPAIGN=1 copies those
  *     files for local development only; production ignores that flag.
+ *     On boot, a sector label or system display name that is still exactly the
+ *     legacy sample place name is renamed. Other names, ids, positions, links,
+ *     scores, notes, and accounts are left as they are. A backup is written
+ *     under DATA_DIR/backups only when a label changes.
  *   Production (NODE_ENV=production, or RENDER set) refuses to start when
  *     DATA_DIR is unset or resolves inside this application directory, because
  *     that copy is wiped on deploy. ALLOW_EPHEMERAL_DATA=1 overrides the
@@ -1309,19 +1313,20 @@ function sectorName(meta) {
 }
 
 // Wording shared with sectorCopy() in js/api.js. A blank subsector stays neutral.
+// The stored name is shown as written, so a name that already says Sector is not given another "sub-sector".
 function sectorCopy(meta) {
   const name = sectorName(meta);
   const description = name
-    ? "Sunset Heresy campaign tracker for the " + name + " sub-sector. Visitors can open the map and battle log. Players sign in or sign up with an invite code."
+    ? "Sunset Heresy campaign tracker for the " + name + ". Visitors can open the map and battle log. Players sign in or sign up with an invite code."
     : "Sunset Heresy campaign tracker. Visitors can open the map and battle log. Players sign in or sign up with an invite code.";
   return {
     description: description,
     socialTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy",
     mapTitle: name ? "Sunset Heresy – " + name : "Sunset Heresy – Campaign Map",
-    headerSub: name ? name + " sub-sector" : "Campaign sector",
+    headerSub: name || "Campaign sector",
     mapHeader: name || "Campaign sector",
     mapBlurb: name
-      ? "Interactive " + name + " map with control colours, force presence, and system details."
+      ? "Interactive map of the " + name + ", with control colours, force presence, and system details."
       : "Interactive campaign map with control colours, force presence, and system details.",
     keepMapHint: name
       ? "Unchecked, the " + name + " starting map is restored, including links, positions, power, durability, and control."
@@ -5115,6 +5120,66 @@ function migrateStartingForces() {
   return { changed: true, added: filled.added, backup: backupFile };
 }
 
+// Exact legacy sample label. Anything else, including a different spelling, is a chosen name.
+const LEGACY_PLACE_NAME = "Port Maw";
+const CURRENT_PLACE_NAME = "Ajale Sector";
+
+/**
+ * Idempotent load migration. Renames the legacy sample place when it is still
+ * the exact sector label or an exact system display name. Ids, links, positions,
+ * control, notes, accounts, and every other name stay. A backup is written only
+ * when a label changes.
+ */
+function migrateLegacyPlaceName() {
+  ensureDataDir();
+  const metaPath = path.join(DATA, "meta.json");
+  const systemsPath = path.join(DATA, "systems.json");
+  let meta = null;
+  let systems = null;
+  if (fs.existsSync(metaPath)) meta = JSON.parse(fs.readFileSync(metaPath, "utf8"));
+  if (fs.existsSync(systemsPath)) systems = JSON.parse(fs.readFileSync(systemsPath, "utf8"));
+
+  const metaIsObject = !!meta && typeof meta === "object" && !Array.isArray(meta);
+  let metaChanged = false;
+  let nextMeta = meta;
+  if (metaIsObject && meta.subsector === LEGACY_PLACE_NAME) {
+    nextMeta = { ...meta, subsector: CURRENT_PLACE_NAME };
+    metaChanged = true;
+  }
+
+  let systemsChanged = false;
+  let nextSystems = systems;
+  if (Array.isArray(systems)) {
+    nextSystems = systems.map((system) => {
+      if (!system || typeof system !== "object" || Array.isArray(system)) return system;
+      if (system.sys_name !== LEGACY_PLACE_NAME) return system;
+      systemsChanged = true;
+      return { ...system, sys_name: CURRENT_PLACE_NAME };
+    });
+  }
+
+  if (!metaChanged && !systemsChanged) return { changed: false };
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const dir = path.join(DATA, "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const backupFile = path.join(dir, "pre-ajale-sector-" + stamp + ".json");
+  const payload = {
+    taken_at: new Date().toISOString(),
+    reason: "Before renaming legacy place labels that still used the old sample name"
+  };
+  if (metaChanged) payload.meta = meta;
+  if (systemsChanged) payload.systems = systems;
+  atomicWrite(backupFile, JSON.stringify(payload, null, 2) + "\n");
+  if (metaChanged) writeCollection("meta", nextMeta);
+  if (systemsChanged) writeCollection("systems", nextSystems);
+  const parts = [];
+  if (metaChanged) parts.push("sector label");
+  if (systemsChanged) parts.push("system label");
+  console.log("Place-name migration: renamed the legacy " + parts.join(" and ") + ". Backup: " + backupFile);
+  return { changed: true, backup: backupFile, meta: metaChanged, systems: systemsChanged };
+}
+
 const DISCORD_CONTENT_LIMIT = 2000;
 const DISCORD_REMINDER_WINDOW_MS = 24 * 60 * 60 * 1000;
 let discordDelivery = Promise.resolve();
@@ -6236,6 +6301,7 @@ function bootDataFiles() {
   ensureDataDir();
   seedBaselineSystems();
   seedSampleCampaign();
+  migrateLegacyPlaceName();
   migrateBlackshieldAllegiance();
   migrateStartingForces();
 }

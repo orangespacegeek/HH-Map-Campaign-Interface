@@ -107,9 +107,16 @@ function sampleSubsector() {
   return name;
 }
 
-test("application source does not hardcode the sample sector name", () => {
-  const banned = sampleSubsector();
-  const skipDir = new Set(["bot-test", "data", "schema", "node_modules", ".git"]);
+test("maintained files do not keep the old place name as branding", () => {
+  const skipDir = new Set(["bot-test", "node_modules", ".git"]);
+  const allowed = new Set([
+    "server.js",
+    "README.md",
+    "DEPLOY_RENDER.md",
+    "test/ajale-migration.test.js",
+    "test/sector-name.test.js"
+  ]);
+  const textExt = new Set([".js", ".html", ".md", ".json", ".csv", ".css", ".yml", ".yaml", ".txt"]);
   const hits = [];
   function walk(dir) {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -120,12 +127,27 @@ test("application source does not hardcode the sample sector name", () => {
         continue;
       }
       if (!ent.isFile()) continue;
-      const text = fs.readFileSync(fp);
-      if (text.includes(banned)) hits.push(path.relative(ROOT, fp));
+      if (!textExt.has(path.extname(ent.name).toLowerCase())) continue;
+      const rel = path.relative(ROOT, fp);
+      const text = fs.readFileSync(fp, "utf8");
+      if (!/port maw/i.test(text)) continue;
+      if (!allowed.has(rel)) hits.push(rel);
     }
   }
   walk(ROOT);
   assert.deepEqual(hits, []);
+  const server = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
+  const withoutNeedle = server.replace('const LEGACY_PLACE_NAME = "Port Maw";', "");
+  assert.equal(/port maw/i.test(withoutNeedle), false);
+  const baseline = JSON.parse(fs.readFileSync(path.join(ROOT, "data", "baseline", "systems.json"), "utf8"));
+  const sampleSystems = JSON.parse(fs.readFileSync(path.join(ROOT, "data", "systems.json"), "utf8"));
+  assert.equal(baseline[0].sys_name, "Ajale Sector");
+  assert.equal(sampleSystems[0].sys_name, "Ajale Sector");
+  assert.equal(baseline[0].sys_id, sampleSystems[0].sys_id);
+  assert.equal(baseline[0].sys_links, sampleSystems[0].sys_links);
+  assert.equal(baseline[0].sys_x, sampleSystems[0].sys_x);
+  assert.equal(baseline[0].sys_y, sampleSystems[0].sys_y);
+  assert.equal(sampleSubsector(), "Ajale Sector");
 });
 
 test("force and player editors take systems from the API", () => {
@@ -191,7 +213,7 @@ test("a blank subsector uses neutral copy and a set subsector is rendered", asyn
     for (const pathname of PAGES) {
       const html = await page(ctx, pathname);
       assert.ok(
-        html.includes("Sunset Heresy campaign tracker for the Garm Reach sub-sector."),
+        html.includes("Sunset Heresy campaign tracker for the Garm Reach."),
         pathname
       );
       assert.equal(html.includes("__SH_"), false, pathname);
@@ -199,25 +221,25 @@ test("a blank subsector uses neutral copy and a set subsector is rendered", asyn
     const namedIndex = await page(ctx, "/");
     assert.match(namedIndex, /property="og:title"[^>]*content="Sunset Heresy – Garm Reach"/);
     assert.match(namedIndex, /name="twitter:title"[^>]*content="Sunset Heresy – Garm Reach"/);
-    assert.match(namedIndex, /id="header-sub"[^>]*>Garm Reach sub-sector</);
-    assert.match(namedIndex, /Interactive Garm Reach map with control colours/);
+    assert.match(namedIndex, /id="header-sub"[^>]*>Garm Reach</);
+    assert.match(namedIndex, /Interactive map of the Garm Reach, with control colours/);
     assert.match(namedIndex, /Unchecked, the Garm Reach starting map is restored/);
     const namedMap = await page(ctx, "/campaign_map.html");
     assert.match(namedMap, /<title[^>]*>Sunset Heresy – Garm Reach<\/title>/);
     assert.match(namedMap, /id="header-sub"[^>]*>Garm Reach</);
     const namedSystems = await page(ctx, "/systems.html");
-    assert.match(namedSystems, /id="header-sub"[^>]*>Garm Reach sub-sector</);
+    assert.match(namedSystems, /id="header-sub"[^>]*>Garm Reach</);
 
     await putSubsector('A & B "C" <tag>');
     const escaped = await page(ctx, "/systems.html");
-    assert.match(escaped, /for the A &amp; B &quot;C&quot; &lt;tag&gt; sub-sector/);
+    assert.match(escaped, /for the A &amp; B &quot;C&quot; &lt;tag&gt;\./);
     assert.equal(escaped.includes('for the A & B "C" <tag>'), false);
-    assert.match(escaped, /id="header-sub"[^>]*>A &amp; B &quot;C&quot; &lt;tag&gt; sub-sector</);
+    assert.match(escaped, /id="header-sub"[^>]*>A &amp; B &quot;C&quot; &lt;tag&gt;</);
 
     await putSubsector(sampleName);
     const fromData = await page(ctx, "/");
-    assert.ok(fromData.includes("for the " + sampleName + " sub-sector."));
-    assert.match(fromData, new RegExp("id=\"header-sub\"[^>]*>" + sampleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " sub-sector<"));
+    assert.ok(fromData.includes("for the " + sampleName + "."));
+    assert.match(fromData, new RegExp("id=\"header-sub\"[^>]*>" + sampleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "<"));
 
     await putSubsector("");
     const cleared = await page(ctx, "/campaign_map.html");
@@ -270,7 +292,7 @@ test("an existing data directory keeps its sector name, and reset restores the s
   try {
     await ctx.ready;
     const html = await page(ctx, "/");
-    assert.ok(html.includes("for the " + sampleName + " sub-sector."));
+    assert.ok(html.includes("for the " + sampleName + "."));
     const systems = await api(ctx, null, "GET", "/api/public/systems");
     assert.equal(systems.status, 200);
     assert.equal(systems.json.length, 1);
@@ -299,7 +321,7 @@ test("an existing data directory keeps its sector name, and reset restores the s
     const stillNamed = await page(ctx, "/systems.html");
     assert.match(
       stillNamed,
-      new RegExp("id=\"header-sub\"[^>]*>" + sampleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + " sub-sector<")
+      new RegExp("id=\"header-sub\"[^>]*>" + sampleName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "<")
     );
   } finally {
     await ctx.stop();
