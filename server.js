@@ -1114,6 +1114,10 @@ function destroySession(token) {
   writeCollection("sessions", sessions);
 }
 
+function objectRows(value) {
+  return Array.isArray(value) ? value.filter((row) => row && typeof row === "object") : [];
+}
+
 function publicPlayer(p) {
   return {
     player_id: p.player_id,
@@ -1174,22 +1178,32 @@ function injectDashboardCounts(html) {
 
 // Signed-in Players page. Same fields as the public list, plus the name and
 // contact a player typed so others can arrange a game. Nothing else.
+function plainRosterText(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).trim();
+  return "";
+}
+
 function rosterPlayer(p) {
-  const name = p.player_name == null ? "" : String(p.player_name).trim();
-  const contact = p.contact == null ? "" : String(p.contact).trim();
+  const row = p && typeof p === "object" ? p : {};
   return {
-    ...publicPlayer(p),
-    realName: name || null,
-    contact: contact || null
+    player_id: row.player_id == null ? null : row.player_id,
+    display_name: plainRosterText(row.display_name) || "Unknown commander",
+    allegiance: plainRosterText(row.allegiance) || null,
+    status: plainRosterText(row.status) || null,
+    start_sys_id: row.start_sys_id || null,
+    realName: plainRosterText(row.player_name) || null,
+    contact: plainRosterText(row.contact) || null
   };
 }
 
 function handleRoster(req, res, method) {
   if (method !== "GET") return send(res, 405, { error: "Method not allowed" });
   const auth = getSession(req);
-  const gate = requireRole(auth, ["player", "campaign_admin"]);
-  if (!gate.ok) return send(res, gate.status, { error: gate.error });
-  return send(res, 200, readCollection("players").map(rosterPlayer));
+  // Any signed-in account. Older rows may not use the exact "player" spelling.
+  // Signed-out stays 401. Notes, Discord ids, invites, and secrets are not copied.
+  if (!auth || !auth.account) return send(res, 401, { error: "Login required" });
+  return send(res, 200, objectRows(readCollection("players")).map(rosterPlayer));
 }
 
 // Roster fields are shared. Notes and allies are the owner's private list text.
@@ -1465,6 +1479,46 @@ function applySectorPlaceholders(html, meta) {
   });
 }
 
+const assetVersions = new Map();
+
+function assetVersion(absPath) {
+  const st = fs.statSync(absPath);
+  const key = absPath + "\0" + st.mtimeMs + "\0" + st.size;
+  const cached = assetVersions.get(key);
+  if (cached) return cached;
+  const hash = crypto.createHash("sha256").update(fs.readFileSync(absPath)).digest("hex").slice(0, 12);
+  assetVersions.set(key, hash);
+  return hash;
+}
+
+// HTML is no-store, but JS and CSS used to be cached for an hour with no
+// version in the URL. After a deploy the new page can run against the old
+// api.js, which has no SH.roster, and the Players page dies in Chrome.
+function versionAssetUrls(html) {
+  const rootResolved = path.resolve(ROOT);
+  return html.replace(/\b(src|href)="([^"]+)"/g, (full, attr, url) => {
+    if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i.test(url)) return full;
+    const pathOnly = url.split("#")[0].split("?")[0];
+    if (!/\.(?:js|css)$/i.test(pathOnly)) return full;
+    if (pathOnly.split("/").some((part) => !part || part === "." || part === "..")) return full;
+    if (/[?&]v=/.test(url)) return full;
+    const abs = path.resolve(rootResolved, pathOnly);
+    if (abs !== rootResolved && !abs.startsWith(rootResolved + path.sep)) return full;
+    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) return full;
+    return attr + '="' + url + (url.includes("?") ? "&" : "?") + "v=" + assetVersion(abs) + '"';
+  });
+}
+
+function staticCacheControl(req, ext) {
+  if (ext !== ".js" && ext !== ".css") return "public, max-age=3600";
+  let versioned = false;
+  try {
+    versioned = new URL(req.url || "/", "http://localhost").searchParams.has("v");
+  } catch (_) {}
+  if (versioned) return "public, max-age=31536000, immutable";
+  return "public, max-age=0, must-revalidate";
+}
+
 function serveStatic(req, res, pathname) {
   let rel = pathname === "/" ? "/index.html" : String(pathname || "/");
   rel = path.posix.normalize(rel);
@@ -1509,6 +1563,7 @@ function serveStatic(req, res, pathname) {
         console.error("Could not fill dashboard counts: " + (err && err.message ? err.message : err));
       }
     }
+    html = versionAssetUrls(html);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -1519,7 +1574,7 @@ function serveStatic(req, res, pathname) {
   }
   res.writeHead(200, {
     "Content-Type": type,
-    "Cache-Control": "public, max-age=3600",
+    "Cache-Control": staticCacheControl(req, ext),
     "X-Content-Type-Options": "nosniff"
   });
   fs.createReadStream(fp).pipe(res);
@@ -6064,12 +6119,12 @@ async function handlePublic(req, res, parts, method) {
     return send(res, 200, publicMeta(readCollection("meta")));
   }
   if (collection === "players") {
-    return send(res, 200, readCollection("players").map(publicPlayer));
+    return send(res, 200, objectRows(readCollection("players")).map(publicPlayer));
   }
   if (collection === "forces") {
-    const players = readCollection("players");
+    const players = objectRows(readCollection("players"));
     const byId = Object.fromEntries(players.map((p) => [p.player_id, p]));
-    return send(res, 200, readCollection("forces").map((f) => publicForce(f, byId)));
+    return send(res, 200, objectRows(readCollection("forces")).map((f) => publicForce(f, byId)));
   }
   if (collection === "systems") {
     return send(res, 200, readCollection("systems"));

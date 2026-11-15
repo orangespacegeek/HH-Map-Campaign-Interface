@@ -936,13 +936,21 @@
       credentials: "include",
       cache: "no-store"
     });
-    if (res.status === 401) {
-      const err = new Error("Login required");
-      err.status = 401;
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const message = data && typeof data.error === "string" && data.error.trim()
+        ? data.error.trim()
+        : "Could not load the roster";
+      const err = new Error(message);
+      err.status = res.status;
       throw err;
     }
-    if (!res.ok) throw new Error("Could not load the roster");
-    return res.json();
+    if (!Array.isArray(data)) {
+      const err = new Error("Roster response was not a list");
+      err.status = res.status;
+      throw err;
+    }
+    return data;
   }
 
   async function playerActions() {
