@@ -12,22 +12,42 @@ const GUIDE = "players_guide.html";
 const LINK = '<a class="nav-guide" href="players_guide.html">Guide</a>';
 const ACTIVE_LINK = '<a class="nav-guide active" href="players_guide.html" aria-current="page">Guide</a>';
 
+const APP_URL = "https://hh-map-campaign-alpha.onrender.com/";
 const WORDING = [
   "Winter 2026/27 Heresy Escalation Campaign: Player's Guide",
-  "Length: 3 months (Dec 2026 to Feb 2027), then we'll check in on how it's going.",
-  "Dec: 500\u2013750 pts",
-  "Jan: 1000\u20131500 pts",
-  "Feb: 2000\u20133000 pts",
+  "Campaign app:",
+  APP_URL,
+  "Length:",
+  "3 months (Dec 2026 to Feb 2027), then we'll check in on how it's going.",
+  "Game size",
+  "Dec:",
+  "500\u2013750 pts",
+  "Jan:",
+  "1000\u20131500 pts",
+  "Feb:",
+  "2000\u20133000 pts",
   "Agree on points and game type with your opponent ahead of time. For December I recommend Core, Relic and Zone Mortalis. Onslaught, Leviathan and Armoured Spearhead are fine too. No new army required.",
+  "Tables",
   "Book a table through the store's normal scheduling.",
   "Use the store's Heresy terrain or the Zone Mortalis/Necromunda set.",
   "Smaller games should use a 3\u2032 \u00d7 4\u2032 table so two can run side by side.",
+  "Games do not need to be played at Lost Planet to count.",
   "Log your results in the campaign app. Store staff don't track anything.",
-  "Store rules (please respect these, it's their space)",
+  "Lost Planet Store rules (please respect these, it's their space)",
   "No 3D-printed models and no pirated materials.",
-  "3D-printed Legion shoulder pads, Legion-specific weapons and head swaps are OK.",
-  "Between you, have the core rulebook and the scenario book (if needed). Each player brings the book for their army. Don't rely on New Recruit or PDFs.",
-  "Painted minis (primed/WIP at a minimum). The core of each model should be GW or a purchasable alternative (e.g. Wargames Atlantic)."
+  "Between the two players, have the core rulebook and the scenario book (if needed). Each player brings the book for their army. Don't rely on New Recruit or PDFs of books if you do not have the physical copy.",
+  "Painted minis (primed/WIP at a minimum). The core of each model should be GW or a purchasable alternative (e.g. Wargames Atlantic).",
+  "3D-printed shoulder pads, weapons and head swaps: waiting on the store's answer. My assumption is \u201cok\u201d."
+];
+const BOLD_LABELS = [
+  "Campaign app:",
+  "Length:",
+  "Game size",
+  "Dec:",
+  "Jan:",
+  "Feb:",
+  "Tables",
+  "Lost Planet Store rules (please respect these, it's their space)"
 ];
 
 function startServer() {
@@ -106,7 +126,20 @@ test("every page with the top-right nav links the player's guide beside Actions"
 
 test("the player's guide keeps the written wording and is not campaign rules", () => {
   const html = fs.readFileSync(path.join(ROOT, GUIDE), "utf8");
-  for (const line of WORDING) assert.ok(html.includes(line), "missing: " + line);
+  const main = html.slice(html.indexOf("<main>"), html.indexOf("</main>"));
+  for (const line of WORDING) assert.ok(main.includes(line), "missing: " + line);
+  for (const label of BOLD_LABELS) {
+    assert.ok(main.includes("<strong>" + label + "</strong>"), "label not bold: " + label);
+  }
+  assert.ok(
+    main.includes('<a href="' + APP_URL + '">' + APP_URL + "</a>"),
+    "campaign app URL is not a link"
+  );
+  assert.equal((main.match(/<h2>/g) || []).length, 1);
+  assert.equal(main.includes("<h2>Game size</h2>"), false);
+  assert.equal(main.includes("Legion shoulder pads"), false);
+  assert.equal(main.includes("Between you, have"), false);
+  assert.equal(main.includes("Ajale"), false);
   assert.equal(html.includes("Ajale"), false);
   const rules = fs.readFileSync(path.join(ROOT, "rules.html"), "utf8");
   const rulesBody = rules.slice(rules.indexOf("<main>"));
