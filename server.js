@@ -25,6 +25,7 @@
  *
  * Public reads (no private action notes, no real names, no contact details):
  *   GET /api/public/players|forces|systems|games|meta
+ *   GET /api/public/counts  active players, active forces, systems, battles
  *   GET /health and GET /api/health
  *
  * Signed-in roster (player or campaign_admin). Public fields plus realName and contact.
@@ -1122,6 +1123,54 @@ function publicPlayer(p) {
   };
 }
 
+// Same Active chip as the Players and Forces admin tables: status is exactly
+// "active". The campaign admin login is an account, not a player row. Inactive,
+// waitlist, retired, destroyed, removed, and eliminated rows are left out.
+function isActiveRecord(row) {
+  return !!row && row.status === "active";
+}
+
+function readCountList(name) {
+  try {
+    const data = readExistingCollection(name);
+    return Array.isArray(data) ? data : [];
+  } catch (err) {
+    console.error("Could not read " + name + " for public counts: " + (err && err.message ? err.message : err));
+    return [];
+  }
+}
+
+function publicCounts() {
+  const games = readCountList("games");
+  return {
+    players: readCountList("players").filter(isActiveRecord).length,
+    forces: readCountList("forces").filter(isActiveRecord).length,
+    systems: readCountList("systems").length,
+    battles: games.length
+  };
+}
+
+function injectDashboardCounts(html) {
+  const start = html.indexOf('<div class="stats" id="stats">');
+  if (start < 0) return html;
+  const end = html.indexOf("\n    </div>", start);
+  if (end < 0) return html;
+  const counts = publicCounts();
+  const values = {
+    "count-players": counts.players,
+    "count-systems": counts.systems,
+    "count-forces": counts.forces,
+    "count-battles": counts.battles
+  };
+  let block = html.slice(start, end);
+  for (const [id, value] of Object.entries(values)) {
+    const safe = Number.isInteger(value) && value >= 0 ? String(value) : "0";
+    const re = new RegExp('(<div class="num"[^>]*\\bid="' + id + '"[^>]*>)[^<]*(</div>)');
+    block = block.replace(re, "$1" + safe + "$2");
+  }
+  return html.slice(0, start) + block + html.slice(end);
+}
+
 // Signed-in Players page. Same fields as the public list, plus the name and
 // contact a player typed so others can arrange a game. Nothing else.
 function rosterPlayer(p) {
@@ -1452,6 +1501,13 @@ function serveStatic(req, res, pathname) {
     let html = fs.readFileSync(fp, "utf8");
     html = applySectorPlaceholders(html, readCollection("meta"));
     html = html.replaceAll("__OG_IMAGE__", origin + "/Sunset%20Heresy-ff-02.png").replaceAll("__OG_URL__", origin + pathOnly);
+    if (path.basename(fp) === "index.html") {
+      try {
+        html = injectDashboardCounts(html);
+      } catch (err) {
+        console.error("Could not fill dashboard counts: " + (err && err.message ? err.message : err));
+      }
+    }
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
       "Cache-Control": "no-store",
@@ -6000,6 +6056,9 @@ async function handlePublic(req, res, parts, method) {
   if (method !== "GET") return send(res, 405, { error: "Method not allowed" });
   const collection = parts[1];
 
+  if (collection === "counts") {
+    return send(res, 200, publicCounts());
+  }
   if (collection === "meta") {
     return send(res, 200, publicMeta(readCollection("meta")));
   }
@@ -6457,7 +6516,7 @@ function startServer() {
     console.log(`Data directory: ${DATA}`);
     console.log(`Roles: visitor (public) · player · campaign_admin`);
     console.log(`Login: POST /api/auth/login  ·  Signup: POST /api/auth/signup  ·  Me: GET /api/auth/me`);
-    console.log(`Public data: /api/public/{players|forces|systems|games|meta}`);
+    console.log(`Public data: /api/public/{counts|players|forces|systems|games|meta}`);
     console.log(`Health: /health`);
     if (feedbackWebhookUrl()) console.log("Discord feedback webhook: enabled");
     else console.log("Discord feedback webhook: off (set DISCORD_FEEDBACK_WEBHOOK to enable)");

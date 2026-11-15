@@ -817,10 +817,10 @@
 </header>
   <main>
     <div class="stats" id="stats">
-      <div class="stat"><div class="num">1</div><div class="label">Players</div></div>
-      <div class="stat"><div class="num">13</div><div class="label">Systems</div></div>
-      <div class="stat"><div class="num">1</div><div class="label">Forces</div></div>
-      <div class="stat"><div class="num" style="color:var(--traitor)">1</div><div class="label">Battles logged</div></div>
+      <div class="stat"><div class="num" id="count-players">—</div><div class="label">Players</div></div>
+      <a class="stat" href="systems.html"><div class="num" id="count-systems">—</div><div class="label">Systems</div></a>
+      <a class="stat" href="forces.html"><div class="num" id="count-forces">—</div><div class="label">Forces</div></a>
+      <a class="stat" href="games.html"><div class="num" id="count-battles" style="color:var(--traitor)">—</div><div class="label">Battles logged</div></a>
     </div>
 
     <div class="panel" id="score-panel">
@@ -1208,30 +1208,115 @@
       if (advance) advance.hidden = mustering;
     }
 
-    async function refreshDashboard() {
-      const [players, forces, games, systems, meta] = await Promise.all([
-        SH.list("players"),
-        SH.list("forces"),
-        SH.list("games"),
-        SH.list("systems"),
-        SH.getMeta()
-      ]);
-      dashboardMeta = meta || {};
-      if (window.SH && SH.applySectorChrome) SH.applySectorChrome(dashboardMeta);
-      const statCard = (href, num, label, numStyle) => {
+    function readCounts(body) {
+      if (!body || typeof body !== "object" || Array.isArray(body)) return null;
+      const counts = {};
+      for (const key of ["players", "forces", "systems", "battles"]) {
+        const n = body[key];
+        if (!Number.isInteger(n) || n < 0) return null;
+        counts[key] = n;
+      }
+      return counts;
+    }
+
+    function countsFromLists(players, forces, systems, games) {
+      const active = (rows) => (rows || []).filter((row) => row && row.status === "active").length;
+      return {
+        players: active(players),
+        forces: active(forces),
+        systems: Array.isArray(systems) ? systems.length : 0,
+        battles: Array.isArray(games) ? games.length : 0
+      };
+    }
+
+    function serverRenderedCounts() {
+      return ["count-players", "count-forces", "count-systems", "count-battles"].every((id) => {
+        const el = document.getElementById(id);
+        return el && /^\d+$/.test((el.textContent || "").trim());
+      });
+    }
+
+    function applyStats(counts) {
+      const statCard = (href, num, label, numStyle, id) => {
         const style = numStyle ? ` style="${numStyle}"` : "";
-        const inner = `<div class="num"${style}>${num}</div><div class="label">${label}</div>`;
+        const inner = `<div class="num" id="${id}"${style}>${num}</div><div class="label">${label}</div>`;
         if (!href) return `<div class="stat">${inner}</div>`;
         return `<a class="stat" href="${href}">${inner}</a>`;
       };
       const playersHref = (SH.role === "campaign_admin" || SH.role === "player") ? "player_admin.html" : "";
       document.getElementById("stats").innerHTML = [
-        statCard(playersHref, players.length, "Players"),
-        statCard("systems.html", systems.length, "Systems"),
-        statCard("forces.html", forces.length, "Forces"),
-        statCard("games.html", games.length, "Battles logged", "color:var(--traitor)")
+        statCard(playersHref, counts.players, "Players", "", "count-players"),
+        statCard("systems.html", counts.systems, "Systems", "", "count-systems"),
+        statCard("forces.html", counts.forces, "Forces", "", "count-forces"),
+        statCard("games.html", counts.battles, "Battles logged", "color:var(--traitor)", "count-battles")
       ].join("");
-      updateHero(meta, systems.length);
+      const systemsEl = document.getElementById("meta-systems");
+      if (systemsEl) systemsEl.textContent = String(counts.systems);
+    }
+
+    async function loadPublic(name) {
+      const res = await fetch("/api/public/" + name, {
+        cache: "no-store",
+        credentials: "include"
+      });
+      if (!res.ok) throw new Error("API " + res.status);
+      return res.json();
+    }
+
+    async function refreshDashboard() {
+      // Counts come from the live public tally. A failed probe must not paint the
+      // checked-in sample (1 player, 1 force, 1 battle) over numbers the server
+      // already wrote into this page.
+      let counts = null;
+      try {
+        counts = readCounts(await loadPublic("counts"));
+      } catch (_) {}
+      if (counts) applyStats(counts);
+
+      let players;
+      let forces;
+      let games;
+      let systems;
+      let meta;
+      try {
+        [players, forces, games, systems, meta] = await Promise.all([
+          loadPublic("players"),
+          loadPublic("forces"),
+          loadPublic("games"),
+          loadPublic("systems"),
+          loadPublic("meta")
+        ]);
+      } catch (_) {
+        if (SH.mode !== "server") {
+          if (counts || serverRenderedCounts()) return dashboardMeta;
+          [players, forces, games, systems, meta] = await Promise.all([
+            SH.list("players"),
+            SH.list("forces"),
+            SH.list("games"),
+            SH.list("systems"),
+            SH.getMeta()
+          ]);
+        } else {
+          try {
+            [players, forces, games, systems, meta] = await Promise.all([
+              SH.list("players"),
+              SH.list("forces"),
+              SH.list("games"),
+              SH.list("systems"),
+              SH.getMeta()
+            ]);
+          } catch (_) {
+            return dashboardMeta;
+          }
+        }
+      }
+      if (!counts) {
+        counts = countsFromLists(players, forces, systems, games);
+        applyStats(counts);
+      }
+      dashboardMeta = meta || {};
+      if (window.SH && SH.applySectorChrome) SH.applySectorChrome(dashboardMeta);
+      updateHero(meta, counts.systems);
       renderRecent(games, players, forces, systems);
       const btn = document.getElementById("btn-advance");
       if (btn) btn.textContent = advanceLabel(meta.phase);
