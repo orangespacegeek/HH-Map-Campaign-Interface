@@ -1,6 +1,7 @@
 "use strict";
 
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
@@ -459,6 +460,42 @@ test("legacy and odd player rows still load for a signed-in player", async () =>
     assert.equal(pubForces.text.includes("shield secret"), false);
     assert.equal(pubForces.text.includes("orphan secret"), false);
     assert.equal(pubForces.text.includes("hidden allies"), false);
+  } finally {
+    await ctx.stop();
+  }
+});
+
+test("served pages version js and css so a new Players page cannot run a stale api.js", async () => {
+  const ctx = startServer();
+  try {
+    await ctx.ready;
+    const page = await fetch(ctx.base + "/player_admin.html");
+    assert.equal(page.status, 200);
+    assert.match(page.headers.get("cache-control") || "", /no-store/);
+    assert.doesNotMatch(page.headers.get("cache-control") || "", /max-age/);
+    const html = await page.text();
+    const script = html.match(/src="js\/api\.js\?v=([0-9a-f]{12})"/);
+    const css = html.match(/href="css\/site-nav\.css\?v=([0-9a-f]{12})"/);
+    assert.ok(script, html.slice(html.indexOf("js/api.js") - 20, html.indexOf("js/api.js") + 40));
+    assert.ok(css);
+    const expected = crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT, "js", "api.js"))).digest("hex").slice(0, 12);
+    assert.equal(script[1], expected);
+
+    const versioned = await fetch(ctx.base + "/js/api.js?v=" + script[1]);
+    assert.equal(versioned.status, 200);
+    assert.match(versioned.headers.get("cache-control") || "", /immutable/);
+    const source = await versioned.text();
+    assert.match(source, /async function roster\(/);
+
+    const bare = await fetch(ctx.base + "/js/api.js");
+    assert.equal(bare.status, 200);
+    assert.match(bare.headers.get("cache-control") || "", /must-revalidate/);
+    assert.match(bare.headers.get("cache-control") || "", /max-age=0/);
+
+    const map = await fetch(ctx.base + "/campaign_map.html");
+    const mapHtml = await map.text();
+    assert.match(mapHtml, /src="js\/map\.js\?v=[0-9a-f]{12}"/);
+    assert.match(mapHtml, /src="js\/api\.js\?v=[0-9a-f]{12}"/);
   } finally {
     await ctx.stop();
   }
