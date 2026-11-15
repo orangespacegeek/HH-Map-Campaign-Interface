@@ -8,6 +8,8 @@ Before the first campaign turn, players join, choose Loyalist or Traitor, name t
 
 The campaign can post to a Discord channel when a phase starts, when the campaign admin adds a battle, and once in the 24 hours before a phase deadline. In the Battles phase those posts list the battles and can @mention a player who has saved a Discord user ID. That ID is optional. Only that player and the campaign admin can see it. (added as part of web app build)
 
+Signed-in campaign players can see each other's real names and contact info on the Players page to arrange games. (added as part of web app build)
+
 A player gets 2 Actions per Campaign Turn
 
 Turn order - Logistics &gt; Movement &gt; Battles

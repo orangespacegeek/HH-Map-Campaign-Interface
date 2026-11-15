@@ -22,7 +22,8 @@ const PRIVATE_KEYS = [
   "invite_code",
   "signup_invite",
   "discord_user_id",
-  "token"
+  "token",
+  "realName"
 ];
 
 function startServer() {
@@ -295,7 +296,8 @@ test("the dashboard source no longer bakes in the sample campaign counts", () =>
   assert.match(html, /loadPublic\("counts"\)/);
   assert.match(html, /\/api\/public\/" \+ name/);
   assert.match(html, /cache:\s*"no-store"/);
-  assert.match(html, /SH\.role === "campaign_admin" \? "player_admin\.html"/);
+  assert.match(html, /data-role="logged-in"/);
+  assert.match(html, /SH\.role === "campaign_admin" \|\| SH\.role === "player"\) \? "player_admin\.html"/);
   const server = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
   assert.match(server, /function publicCounts\(/);
   assert.match(server, /row\.status === "active"/);

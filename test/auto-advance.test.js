@@ -479,7 +479,7 @@ test("the dashboard links stat cards and explains the deadline without auto-void
   assert.match(html, /Auto-advance when all players are done/);
   assert.match(html, /Open battles are not voided/);
   assert.doesNotMatch(html, /Setting a deadline does not advance the phase/);
-  assert.match(html, /SH\.role === "campaign_admin" \? "player_admin\.html"/);
+  assert.match(html, /SH\.role === "campaign_admin" \|\| SH\.role === "player"\) \? "player_admin\.html"/);
   const server = fs.readFileSync(path.join(ROOT, "server.js"), "utf8");
   assert.match(server, /force: false/);
   assert.match(server, /auto_advance_when_done !== false/);
