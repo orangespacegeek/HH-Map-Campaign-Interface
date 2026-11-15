@@ -23,9 +23,13 @@
  *   POST /api/auth/signup         { invite_code, login, password, player_name, display_name, ... }
  *   Login and signup are rate-limited per IP (see AUTH_MAX_ATTEMPTS).
  *
- * Public reads (no private action notes, no contact details):
+ * Public reads (no private action notes, no real names, no contact details):
  *   GET /api/public/players|forces|systems|games|meta
  *   GET /health and GET /api/health
+ *
+ * Signed-in roster (player or campaign_admin). Public fields plus realName and contact.
+ * Notes, Discord user IDs, invites, passwords, and sessions stay off this route:
+ *   GET /api/roster
  *
  * Protected writes use session cookie or Authorization: Bearer <token>.
  * Cookie-authenticated writes must come from the same origin (or CORS_ORIGINS)
@@ -1117,6 +1121,26 @@ function publicPlayer(p) {
     status: p.status,
     start_sys_id: p.start_sys_id || null
   };
+}
+
+// Signed-in Players page. Same fields as the public list, plus the name and
+// contact a player typed so others can arrange a game. Nothing else.
+function rosterPlayer(p) {
+  const name = p.player_name == null ? "" : String(p.player_name).trim();
+  const contact = p.contact == null ? "" : String(p.contact).trim();
+  return {
+    ...publicPlayer(p),
+    realName: name || null,
+    contact: contact || null
+  };
+}
+
+function handleRoster(req, res, method) {
+  if (method !== "GET") return send(res, 405, { error: "Method not allowed" });
+  const auth = getSession(req);
+  const gate = requireRole(auth, ["player", "campaign_admin"]);
+  if (!gate.ok) return send(res, gate.status, { error: gate.error });
+  return send(res, 200, readCollection("players").map(rosterPlayer));
 }
 
 // Roster fields are shared. Notes and allies are the owner's private list text.
@@ -6044,8 +6068,10 @@ async function handleApi(req, res, pathname) {
     return handleBackupRestore(req, res);
   }
 
-  // Public sanitized routes
+  // Public sanitized routes. Real names and contact stay off these.
   if (parts[0] === "public") return handlePublic(req, res, parts, method);
+
+  if (parts[0] === "roster" && parts.length === 1) return handleRoster(req, res, method);
 
   const collection = parts[0];
   const idPart = parts[1];

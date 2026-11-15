@@ -807,7 +807,7 @@
   <nav class="site-nav" id="site-menu">
     <a href="index.html" class="active">Dashboard</a>
     <a href="campaign_map.html">Map</a>
-    <a href="player_admin.html" data-role="campaign_admin">Players</a>
+    <a href="player_admin.html" data-role="logged-in">Players</a>
     <a href="forces.html">Forces</a>
     <a href="systems.html">Systems</a>
     <a href="games.html">Battles</a>
@@ -1225,7 +1225,7 @@
         if (!href) return `<div class="stat">${inner}</div>`;
         return `<a class="stat" href="${href}">${inner}</a>`;
       };
-      const playersHref = SH.role === "campaign_admin" ? "player_admin.html" : "";
+      const playersHref = (SH.role === "campaign_admin" || SH.role === "player") ? "player_admin.html" : "";
       document.getElementById("stats").innerHTML = [
         statCard(playersHref, players.length, "Players"),
         statCard("systems.html", systems.length, "Systems"),
