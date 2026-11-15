@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0e0e18" />
+  <meta name="description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
+  <link rel="icon" href="Sunset%20Heresy-ff-02.png" type="image/png" />
+  <link rel="apple-touch-icon" href="Sunset%20Heresy-ff-02.png" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="Sunset Heresy" />
+  <meta property="og:title" content="Sunset Heresy – Player's Guide" />
+  <meta property="og:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
+  <meta property="og:image" content="__OG_IMAGE__" />
+  <meta property="og:url" content="__OG_URL__" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Sunset Heresy – Player's Guide" />
+  <meta name="twitter:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
+  <meta name="twitter:image" content="__OG_IMAGE__" />
+  <title>Sunset Heresy – Player's Guide</title>
+  <style>
+    :root {
+      --bg: #0a0a12; --panel: #12121e; --panel-2: #1a1a28; --border: #3a3a55;
+      --text: #e8e0c8; --muted: #9a9080; --accent: #f0c040;
+      --safe-bottom: env(safe-area-inset-bottom, 0px);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+    body { display: flex; flex-direction: column; min-height: 100vh; }
+
+    .site-header { flex-shrink: 0; background: #0e0e18; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; }
+    .site-header-inner { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.85rem; max-width: 800px; margin: 0 auto; }
+    .site-header img { height: 36px; width: auto; }
+    .site-header .titles { flex: 1; min-width: 0; }
+    .site-header h1 { font-size: 1.05rem; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; line-height: 1.2; }
+    .site-header .sub { font-size: 0.7rem; color: var(--muted); }
+    .site-nav { display: flex; gap: 0.15rem; overflow-x: auto; padding: 0 0.5rem 0.45rem; max-width: 800px; margin: 0 auto; scrollbar-width: none; }
+    .site-nav::-webkit-scrollbar { display: none; }
+    .site-nav a { flex-shrink: 0; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; white-space: nowrap; }
+    .site-nav a:hover { color: var(--text); background: var(--panel-2); }
+    .site-nav a.active { color: var(--accent); background: rgba(240, 192, 64, 0.12); }
+
+    main {
+      flex: 1;
+      padding: 1.25rem 1rem calc(2rem + var(--safe-bottom));
+      max-width: 800px;
+      width: 100%;
+      margin: 0 auto;
+      line-height: 1.55;
+    }
+    main h2 {
+      font-size: 1.15rem;
+      color: var(--accent);
+      margin: 1.5rem 0 0.6rem;
+      padding-bottom: 0.35rem;
+      border-bottom: 1px solid var(--border);
+    }
+    main h2:first-child { margin-top: 0; }
+    main p, main li { font-size: 0.92rem; color: var(--text); margin-bottom: 0.5rem; }
+    main ul { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    main li { margin-bottom: 0.3rem; }
+  </style>
+  <link rel="stylesheet" href="css/site-nav.css" />
+</head>
+<body>
+  <header class="site-header">
+  <div class="site-header-inner">
+    <button type="button" class="nav-toggle" aria-expanded="false" aria-controls="site-menu" aria-label="Open menu">
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+      <span class="nav-toggle-bar"></span>
+    </button>
+    <a class="brand" href="index.html">
+      <img src="Sunset Heresy-ff-02.png" alt="" width="36" height="36" />
+      <span class="titles">
+        <span class="brand-kicker">Sunset Heresy</span>
+        <h1>Guide</h1>
+        <span class="sub" id="header-sub">Winter 2026/27</span>
+      </span>
+    </a>
+    <div class="header-end">
+      <a class="nav-guide active" href="players_guide.html" aria-current="page">Guide</a>
+      <a id="nav-waiting" href="actions.html" hidden>Actions</a>
+      <span id="nav-auth"><a class="nav-login" href="login.html">Log in</a></span>
+    </div>
+  </div>
+  <nav class="site-nav" id="site-menu">
+    <a href="index.html">Dashboard</a>
+    <a href="campaign_map.html">Map</a>
+    <a href="player_admin.html" data-role="logged-in">Players</a>
+    <a href="forces.html">Forces</a>
+    <a href="systems.html">Systems</a>
+    <a href="games.html">Battles</a>
+    <a href="rules.html">Rules</a>
+    <button type="button" id="nav-logout" hidden>Log out</button>
+    <div id="mode-slot" class="mode-slot"></div>
+  </nav>
+</header>
+  <script src="js/api.js"></script>
+  <script>SH.applyNavPermissions();</script>
+
+  <main>
+    <h2>Winter 2026/27 Heresy Escalation Campaign: Player's Guide</h2>
+    <p>Length: 3 months (Dec 2026 to Feb 2027), then we'll check in on how it's going.</p>
+
+    <h2>Game size</h2>
+    <ul>
+      <li>Dec: 500–750 pts</li>
+      <li>Jan: 1000–1500 pts</li>
+      <li>Feb: 2000–3000 pts</li>
+    </ul>
+    <p>Agree on points and game type with your opponent ahead of time. For December I recommend Core, Relic and Zone Mortalis. Onslaught, Leviathan and Armoured Spearhead are fine too. No new army required.</p>
+
+    <h2>Tables</h2>
+    <ul>
+      <li>Book a table through the store's normal scheduling.</li>
+      <li>Use the store's Heresy terrain or the Zone Mortalis/Necromunda set.</li>
+      <li>Smaller games should use a 3′ × 4′ table so two can run side by side.</li>
+      <li>Log your results in the campaign app. Store staff don't track anything.</li>
+    </ul>
+
+    <h2>Store rules (please respect these, it's their space)</h2>
+    <ul>
+      <li>No 3D-printed models and no pirated materials.</li>
+      <li>3D-printed Legion shoulder pads, Legion-specific weapons and head swaps are OK.</li>
+      <li>Between you, have the core rulebook and the scenario book (if needed). Each player brings the book for their army. Don't rely on New Recruit or PDFs.</li>
+      <li>Painted minis (primed/WIP at a minimum). The core of each model should be GW or a purchasable alternative (e.g. Wargames Atlantic).</li>
+    </ul>
+  </main>
+</body>
+</html>
