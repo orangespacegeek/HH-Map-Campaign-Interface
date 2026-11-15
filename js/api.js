@@ -918,6 +918,33 @@
     return data;
   }
 
+  async function roster() {
+    await probe();
+    if (mode !== "server") {
+      return localRead("players").map((player) => ({
+        player_id: player.player_id,
+        display_name: player.display_name || "Unknown commander",
+        realName: player.player_name ? String(player.player_name) : null,
+        contact: player.contact ? String(player.contact) : null,
+        allegiance: player.allegiance,
+        status: player.status,
+        start_sys_id: player.start_sys_id || null
+      }));
+    }
+    const res = await fetch(apiBase() + "/api/roster", {
+      headers: authHeaders(),
+      credentials: "include",
+      cache: "no-store"
+    });
+    if (res.status === 401) {
+      const err = new Error("Login required");
+      err.status = 401;
+      throw err;
+    }
+    if (!res.ok) throw new Error("Could not load the roster");
+    return res.json();
+  }
+
   async function playerActions() {
     await probe();
     if (mode !== "server") throw new Error("Player actions need the campaign server");
@@ -1204,6 +1231,7 @@
     setMusterAutoAdvance,
     sendDiscordTest,
     actionsStatus,
+    roster,
     playerActions,
     doAction,
     moveForce: (forceId, destSysId, extra) =>

@@ -116,7 +116,7 @@ test("a signed-in player can read the roster without private fields", async () =
     const login = await api(ctx, null, "POST", "/api/auth/login", { login: "admin", password: ADMIN_PW });
     assert.equal(login.status, 200, JSON.stringify(login.json));
     const admin = login.json.token;
-    const issued = await api(ctx, admin, "POST", "/api/auth/invites", { note: "roster", max_uses: 2 });
+    const issued = await api(ctx, admin, "POST", "/api/auth/invites", { note: "roster", max_uses: 3 });
     assert.equal(issued.status, 201, JSON.stringify(issued.json));
     const code = issued.json.invite.code;
 
@@ -137,7 +137,8 @@ test("a signed-in player can read the roster without private fields", async () =
     }
 
     const loyal = await signup("roster_loyal", "Table Loyal", "Loyalist", "loyal.secret@example.invalid");
-    const traitor = await signup("roster_traitor", "Table Traitor", "Traitor", "traitor.secret@example.invalid");
+    const traitor = await signup("roster_traitor", "Table Traitor", "Traitor", "discord:warsmith#1234");
+    const quiet = await signup("roster_quiet", "Table Quiet", "Loyalist", "");
     const discord = await api(ctx, traitor.token, "PUT", "/api/players/" + traitor.player_id, {
       discord_user_id: "123456789012345678"
     });
@@ -165,7 +166,7 @@ test("a signed-in player can read the roster without private fields", async () =
     assert.equal(other.allegiance, "Traitor");
     assertNoPrivatePlayerFields(other);
     assert.equal(self.contact, "loyal.secret@example.invalid");
-    assert.equal(list.text.includes("traitor.secret@example.invalid"), false);
+    assert.equal(list.text.includes("warsmith#1234"), false);
     assert.equal(list.text.includes("Real roster_traitor"), false);
     assert.equal(list.text.includes("traitor private notes"), false);
     assert.equal(list.text.includes("123456789012345678"), false);
@@ -191,6 +192,48 @@ test("a signed-in player can read the roster without private fields", async () =
     assert.equal(pub.text.includes("private notes"), false);
     assert.equal(pub.text.includes("123456789012345678"), false);
     assert.equal(pub.text.includes("pass_hash"), false);
+    assert.equal(pub.text.includes("warsmith#1234"), false);
+    assert.equal(pub.text.includes("realName"), false);
+
+    const anon = await api(ctx, null, "GET", "/api/roster");
+    assert.equal(anon.status, 401);
+    assert.equal(anon.text.includes("Real roster_"), false);
+    assert.equal(anon.text.includes("loyal.secret@"), false);
+    assert.equal(anon.text.includes("warsmith#1234"), false);
+    assert.equal(anon.text.includes("123456789012345678"), false);
+    assert.equal((await api(ctx, null, "POST", "/api/roster", {})).status, 405);
+
+    const roster = await api(ctx, loyal.token, "GET", "/api/roster");
+    assert.equal(roster.status, 200);
+    const rosterKeys = ["allegiance", "contact", "display_name", "player_id", "realName", "start_sys_id", "status"];
+    const rosterOther = roster.json.find((player) => Number(player.player_id) === Number(traitor.player_id));
+    const rosterSelf = roster.json.find((player) => Number(player.player_id) === Number(loyal.player_id));
+    const rosterQuiet = roster.json.find((player) => Number(player.player_id) === Number(quiet.player_id));
+    assert.equal(rosterOther.display_name, "Table Traitor");
+    assert.equal(rosterOther.realName, "Real roster_traitor");
+    assert.equal(rosterOther.contact, "discord:warsmith#1234");
+    assert.equal(rosterOther.allegiance, "Traitor");
+    assert.deepEqual(Object.keys(rosterOther).sort(), rosterKeys);
+    assert.equal(rosterSelf.realName, "Real roster_loyal");
+    assert.equal(rosterSelf.contact, "loyal.secret@example.invalid");
+    assert.equal(rosterQuiet.realName, "Real roster_quiet");
+    assert.equal(rosterQuiet.contact, null);
+    assert.equal(roster.text.includes("roster_traitor private notes"), false);
+    assert.equal(roster.text.includes("123456789012345678"), false);
+    assert.equal(roster.text.includes(code.replace(/-/g, "")), false);
+    assert.equal(roster.text.includes("pass_hash"), false);
+    assert.equal(roster.text.includes("discord_user_id"), false);
+    assert.equal(rosterOther.notes, undefined);
+    assert.equal(rosterOther.player_name, undefined);
+    assert.equal(rosterOther.discord_user_id, undefined);
+
+    const adminRoster = await api(ctx, admin, "GET", "/api/roster");
+    assert.equal(adminRoster.status, 200);
+    const adminRosterOther = adminRoster.json.find((player) => Number(player.player_id) === Number(traitor.player_id));
+    assert.equal(adminRosterOther.realName, "Real roster_traitor");
+    assert.equal(adminRosterOther.contact, "discord:warsmith#1234");
+    assert.equal(adminRoster.text.includes("private notes"), false);
+    assert.equal(adminRoster.text.includes("123456789012345678"), false);
 
     const pubForces = await api(ctx, loyal.token, "GET", "/api/public/forces");
     assert.equal(pubForces.status, 200);
@@ -224,7 +267,7 @@ test("a signed-in player can read the roster without private fields", async () =
     const adminList = await api(ctx, admin, "GET", "/api/players");
     const adminOther = adminList.json.find((player) => Number(player.player_id) === Number(traitor.player_id));
     assert.equal(adminOther.player_name, "Real roster_traitor");
-    assert.equal(adminOther.contact, "traitor.secret@example.invalid");
+    assert.equal(adminOther.contact, "discord:warsmith#1234");
     assert.equal(adminOther.notes, "roster_traitor private notes");
     assert.equal(adminOther.discord_user_id, "123456789012345678");
     const adminForce = (await api(ctx, admin, "GET", "/api/forces/" + traitorForce.force_id)).json;
@@ -250,7 +293,7 @@ test("the players tab is for signed-in players and the page keeps admin tools se
   const adminAt = page.indexOf('id="admin-body"');
   assert.ok(rosterAt > 0 && adminAt > rosterAt);
   const roster = page.slice(rosterAt, adminAt);
-  assert.match(roster, /Display names, sides, and forces/);
+  assert.match(roster, /arrange games/);
   assert.match(roster, /id="roster-list"/);
   assert.doesNotMatch(roster, /data-edit|invite-code|Generate code|id="btn-add"|id="f-contact"|id="btn-delete"/);
 
@@ -262,15 +305,38 @@ test("the players tab is for signed-in players and the page keeps admin tools se
 
   const shape = sliceFunction(page, "asRoster");
   assert.match(shape, /display_name/);
+  assert.match(shape, /realName/);
+  assert.match(shape, /contact/);
   assert.match(shape, /allegiance/);
   assert.match(shape, /legion/);
   assert.match(shape, /force_name/);
-  assert.doesNotMatch(shape, /player_name|contact|notes|discord|allies|invite|password|pass_hash/);
+  assert.doesNotMatch(shape, /player_name|notes|discord_user_id|allies|invite|password|pass_hash/);
+
+  const contact = sliceFunction(page, "contactHtml");
+  assert.match(contact, /mailto:/);
+  assert.match(contact, /data-copy-contact/);
+  assert.match(contact, /No contact shared/);
 
   const load = sliceFunction(page, "loadRoster");
-  assert.match(load, /loadPublicList\("players"\)/);
+  assert.match(load, /SH\.roster\(\)/);
   assert.match(load, /loadPublicList\("forces"\)/);
+  assert.doesNotMatch(load, /loadPublicList\("players"\)/);
   assert.doesNotMatch(load, /listInvites|passwordStatus|SH\.list\("players"\)/);
+
+  const rulesMd = fs.readFileSync(path.join(ROOT, "campaign_rules.md"), "utf8");
+  const rulesHtml = fs.readFileSync(path.join(ROOT, "rules.html"), "utf8");
+  const rule = "Signed-in campaign players can see each other's real names and contact info on the Players page to arrange games.";
+  const ruleRe = new RegExp(rule.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  assert.match(rulesMd, new RegExp(ruleRe.source + " \\(added as part of web app build\\)"));
+  assert.match(rulesHtml, ruleRe);
+  assert.doesNotMatch(rulesHtml, /added as part of web app build/);
+  const login = fs.readFileSync(path.join(ROOT, "login.html"), "utf8");
+  const account = fs.readFileSync(path.join(ROOT, "account.html"), "utf8");
+  assert.match(login, /Other signed-in players can see it on the Players page/);
+  assert.match(login, /Other signed-in players can see this on the Players page to arrange games/);
+  assert.match(account, /Other signed-in players can see this on the Players page so they can arrange games/);
+  const api = fs.readFileSync(path.join(ROOT, "js", "api.js"), "utf8");
+  assert.match(api, /\/api\/roster/);
 
   assert.match(page, /if \(SH\.role === "player"\)/);
   assert.match(page, /roster\.hidden = false/);

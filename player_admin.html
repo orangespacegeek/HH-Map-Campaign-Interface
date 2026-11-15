@@ -376,6 +376,41 @@
       text-transform: uppercase;
       margin-left: 0.35rem;
     }
+    .roster-kicker {
+      display: block;
+      color: var(--muted);
+      font-size: 0.68rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      margin-bottom: 0.1rem;
+    }
+    .roster-real,
+    .roster-contact,
+    .roster-missing {
+      margin-top: 0.45rem;
+      font-size: 0.92rem;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .roster-missing { color: var(--muted); }
+    .roster-contact .roster-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.35rem 0.6rem;
+    }
+    .roster-contact a {
+      color: var(--accent);
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      overflow-wrap: anywhere;
+    }
+    .roster-copy {
+      min-height: 44px;
+      padding: 0 0.85rem;
+    }
     .roster-forces {
       list-style: none;
       margin: 0.7rem 0 0;
@@ -768,7 +803,7 @@
       <p><a href="login.html" style="color:var(--accent)">Log in</a></p>
     </div>
     <div id="player-roster" hidden>
-      <p class="roster-lead">Display names, sides, and forces. Real names, contact details, and invites stay with the campaign admin.</p>
+      <p class="roster-lead">Real names and contact are here so signed-in players can arrange games. They are not on the public map.</p>
       <div class="stats" id="roster-stats"></div>
       <div class="toolbar">
         <input type="search" class="search" id="roster-search" placeholder="Search player, force, or legion…" />
@@ -1591,12 +1626,14 @@
       return "needs-side";
     }
 
-    // The roster only keeps fields the rest of the site already shows.
-    // Real names, contact, notes, Discord ids, and force notes/allies stay off this page.
+    // Signed-in roster fields only. Notes, Discord user IDs, and invites are dropped
+    // even if a response includes them.
     function asRoster(playerRows, forceRows) {
       rosterPlayers = (playerRows || []).map((player) => ({
         player_id: player.player_id,
         display_name: player.display_name || "Unknown commander",
+        realName: player.realName ? String(player.realName) : "",
+        contact: player.contact ? String(player.contact) : "",
         allegiance: player.allegiance,
         status: player.status || "active"
       }));
@@ -1651,6 +1688,8 @@
         const q = rosterQuery.toLowerCase();
         list = list.filter((player) => {
           if ((player.display_name || "").toLowerCase().includes(q)) return true;
+          if ((player.realName || "").toLowerCase().includes(q)) return true;
+          if ((player.contact || "").toLowerCase().includes(q)) return true;
           return rosterForcesFor(player.player_id).some((force) =>
             (force.force_name || "").toLowerCase().includes(q) ||
             (force.legion || "").toLowerCase().includes(q) ||
@@ -1700,17 +1739,52 @@
         const status = player.status && player.status !== "active"
           ? ` <span class="badge ${escapeHtml(player.status)}">${escapeHtml(player.status)}</span>`
           : "";
+        const real = player.realName
+          ? `<p class="roster-real"><span class="roster-kicker">Name</span>${escapeHtml(player.realName)}</p>`
+          : "";
         const card = document.createElement("article");
         card.className = "roster-card";
         card.innerHTML = `
           <div class="roster-head">
-            <h2>${escapeHtml(player.display_name)}${youMark}${status}</h2>
+            <div>
+              <h2>${escapeHtml(player.display_name)}${youMark}${status}</h2>
+              ${real}
+            </div>
             <span class="badge ${rosterSideClass(player)}">${escapeHtml(rosterSide(player))}</span>
           </div>
+          ${contactHtml(player.contact)}
           ${forcesHtml}
         `;
         host.appendChild(card);
       });
+    }
+
+    function contactHtml(contact) {
+      const value = contact == null ? "" : String(contact).trim();
+      if (!value) return `<p class="roster-missing"><span class="roster-kicker">Contact</span>No contact shared</p>`;
+      const emailRe = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+      const emails = value.match(emailRe) || [];
+      const onlyEmail = emails.length === 1 && emails[0] === value;
+      if (onlyEmail) {
+        return `<p class="roster-contact"><span class="roster-kicker">Contact</span><a href="mailto:${escapeHtml(value)}">${escapeHtml(value)}</a></p>`;
+      }
+      let body = "";
+      if (emails.length) {
+        let last = 0;
+        let match;
+        const bits = [];
+        const re = /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g;
+        while ((match = re.exec(value))) {
+          bits.push(escapeHtml(value.slice(last, match.index)));
+          bits.push(`<a href="mailto:${escapeHtml(match[0])}">${escapeHtml(match[0])}</a>`);
+          last = match.index + match[0].length;
+        }
+        bits.push(escapeHtml(value.slice(last)));
+        body = bits.join("");
+      } else {
+        body = `<span class="roster-handle">${escapeHtml(value)}</span>`;
+      }
+      return `<div class="roster-contact"><span class="roster-kicker">Contact</span><div class="roster-actions">${body}<button type="button" class="roster-copy" data-copy-contact="${escapeHtml(value)}">Copy</button></div></div>`;
     }
 
     async function loadPublicList(name) {
@@ -1720,14 +1794,36 @@
     }
 
     async function loadRoster() {
-      const [playerRows, forceRows] = await Promise.all([
-        loadPublicList("players"),
+      let playerRows;
+      try {
+        playerRows = await SH.roster();
+      } catch (err) {
+        if (err && err.status === 401) {
+          document.getElementById("player-roster").hidden = true;
+          document.getElementById("access-denied").hidden = false;
+          return;
+        }
+        throw err;
+      }
+      const [forceRows] = await Promise.all([
         loadPublicList("forces"),
         loadSystems()
       ]);
       asRoster(playerRows, forceRows);
       renderRoster();
     }
+
+    document.getElementById("roster-list").addEventListener("click", async (e) => {
+      const btn = e.target.closest("[data-copy-contact]");
+      if (!btn) return;
+      const text = btn.getAttribute("data-copy-contact") || "";
+      try {
+        await navigator.clipboard.writeText(text);
+        showToast("Contact copied");
+      } catch (_) {
+        showToast(text);
+      }
+    });
 
     document.getElementById("roster-search").addEventListener("input", (e) => {
       rosterQuery = e.target.value.trim();
