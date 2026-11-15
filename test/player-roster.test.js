@@ -58,6 +58,7 @@ function startServer() {
     });
   });
   return {
+    dataDir,
     base: "http://127.0.0.1:" + port,
     ready,
     stop() {
@@ -338,10 +339,127 @@ test("the players tab is for signed-in players and the page keeps admin tools se
   const api = fs.readFileSync(path.join(ROOT, "js", "api.js"), "utf8");
   assert.match(api, /\/api\/roster/);
 
-  assert.match(page, /if \(SH\.role === "player"\)/);
+  assert.match(page, /String\(SH\.role \|\| ""\)\.trim\(\)\.toLowerCase\(\) === "player"/);
+  assert.match(page, /function compareNames/);
+  assert.doesNotMatch(page, /localeCompare\([^)]*undefined/);
+  assert.match(page, /Players page failed/);
+  assert.match(page, /rosterErrorText\(err\)/);
+  assert.doesNotMatch(page, /showToast\("Could not load players"\)/);
+
+  const compareSrc = page.slice(page.indexOf("function compareNames"), page.indexOf("function rosterText"));
+  const compareNames = new Function(compareSrc + "\nreturn compareNames;")();
+  const original = String.prototype.localeCompare;
+  String.prototype.localeCompare = function () {
+    throw new RangeError("Incorrect locale information provided");
+  };
+  try {
+    assert.equal(typeof compareNames("Bravo", "alpha"), "number");
+    assert.ok(compareNames("Alpha", "Bravo") < 0);
+    assert.equal(compareNames("same", "same"), 0);
+  } finally {
+    String.prototype.localeCompare = original;
+  }
   assert.match(page, /roster\.hidden = false/);
   assert.match(page, /await loadRoster\(\)/);
   assert.match(page, /if \(SH\.canEditPlayers\(\)\)/);
   assert.match(page, /adminBody\.hidden = false/);
   assert.match(page, /await reload\(\)/);
+});
+
+test("legacy and odd player rows still load for a signed-in player", async () => {
+  const ctx = startServer();
+  try {
+    await ctx.ready;
+    const login = await api(ctx, null, "POST", "/api/auth/login", { login: "admin", password: ADMIN_PW });
+    assert.equal(login.status, 200, login.text);
+    const admin = login.json.token;
+    const issued = await api(ctx, admin, "POST", "/api/auth/invites", { max_uses: 1 });
+    assert.equal(issued.status, 201, issued.text);
+    const signed = await api(ctx, null, "POST", "/api/auth/signup", {
+      invite_code: issued.json.invite.code,
+      login: "legacy_player",
+      password: "botpass-xyz",
+      player_name: "Real Legacy",
+      display_name: "Table Legacy",
+      allegiance: "Loyalist",
+      contact: "legacy@example.invalid",
+      notes: "legacy private notes"
+    });
+    assert.equal(signed.status, 201, signed.text);
+
+    const playersPath = path.join(ctx.dataDir, "players.json");
+    const forcesPath = path.join(ctx.dataDir, "forces.json");
+    const accountsPath = path.join(ctx.dataDir, "accounts.json");
+    const players = JSON.parse(fs.readFileSync(playersPath, "utf8"));
+    const forces = JSON.parse(fs.readFileSync(forcesPath, "utf8"));
+    players.push(
+      { player_id: 80, player_name: "Legacy Only", allegiance: "Blackshield", status: "active", role: "player", notes: "do not share", discord_user_id: "123456789012345678" },
+      { player_id: 81, allegiance: null, status: null, contact: null, player_name: null, display_name: null },
+      { player_id: 82, player_name: "No Forces", display_name: "Unraised", allegiance: "Traitor", status: "waitlist", contact: "discord:quiet#1" },
+      { player_id: 83, player_name: { unexpected: true }, display_name: ["Array", "Name"], allegiance: "Loyalist", status: "inactive", contact: 44100 },
+      null
+    );
+    forces.push(
+      { force_id: 900, player_id: null, force_name: null, allegiance: null, sys_id: null, status: null, notes: "orphan secret", allies: "hidden allies" },
+      { force_id: 901, player_id: 80, force_name: "Old Shield", legion: null, allegiance: "Blackshield", sys_id: 99999, status: "active", notes: "shield secret" },
+      null
+    );
+    fs.writeFileSync(playersPath, JSON.stringify(players, null, 2));
+    fs.writeFileSync(forcesPath, JSON.stringify(forces, null, 2));
+    const accounts = JSON.parse(fs.readFileSync(accountsPath, "utf8"));
+    const mine = accounts.find((account) => account.login === "legacy_player");
+    assert.ok(mine);
+    mine.role = "Player";
+    fs.writeFileSync(accountsPath, JSON.stringify(accounts, null, 2));
+
+    const anon = await api(ctx, null, "GET", "/api/roster");
+    assert.equal(anon.status, 401);
+    assert.equal(anon.json.error, "Login required");
+    assert.equal(anon.text.includes("Real Legacy"), false);
+    assert.equal(anon.text.includes("legacy@example.invalid"), false);
+
+    const roster = await api(ctx, signed.json.token, "GET", "/api/roster");
+    assert.equal(roster.status, 200, roster.text);
+    const keys = ["allegiance", "contact", "display_name", "player_id", "realName", "start_sys_id", "status"];
+    roster.json.forEach((row) => assert.deepEqual(Object.keys(row).sort(), keys));
+    const self = roster.json.find((row) => row.display_name === "Table Legacy");
+    const legacy = roster.json.find((row) => row.realName === "Legacy Only");
+    const blank = roster.json.find((row) => Number(row.player_id) === 81);
+    const quiet = roster.json.find((row) => row.display_name === "Unraised");
+    const odd = roster.json.find((row) => Number(row.player_id) === 83);
+    assert.ok(self && legacy && blank && quiet && odd);
+    assert.equal(self.realName, "Real Legacy");
+    assert.equal(self.contact, "legacy@example.invalid");
+    assert.equal(legacy.display_name, "Unknown commander");
+    assert.equal(legacy.allegiance, "Blackshield");
+    assert.equal(legacy.contact, null);
+    assert.equal(blank.realName, null);
+    assert.equal(blank.contact, null);
+    assert.equal(blank.display_name, "Unknown commander");
+    assert.equal(quiet.contact, "discord:quiet#1");
+    assert.equal(quiet.status, "waitlist");
+    assert.equal(odd.realName, null);
+    assert.equal(odd.display_name, "Unknown commander");
+    assert.equal(odd.contact, "44100");
+    assert.equal(roster.json.some((row) => row == null), false);
+    assert.equal(roster.text.includes("legacy private notes"), false);
+    assert.equal(roster.text.includes("do not share"), false);
+    assert.equal(roster.text.includes("123456789012345678"), false);
+    assert.equal(roster.text.includes("pass_hash"), false);
+    assert.equal(roster.text.includes(issued.json.invite.code.replace(/-/g, "")), false);
+
+    const pubPlayers = await api(ctx, null, "GET", "/api/public/players");
+    const pubForces = await api(ctx, null, "GET", "/api/public/forces");
+    assert.equal(pubPlayers.status, 200, pubPlayers.text);
+    assert.equal(pubForces.status, 200, pubForces.text);
+    assert.equal(pubPlayers.text.includes("Real Legacy"), false);
+    assert.equal(pubPlayers.text.includes("legacy@example.invalid"), false);
+    assert.equal(pubPlayers.text.includes("discord:quiet#1"), false);
+    assert.equal(pubPlayers.text.includes("realName"), false);
+    assert.equal(pubForces.text.includes("shield secret"), false);
+    assert.equal(pubForces.text.includes("orphan secret"), false);
+    assert.equal(pubForces.text.includes("hidden allies"), false);
+  } finally {
+    await ctx.stop();
+  }
 });

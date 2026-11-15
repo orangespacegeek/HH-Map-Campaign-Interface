@@ -1029,6 +1029,38 @@
     let rosterFilter = "all";
     let rosterQuery = "";
 
+    // Safari throws RangeError when localeCompare is given an undefined locale
+    // plus options. That abort used to land in the generic "Could not load players" toast.
+    function compareNames(a, b) {
+      const left = String(a == null ? "" : a);
+      const right = String(b == null ? "" : b);
+      try {
+        return left.localeCompare(right, "en", { sensitivity: "base", numeric: true });
+      } catch (err) {
+        const l = left.toLowerCase();
+        const r = right.toLowerCase();
+        if (l < r) return -1;
+        if (l > r) return 1;
+        return 0;
+      }
+    }
+
+    function rosterText(value) {
+      if (typeof value === "string") return value.trim();
+      if (typeof value === "number" || typeof value === "boolean") return String(value).trim();
+      return "";
+    }
+
+    function rosterErrorText(err) {
+      const status = err && Number(err.status);
+      const message = err && err.message ? String(err.message).replace(/\s+/g, " ").trim() : "";
+      const safe = message.slice(0, 160);
+      if (safe && status) return safe + " (" + status + ")";
+      if (safe) return safe;
+      if (status) return "Could not load players (" + status + ")";
+      return "Could not load players";
+    }
+
     async function reload() {
       const [playerRows, forceRows] = await Promise.all([
         SH.list("players"),
@@ -1089,7 +1121,7 @@
       else if (systemsState === "error") blank.textContent = "Could not load systems";
       else blank.textContent = "— None —";
       sel.appendChild(blank);
-      systems.slice().sort((a, b) => String(a.sys_name || "").localeCompare(String(b.sys_name || ""), undefined, { numeric: true })).forEach((system) => {
+      systems.filter((system) => system && typeof system === "object").slice().sort((a, b) => compareNames(a.sys_name, b.sys_name)).forEach((system) => {
         const opt = document.createElement("option");
         opt.value = system.sys_id;
         opt.textContent = system.sys_name || ("System " + system.sys_id);
@@ -1139,7 +1171,7 @@
 
     function systemName(id) {
       if (!id) return "—";
-      const system = systems.find((row) => Number(row.sys_id) === Number(id));
+      const system = systems.find((row) => row && Number(row.sys_id) === Number(id));
       if (system) return system.sys_name || ("System " + system.sys_id);
       if (systemsState === "loading") return "Loading…";
       return "System " + id;
@@ -1630,30 +1662,32 @@
     // Signed-in roster fields only. Notes, Discord user IDs, and invites are dropped
     // even if a response includes them.
     function asRoster(playerRows, forceRows) {
-      rosterPlayers = (playerRows || []).map((player) => ({
+      const playersIn = Array.isArray(playerRows) ? playerRows : [];
+      const forcesIn = Array.isArray(forceRows) ? forceRows : [];
+      rosterPlayers = playersIn.filter((player) => player && typeof player === "object").map((player) => ({
         player_id: player.player_id,
-        display_name: player.display_name || "Unknown commander",
-        realName: player.realName ? String(player.realName) : "",
-        contact: player.contact ? String(player.contact) : "",
-        allegiance: player.allegiance,
-        status: player.status || "active"
+        display_name: rosterText(player.display_name) || "Unknown commander",
+        realName: rosterText(player.realName),
+        contact: rosterText(player.contact),
+        allegiance: rosterText(player.allegiance),
+        status: rosterText(player.status) || "active"
       }));
-      rosterForces = (forceRows || []).map((force) => ({
+      rosterForces = forcesIn.filter((force) => force && typeof force === "object").map((force) => ({
         force_id: force.force_id,
         player_id: force.player_id,
-        force_name: force.force_name || "Unnamed force",
-        allegiance: force.allegiance,
-        game_system: force.game_system || "",
-        force_type: force.force_type || "",
-        legion: force.legion || "",
-        subfaction: force.subfaction || "",
-        organisation: force.organisation || "",
-        warlord_name: force.warlord_name || "",
-        primarch_present: !!force.primarch_present,
-        titan_support: !!force.titan_support,
-        points: force.points,
-        strength: force.strength,
-        status: force.status || "active",
+        force_name: rosterText(force.force_name) || "Unnamed force",
+        allegiance: rosterText(force.allegiance),
+        game_system: rosterText(force.game_system),
+        force_type: rosterText(force.force_type),
+        legion: rosterText(force.legion),
+        subfaction: rosterText(force.subfaction),
+        organisation: rosterText(force.organisation),
+        warlord_name: rosterText(force.warlord_name),
+        primarch_present: force.primarch_present === true,
+        titan_support: force.titan_support === true,
+        points: typeof force.points === "number" || typeof force.points === "string" ? force.points : null,
+        strength: force.strength == null || force.strength === "" ? null : force.strength,
+        status: rosterText(force.status) || "active",
         sys_id: force.sys_id
       }));
     }
@@ -1701,7 +1735,7 @@
           );
         });
       }
-      return list.sort((a, b) => String(a.display_name).localeCompare(String(b.display_name), undefined, { sensitivity: "base" }));
+      return list.sort((a, b) => compareNames(a.display_name, b.display_name));
     }
 
     function renderRoster() {
@@ -1790,8 +1824,13 @@
 
     async function loadPublicList(name) {
       const res = await fetch("/api/public/" + name, { credentials: "include", cache: "no-store" });
-      if (!res.ok) throw new Error("Could not load " + name);
-      return res.json();
+      if (!res.ok) {
+        const err = new Error("Could not load " + name);
+        err.status = res.status;
+        throw err;
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
     }
 
     async function loadRoster() {
@@ -1858,7 +1897,7 @@
         }
         document.getElementById("btn-add").hidden = true;
         document.getElementById("btn-export").hidden = true;
-        if (SH.role === "player") {
+        if (String(SH.role || "").trim().toLowerCase() === "player") {
           document.getElementById("header-sub").textContent = "Who is playing";
           document.title = "Sunset Heresy – Players";
           roster.hidden = false;
@@ -1867,8 +1906,8 @@
         }
         denied.hidden = false;
       } catch (err) {
-        console.error(err);
-        showToast("Could not load players");
+        console.error("Players page failed", err && err.status, err);
+        showToast(rosterErrorText(err));
       }
     })();
   </script>

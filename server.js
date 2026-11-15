@@ -1114,6 +1114,10 @@ function destroySession(token) {
   writeCollection("sessions", sessions);
 }
 
+function objectRows(value) {
+  return Array.isArray(value) ? value.filter((row) => row && typeof row === "object") : [];
+}
+
 function publicPlayer(p) {
   return {
     player_id: p.player_id,
@@ -1174,22 +1178,32 @@ function injectDashboardCounts(html) {
 
 // Signed-in Players page. Same fields as the public list, plus the name and
 // contact a player typed so others can arrange a game. Nothing else.
+function plainRosterText(value) {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value).trim();
+  return "";
+}
+
 function rosterPlayer(p) {
-  const name = p.player_name == null ? "" : String(p.player_name).trim();
-  const contact = p.contact == null ? "" : String(p.contact).trim();
+  const row = p && typeof p === "object" ? p : {};
   return {
-    ...publicPlayer(p),
-    realName: name || null,
-    contact: contact || null
+    player_id: row.player_id == null ? null : row.player_id,
+    display_name: plainRosterText(row.display_name) || "Unknown commander",
+    allegiance: plainRosterText(row.allegiance) || null,
+    status: plainRosterText(row.status) || null,
+    start_sys_id: row.start_sys_id || null,
+    realName: plainRosterText(row.player_name) || null,
+    contact: plainRosterText(row.contact) || null
   };
 }
 
 function handleRoster(req, res, method) {
   if (method !== "GET") return send(res, 405, { error: "Method not allowed" });
   const auth = getSession(req);
-  const gate = requireRole(auth, ["player", "campaign_admin"]);
-  if (!gate.ok) return send(res, gate.status, { error: gate.error });
-  return send(res, 200, readCollection("players").map(rosterPlayer));
+  // Any signed-in account. Older rows may not use the exact "player" spelling.
+  // Signed-out stays 401. Notes, Discord ids, invites, and secrets are not copied.
+  if (!auth || !auth.account) return send(res, 401, { error: "Login required" });
+  return send(res, 200, objectRows(readCollection("players")).map(rosterPlayer));
 }
 
 // Roster fields are shared. Notes and allies are the owner's private list text.
@@ -6064,12 +6078,12 @@ async function handlePublic(req, res, parts, method) {
     return send(res, 200, publicMeta(readCollection("meta")));
   }
   if (collection === "players") {
-    return send(res, 200, readCollection("players").map(publicPlayer));
+    return send(res, 200, objectRows(readCollection("players")).map(publicPlayer));
   }
   if (collection === "forces") {
-    const players = readCollection("players");
+    const players = objectRows(readCollection("players"));
     const byId = Object.fromEntries(players.map((p) => [p.player_id, p]));
-    return send(res, 200, readCollection("forces").map((f) => publicForce(f, byId)));
+    return send(res, 200, objectRows(readCollection("forces")).map((f) => publicForce(f, byId)));
   }
   if (collection === "systems") {
     return send(res, 200, readCollection("systems"));
