@@ -145,6 +145,7 @@
   filter: brightness(1.06);
 }
 
+.header-end a.nav-guide.active,
 .header-end a.nav-account.active {
   color: var(--accent, #f0c040);
   background: rgba(240, 192, 64, 0.12);
@@ -305,7 +306,10 @@
 
   .mode-slot { padding: 0.35rem 0.85rem 0.2rem; }
 
-  .header-end a.nav-account { max-width: 5.5rem; }
+  .header-end { gap: 0; }
+  .header-end a,
+  #nav-waiting { padding-left: 0.4rem; padding-right: 0.4rem; }
+  .header-end a.nav-account { max-width: 4rem; }
 
   body { overflow-x: hidden; }
 

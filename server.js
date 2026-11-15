@@ -204,6 +204,7 @@ const PUBLIC_PAGES = new Set([
   "systems.html",
   "games.html",
   "rules.html",
+  "players_guide.html",
   "actions.html",
   "account.html",
   "feedback.html"

@@ -20,6 +20,7 @@ const PAGES = [
   "/login.html",
   "/player_admin.html",
   "/rules.html",
+  "/players_guide.html",
   "/actions.html"
 ];
 
