@@ -65,6 +65,10 @@ Unable to schedule and No report do not change durability. A confirmed No show l
 
 Once System Durability reaches 0, each successive battle reduces the system's Power Level by 1.
 
+*Occupation*
+
+At the end of each Campaign Turn, if a system holds active Forces from only one side (no opposing active Forces), that side gains +1 influence (sys_loyal or sys_traitor) in that system for each of its active Forces there. A system with active Forces from both sides is contested and gains nothing from occupation. Destroyed and inactive Forces do not count. Battle results still change influence the same way. (added as part of web app build)
+
 *Campaign Turn Scoring*
 
 At the end of every Campaign Turn, each side adds up the Power Level of their controlled systems and adds it to their overall Campaign Score.
