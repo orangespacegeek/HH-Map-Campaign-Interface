@@ -49,7 +49,10 @@
  *   POST /api/campaign/auto-advance    (campaign_admin) { enabled?: boolean, muster?: boolean }
  *   POST /api/campaign/discord-test    (campaign_admin) post a test to the campaign Discord webhook
  *   A past phase deadline, or every counted player being out of actions during
- *   Logistics, advances one phase. Muster does not auto-advance unless the
+ *   Logistics, advances one phase. Ending Battles grants uncontested occupation
+ *   before Campaign Turn scoring: +1 influence per active force of the only
+ *   side present. meta.occupation_applied_turn records that turn so a retry
+ *   cannot grant it again. Muster does not auto-advance unless the
  *   admin sets muster. Checked on startup and about every 30s
  *   (AUTO_ADVANCE_INTERVAL_MS). phase_ends_at is one instant, cleared after a
  *   successful advance, so a later weekly schedule can store the next instant.
@@ -2159,6 +2162,71 @@ function applyForceRecovery(forces, systems) {
   });
 }
 
+/**
+ * Highest Campaign Turn whose occupation grant is already recorded.
+ * A missing marker (older saves, or a reset meta) means none.
+ */
+function occupationAppliedTurn(meta) {
+  const marked = Number(meta && meta.occupation_applied_turn);
+  if (!Number.isFinite(marked) || marked <= 0) return 0;
+  return marked;
+}
+
+/**
+ * Uncontested occupation at the end of a Campaign Turn.
+ * Active Loyalist or Traitor forces of only one side: +1 sys_loyal or
+ * sys_traitor per force. Both sides present, or no active force of either
+ * side: no change. Destroyed, inactive, removed, and any other status do
+ * not count, and neither does a force with no system. Influence is not capped.
+ * Battle results are not touched here.
+ * The caller decides whether this turn was already applied.
+ */
+function applyOccupation(systems, forces) {
+  const counts = {};
+  (forces || []).forEach((force) => {
+    if (!force || force.status !== "active") return;
+    if (force.allegiance !== "Loyalist" && force.allegiance !== "Traitor") return;
+    const sid = Number(force.sys_id);
+    if (!Number.isInteger(sid) || sid <= 0) return;
+    if (!counts[sid]) counts[sid] = { Loyalist: 0, Traitor: 0 };
+    counts[sid][force.allegiance] += 1;
+  });
+  const gains = [];
+  let changed = false;
+  const next = (systems || []).map((sys) => {
+    const sid = Number(sys.sys_id);
+    const tally = counts[sid] || { Loyalist: 0, Traitor: 0 };
+    let loyalDelta = 0;
+    let traitorDelta = 0;
+    if (tally.Loyalist > 0 && tally.Traitor === 0) loyalDelta = tally.Loyalist;
+    else if (tally.Traitor > 0 && tally.Loyalist === 0) traitorDelta = tally.Traitor;
+    if (!loyalDelta && !traitorDelta) return sys;
+    changed = true;
+    const where = sys.sys_name ? String(sys.sys_name) : "system " + sid;
+    gains.push({ sys_id: sid, sys_name: where, loyal: loyalDelta, traitor: traitorDelta });
+    return {
+      ...sys,
+      sys_loyal: (Number(sys.sys_loyal) || 0) + loyalDelta,
+      sys_traitor: (Number(sys.sys_traitor) || 0) + traitorDelta
+    };
+  });
+  gains.sort((a, b) => a.sys_id - b.sys_id);
+  return {
+    systems: changed ? recomputeControllers(next) : systems,
+    gains
+  };
+}
+
+function occupationLogLine(turn, gains, already) {
+  if (already) return "Turn " + turn + " occupation: already applied";
+  if (!gains || !gains.length) return "Turn " + turn + " occupation: no uncontested forces";
+  const parts = gains.map((gain) => {
+    if (gain.loyal) return gain.sys_name + " Loyalist +" + gain.loyal;
+    return gain.sys_name + " Traitor +" + gain.traitor;
+  });
+  return "Turn " + turn + " occupation: " + parts.join("; ");
+}
+
 /** Apply pending moves: dest_sys_id → sys_id when leaving Movement phase. */
 function applyPendingMoves(forces) {
   return forces.map((f) => {
@@ -3960,7 +4028,7 @@ function advanceCampaign(meta, options = {}) {
         error: "Use Begin campaign to leave Muster"
       };
     } else {
-      // End of Battles → void anything still unresolved, then score, recover, new turn.
+      // End of Battles → void anything still unresolved, then occupation, score, recover, new turn.
       // Unresolved battles are not carried into the next turn. A normal advance
       // refuses while any remain. { force: true } voids them: no result is
       // applied, and strength and influence are left as they were.
@@ -3978,6 +4046,23 @@ function advanceCampaign(meta, options = {}) {
         log.push(`Voided ${voided} unresolved battle${voided === 1 ? "" : "s"} (no result applied)`);
         systems = recomputeControllers(readCollection("systems"));
         forces = readCollection("forces");
+      }
+      // Occupation before Campaign Turn scoring, so a system that changes
+      // hands is scored for the occupying side this same turn. That order is
+      // an open question; recovery below also sees the updated control.
+      // The marker is the highest turn already granted. Missing means this
+      // save has never recorded occupation, so this turn is granted once and
+      // earlier turns are not backfilled. Systems, forces, and meta commit
+      // together at the end of this advance, so a retry still on this turn
+      // sees the marker and cannot grant occupation again.
+      const occupationTurn = Number(turn) || 1;
+      if (occupationAppliedTurn(meta) >= occupationTurn) {
+        log.push(occupationLogLine(occupationTurn, [], true));
+      } else {
+        const occupation = applyOccupation(systems, forces);
+        systems = occupation.systems;
+        meta.occupation_applied_turn = occupationTurn;
+        log.push(occupationLogLine(occupationTurn, occupation.gains, false));
       }
       const gained = scoreFromSystems(systems);
       meta.loyal_score = (Number(meta.loyal_score) || 0) + gained.loyal;
@@ -4022,9 +4107,14 @@ function advanceCampaign(meta, options = {}) {
   }
 
   clearRestoreQuiet();
-  writeCollection("systems", systems);
-  writeCollection("forces", forces);
-  writeCollection("meta", meta);
+  // One commit: occupation influence, occupation_applied_turn, scores, recovery,
+  // and the new turn land together. A crash retries the whole advance from
+  // the previous files instead of granting occupation twice.
+  writeDataFilesAtomically([
+    { name: COLLECTIONS.systems.file, text: collectionText(systems) },
+    { name: COLLECTIONS.forces.file, text: collectionText(forces) },
+    { name: COLLECTIONS.meta.file, text: collectionText(meta) }
+  ]);
   announcePhaseAdvance(
     { turn: fromTurn, phase: fromPhase },
     { turn, phase },
