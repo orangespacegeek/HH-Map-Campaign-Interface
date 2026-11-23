@@ -21,6 +21,7 @@
   <script src="js/theme.js"></script>
   <link rel="stylesheet" href="css/journal-fonts.css" />
   <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/journal-layout.css" />
   <style>
 .chip.contested.active { border-color: var(--contested); color: var(--contested); }
 
@@ -133,7 +134,8 @@
     <div id="mode-slot" class="mode-slot"></div>
   </nav>
 </header>
-  <main>
+  <main class="jt-systems">
+    <section class="jt-phase" id="jt-phase" aria-label="Campaign phase"></section>
     <div class="page-tools" id="csv-actions" hidden>
       <button type="button" class="ghost" id="btn-template" title="Download blank template">Template</button>
       <button type="button" class="ghost" id="btn-export-csv">Export</button>
@@ -183,6 +185,7 @@
         <span class="chip" data-filter="Neutral">Neutral</span>
       </div>
     </div>
+    <section class="jt-worlds" id="jt-worlds" aria-label="Register of worlds"></section>
     <div class="table-wrap">
       <table>
         <thead>
@@ -278,12 +281,20 @@
   <div class="toast" id="toast"></div>
 
   <script src="js/api.js"></script>
+  <script src="js/journal-layout.js"></script>
   <script>
     let systems = [];
     let filter = "all", searchQ = "", editingId = null;
 
+    let campaignMeta = {};
+
     async function reload() {
-      systems = await SH.list("systems");
+      const [rows, metaRow] = await Promise.all([
+        SH.list("systems"),
+        SH.getMeta().catch(() => ({}))
+      ]);
+      systems = rows;
+      campaignMeta = metaRow && typeof metaRow === "object" ? metaRow : {};
       render();
       let badge = document.getElementById("mode-badge");
       if (!badge) {
@@ -366,6 +377,10 @@
         tbody.appendChild(tr);
       });
       renderStats();
+      if (window.JT) {
+        JT.worldCards(document.getElementById("jt-worlds"), list, () => SH.canEditSystems());
+        JT.phaseBanner(document.getElementById("jt-phase"), campaignMeta, systems);
+      }
     }
 
     // --- CSV parse / export / import ---
@@ -620,12 +635,14 @@
     document.getElementById("btn-close").addEventListener("click", closeDrawer);
     overlay.addEventListener("click", closeDrawer);
     document.getElementById("btn-save").addEventListener("click", save);
-    tbody.addEventListener("click", e => {
-      const btn = e.target.closest("[data-edit]");
+    function openFromEdit(event) {
+      const btn = event.target.closest("[data-edit]");
       if (!btn) return;
       const s = systems.find(x => x.sys_id === Number(btn.dataset.edit));
       if (s) openDrawer(s);
-    });
+    }
+    tbody.addEventListener("click", openFromEdit);
+    document.getElementById("jt-worlds").addEventListener("click", openFromEdit);
     document.getElementById("search").addEventListener("input", e => { searchQ = e.target.value.trim(); render(); });
     document.getElementById("filters").addEventListener("click", e => {
       const chip = e.target.closest(".chip");

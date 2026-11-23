@@ -240,6 +240,7 @@
     }
     const slot = document.getElementById("mode-slot");
     if (slot && window.SH) slot.innerHTML = SH.statusBadgeHtml();
+    if (window.JT) JT.phaseBanner(document.getElementById("jt-phase"), meta, systems);
   }
 
   const isMobile = () => window.matchMedia("(max-width: 767px)").matches;
@@ -291,6 +292,11 @@
         </li>`;
         })
         .join("");
+    }
+
+    if (window.JT) {
+      const names = parseLinks(s.sys_links).map((linkId) => (byId(linkId) || {}).sys_name || ("#" + linkId));
+      JT.dossier(document.getElementById("jt-dossier"), s, present, names);
     }
 
     renderActions(s);
