@@ -21,6 +21,7 @@
   <script src="js/theme.js"></script>
   <link rel="stylesheet" href="css/journal-fonts.css" />
   <link rel="stylesheet" href="css/theme.css" />
+  <link rel="stylesheet" href="css/journal-layout.css" />
   <style>
 /* Shared site header + nav */
 
@@ -725,6 +726,7 @@
   </nav>
 </header>
   <main>
+    <section class="jt-phase" id="jt-phase" aria-label="Campaign phase"></section>
     <div class="stats" id="stats">
       <div class="stat"><div class="num" id="count-players">—</div><div class="label">Players</div></div>
       <a class="stat" href="systems.html"><div class="num" id="count-systems">—</div><div class="label">Systems</div></a>
@@ -904,6 +906,7 @@
     </div>
   </div>
   <script src="js/api.js"></script>
+  <script src="js/journal-layout.js"></script>
   <script>
     function updatePhaseTrack(phase) {
       const order = ["Muster", "Logistics", "Movement", "Battles"];
@@ -1239,6 +1242,7 @@
       dashboardMeta = meta || {};
       if (window.SH && SH.applySectorChrome) SH.applySectorChrome(dashboardMeta);
       updateHero(meta, counts.systems);
+      if (window.JT) JT.phaseBanner(document.getElementById("jt-phase"), meta, systems);
       renderRecent(games, players, forces, systems);
       const btn = document.getElementById("btn-advance");
       if (btn) btn.textContent = advanceLabel(meta.phase);
