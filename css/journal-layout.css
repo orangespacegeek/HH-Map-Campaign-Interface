@@ -465,3 +465,162 @@ html[data-theme="journal-tactica"] .node.selected text.label:not(.jt-halo) {
 html[data-theme="journal-tactica"] .node.selected .jt-brackets {
   visibility: visible;
 }
+
+/* Mobile sheet and phone drawers. Position, motion, and safe-area padding stay with the page rules. */
+html[data-theme="journal-tactica"] .sheet,
+html[data-theme="journal-tactica"] .drawer {
+  background: linear-gradient(180deg, #2a2014, #0e0b07);
+  color: #ece0c4;
+  box-shadow:
+    0 -12px 28px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 3px rgba(14, 11, 7, 0.72),
+    inset 0 0 0 4px #4a3a20;
+}
+
+html[data-theme="journal-tactica"] .drawer {
+  border-left-color: #d6b062;
+  box-shadow:
+    -12px 0 28px rgba(0, 0, 0, 0.45),
+    inset 0 0 0 3px rgba(14, 11, 7, 0.72),
+    inset 0 0 0 4px #4a3a20;
+}
+
+html[data-theme="journal-tactica"] .sheet h2,
+html[data-theme="journal-tactica"] .drawer-header h2 {
+  font-family: Cinzel, Palatino, serif;
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #f3e6c8;
+}
+
+html[data-theme="journal-tactica"] .sheet h2 {
+  padding-right: 2.75rem;
+}
+
+html[data-theme="journal-tactica"] .sheet-body,
+html[data-theme="journal-tactica"] .drawer-body,
+html[data-theme="journal-tactica"] .sheet .empty,
+html[data-theme="journal-tactica"] .sheet .action-note {
+  font-family: "EB Garamond", Palatino, serif;
+  font-style: italic;
+  color: #ece0c4;
+}
+
+html[data-theme="journal-tactica"] .sheet-handle {
+  position: relative;
+  width: 56px;
+  height: 3px;
+  margin-top: 0.15rem;
+  background: linear-gradient(#f0d79a, #a9853f);
+  box-shadow: 0 0 8px rgba(214, 176, 98, 0.55);
+}
+
+html[data-theme="journal-tactica"] .sheet-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  background: #e0bd74;
+  box-shadow: 0 0 0 2px #1a130a;
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+html[data-theme="journal-tactica"] .sheet .close-btn,
+html[data-theme="journal-tactica"] .drawer-header .ghost {
+  color: #d6b062;
+  min-width: var(--tap);
+  min-height: var(--tap);
+}
+
+html[data-theme="journal-tactica"] .sheet .jt-dossier h3,
+html[data-theme="journal-tactica"] .drawer .detail-section h3 {
+  border-top: 1px solid #826230;
+  padding-top: 0.7rem;
+  letter-spacing: 0.12em;
+}
+
+html[data-theme="journal-tactica"] .sheet .jt-dossier-stats div,
+html[data-theme="journal-tactica"] .sheet .jt-dossier li,
+html[data-theme="journal-tactica"] .drawer .detail-section {
+  border-bottom: 1px dotted #826230;
+}
+
+html[data-theme="journal-tactica"] .sheet .actions {
+  margin-top: 0.85rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #d6b062;
+}
+
+html[data-theme="journal-tactica"] .sheet .actions button,
+html[data-theme="journal-tactica"] .drawer-footer button {
+  min-height: var(--tap);
+  padding: 0.65rem 0.75rem;
+  border: 1px solid #826230;
+  background: rgba(20, 15, 10, 0.92);
+  color: #f3e6c8;
+  font-size: 0.85rem;
+}
+
+html[data-theme="journal-tactica"] .sheet .actions button:active,
+html[data-theme="journal-tactica"] .drawer-footer button:active {
+  border-color: #e0bd74;
+  color: #e0bd74;
+}
+
+html[data-theme="journal-tactica"] .sheet .badge.loyalist,
+html[data-theme="journal-tactica"] .drawer .badge.loyalist {
+  background: transparent;
+  color: #d6b062;
+  border: 1px solid #d6b062;
+}
+
+html[data-theme="journal-tactica"] .sheet .badge.traitor,
+html[data-theme="journal-tactica"] .drawer .badge.traitor {
+  background: transparent;
+  color: #e24e3c;
+  border: 1px solid #e24e3c;
+}
+
+html[data-theme="journal-tactica"] .sheet .badge.contested,
+html[data-theme="journal-tactica"] .drawer .badge.contested {
+  background: transparent;
+  color: #e2d2a8;
+  border: 1px solid #e2d2a8;
+}
+
+html[data-theme="journal-tactica"] .sheet .badge.unaligned,
+html[data-theme="journal-tactica"] .drawer .badge.unaligned {
+  background: transparent;
+  color: #c8ba9c;
+  border: 1px solid #8d7f5c;
+}
+
+@media (max-width: 767px) {
+  html[data-theme="journal-tactica"] .sheet {
+    border-top: 1px solid #d6b062;
+    padding-bottom: calc(var(--space-12) + var(--safe-bottom) + 18px);
+  }
+
+  html[data-theme="journal-tactica"] .drawer-header {
+    position: relative;
+    flex-wrap: wrap;
+    border-bottom: 1px solid #826230;
+  }
+
+  html[data-theme="journal-tactica"] .drawer-header::before {
+    content: "";
+    flex: 0 0 100%;
+    height: 3px;
+    margin-bottom: 0.7rem;
+    background: linear-gradient(#f0d79a, #a9853f) center / 56px 3px no-repeat;
+    box-shadow: 0 0 8px rgba(214, 176, 98, 0.35);
+  }
+
+  html[data-theme="journal-tactica"] .drawer-footer {
+    border-top: 1px solid #d6b062;
+  }
+}

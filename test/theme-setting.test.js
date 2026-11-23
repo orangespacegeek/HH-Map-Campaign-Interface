@@ -194,3 +194,19 @@ test("journal map art is drawn only for the Journal Tactica theme", () => {
   assert.match(css, /html\[data-theme="journal-tactica"\] \.node\.selected \.jt-brackets/);
   assert.doesNotMatch(css, /^\.jt-(ring|brackets|icon|core|credit|halo)/m);
 });
+
+test("journal sheet styling stays on the theme and keeps the touch target", () => {
+  const css = fs.readFileSync(path.join(ROOT, "css", "journal-layout.css"), "utf8");
+  const sheetAt = css.indexOf("html[data-theme=\"journal-tactica\"] .sheet-handle {");
+  assert.ok(sheetAt > 0);
+  const handle = css.slice(sheetAt, sheetAt + 280);
+  assert.match(handle, /#f0d79a/);
+  assert.doesNotMatch(css, /^\.sheet-handle/m);
+  assert.match(css, /min-height:\s*var\(--tap\)/);
+  assert.match(css, /EB Garamond/);
+  assert.match(css, /Cinzel, Palatino/);
+  const map = fs.readFileSync(path.join(ROOT, "campaign_map.html"), "utf8");
+  assert.match(map, /calc\(var\(--space-12\) \+ var\(--safe-bottom\)\)/);
+  assert.match(map, /transform: translateY\(100%\)/);
+  assert.match(map, /\.sheet\.open \{ transform: translateY\(0\); \}/);
+});
