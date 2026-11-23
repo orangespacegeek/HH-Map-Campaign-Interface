@@ -185,17 +185,17 @@
       if (here.length) {
         const traitors = here.filter((f) => f.allegiance === "Traitor").length;
         const loyalists = here.filter((f) => f.allegiance === "Loyalist").length;
-        let fill = "#f0c040";
-        if (traitors && !loyalists) fill = "#ef4444";
-        else if (loyalists && !traitors) fill = "#3b82f6";
+        let fill = "var(--accent)";
+        if (traitors && !loyalists) fill = "var(--traitor)";
+        else if (loyalists && !traitors) fill = "var(--loyal)";
         const bx = p.x + 18;
         const by = p.y - 18;
-        g.appendChild(svgEl("circle", { cx: bx, cy: by, r: 9, fill: fill, stroke: "#0a0a12", "stroke-width": 2 }));
+        g.appendChild(svgEl("circle", { cx: bx, cy: by, r: 9, fill: fill, stroke: "var(--bg)", "stroke-width": 2 }));
         const t = svgEl("text", {
           class: "garrison",
           x: bx,
           y: by + 0.5,
-          fill: "#0a0a12",
+          fill: "var(--on-accent)",
           "font-size": 10,
           "font-weight": 700,
           "text-anchor": "middle",

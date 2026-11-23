@@ -476,8 +476,16 @@ test("served pages version js and css so a new Players page cannot run a stale a
     const html = await page.text();
     const script = html.match(/src="js\/api\.js\?v=([0-9a-f]{12})"/);
     const css = html.match(/href="css\/site-nav\.css\?v=([0-9a-f]{12})"/);
+    const themeCss = html.match(/href="css\/theme\.css\?v=([0-9a-f]{12})"/);
+    const themeJs = html.match(/src="js\/theme\.js\?v=([0-9a-f]{12})"/);
     assert.ok(script, html.slice(html.indexOf("js/api.js") - 20, html.indexOf("js/api.js") + 40));
     assert.ok(css);
+    assert.ok(themeCss, "theme.css should be cache-busted");
+    assert.ok(themeJs, "theme.js should be cache-busted");
+    const themeCssExpected = crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT, "css", "theme.css"))).digest("hex").slice(0, 12);
+    const themeJsExpected = crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT, "js", "theme.js"))).digest("hex").slice(0, 12);
+    assert.equal(themeCss[1], themeCssExpected);
+    assert.equal(themeJs[1], themeJsExpected);
     const expected = crypto.createHash("sha256").update(fs.readFileSync(path.join(ROOT, "js", "api.js"))).digest("hex").slice(0, 12);
     assert.equal(script[1], expected);
 

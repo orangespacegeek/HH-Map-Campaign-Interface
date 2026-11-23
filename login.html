@@ -18,90 +18,72 @@
   <meta name="twitter:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Log in</title>
+  <script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/theme.css" />
   <style>
-    :root {
-      --bg: #0a0a12; --panel: #12121e; --panel-2: #1a1a28; --border: #3a3a55;
-      --text: #e8e0c8; --muted: #9a9080; --accent: #f0c040;
-      --loyal: #3b82f6; --danger: #ef4444;
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
+main {
+       padding: var(--space-14) var(--space-12) calc(var(--space-15) + var(--safe-bottom));
+      max-width: 520px;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body {
-      min-height: 100%;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-    body { display: flex; flex-direction: column; min-height: 100vh; }
-
-    main {
-      flex: 1; padding: 1.5rem 1rem calc(2rem + var(--safe-bottom));
-      max-width: 520px; width: 100%; margin: 0 auto;
-    }
-    h2 { color: var(--accent); font-size: 1.2rem; margin-bottom: 0.35rem; }
-    .lead { color: var(--muted); font-size: 0.88rem; margin-bottom: 1.2rem; line-height: 1.45; }
+    h2 { color: var(--accent); font-size: 1.2rem; margin-bottom: var(--space-2); }
+    .lead {   margin-bottom: 1.2rem;  }
 
     .tabs {
-      display: flex; gap: 0.35rem; margin-bottom: 1rem; flex-wrap: wrap;
+      display: flex; gap: var(--space-2); margin-bottom: var(--space-12); flex-wrap: wrap;
     }
     .tab {
-      flex: 1; min-width: 6.5rem; text-align: center; padding: 0.5rem;
-      border: 1px solid var(--border); border-radius: 8px;
+      flex: 1; min-width: 6.5rem; text-align: center; padding: var(--space-5);
+      border: 1px solid var(--border); border-radius: var(--radius-md);
       background: var(--panel); color: var(--muted); font-size: 0.85rem; cursor: pointer;
     }
     .tab.active { border-color: var(--accent); color: var(--accent); background: var(--panel-2); }
 
     .card {
-      background: var(--panel); border: 1px solid var(--border);
-      border-radius: 12px; padding: 1.1rem;
+
+       padding: 1.1rem;
     }
-    .form-group { margin-bottom: 0.85rem; }
-    .form-group label {
-      display: block; font-size: 0.72rem; color: var(--muted);
-      text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.3rem;
-    }
+    .form-group { margin-bottom: var(--space-11); }
+
     .form-group input,
     .form-group select,
     .form-group textarea {
-      width: 100%; background: var(--panel-2); border: 1px solid var(--border);
-      color: var(--text); padding: 0.6rem 0.75rem; border-radius: 8px; font-size: 16px;
-      font-family: inherit; min-height: 44px;
+
+       padding: var(--space-7) var(--space-10);  font-size: 16px;
+       min-height: var(--tap);
     }
     .form-group textarea { min-height: 68px; resize: vertical; }
-    .form-group input:focus,
-    .form-group select:focus,
-    .form-group textarea:focus { outline: none; border-color: var(--accent); }
-    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.7rem; }
-    .hint { font-size: 0.75rem; color: var(--muted); margin-top: 0.25rem; line-height: 1.35; }
+
+    .hint { font-size: 0.75rem; color: var(--muted); margin-top: var(--space-1); line-height: 1.35; }
     @media (max-width: 560px) { .form-row { grid-template-columns: 1fr; } }
 
     button.primary {
-      width: 100%; margin-top: 0.4rem; appearance: none; border: none;
-      background: var(--accent); color: #0a0a12; font-weight: 600;
-      padding: 0.7rem; border-radius: 8px; font-size: 0.95rem; cursor: pointer;
+      width: 100%; margin-top: var(--space-3); appearance: none; border: none;
+
+      padding: var(--space-9); border-radius: var(--radius-md); font-size: 0.95rem; cursor: pointer;
     }
     button.primary:hover { filter: brightness(1.06); }
     button.ghost {
-      width: 100%; margin-top: 0.5rem; appearance: none;
-      background: transparent; border: 1px solid var(--border);
-      color: var(--muted); padding: 0.55rem; border-radius: 8px; cursor: pointer;
+      width: 100%; margin-top: var(--space-5); appearance: none;
+       border: 1px solid var(--border);
+      color: var(--muted); padding: var(--space-6); border-radius: var(--radius-md); cursor: pointer;
     }
 
     .msg {
-      margin-top: 0.75rem; padding: 0.55rem 0.7rem; border-radius: 8px;
+      margin-top: var(--space-10); padding: var(--space-6) var(--space-9); border-radius: var(--radius-md);
       font-size: 0.85rem; display: none;
     }
-    .msg.error { display: block; background: #3f1515; color: #fca5a5; border: 1px solid var(--danger); }
-    .msg.ok { display: block; background: #14532d; color: #86efac; border: 1px solid #22c55e; }
 
     .who {
-      margin-bottom: 1rem; padding: 0.75rem; background: var(--panel-2);
-      border-radius: 8px; border: 1px solid var(--border); font-size: 0.88rem;
+      margin-bottom: var(--space-12); padding: var(--space-10); background: var(--panel-2);
+      border-radius: var(--radius-md); border: 1px solid var(--border); font-size: 0.88rem;
     }
     .roles-note {
-      margin-top: 1.5rem; font-size: 0.78rem; color: var(--muted); line-height: 1.45;
+      margin-top: var(--space-14); font-size: 0.78rem; color: var(--muted); line-height: 1.45;
     }
     .roles-note strong { color: var(--text); }
+
+    .site-header h1 { letter-spacing: normal; }
+  
   </style>
   <link rel="stylesheet" href="css/site-nav.css" />
 </head>
