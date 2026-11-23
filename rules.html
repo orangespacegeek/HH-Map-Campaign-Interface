@@ -18,74 +18,52 @@
   <meta name="twitter:description" data-sh-copy="description" content="__SH_DESCRIPTION__" />
   <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Campaign Rules</title>
+  <script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/theme.css" />
   <style>
-    :root {
-      --bg: #0a0a12; --panel: #12121e; --panel-2: #1a1a28; --border: #3a3a55;
-      --text: #e8e0c8; --muted: #9a9080; --accent: #f0c040;
-      --loyal: #3b82f6; --traitor: #ef4444;
-      --safe-bottom: env(safe-area-inset-bottom, 0px);
-    }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { min-height: 100%; font-family: system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
-    body { display: flex; flex-direction: column; min-height: 100vh; }
+main {
 
-    .site-header { flex-shrink: 0; background: #0e0e18; border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 30; }
-    .site-header-inner { display: flex; align-items: center; gap: 0.65rem; padding: 0.5rem 0.85rem; max-width: 800px; margin: 0 auto; }
-    .site-header img { height: 36px; width: auto; }
-    .site-header .titles { flex: 1; min-width: 0; }
-    .site-header h1 { font-size: 1.05rem; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; line-height: 1.2; }
-    .site-header .sub { font-size: 0.7rem; color: var(--muted); }
-    .site-nav { display: flex; gap: 0.15rem; overflow-x: auto; padding: 0 0.5rem 0.45rem; max-width: 800px; margin: 0 auto; scrollbar-width: none; }
-    .site-nav::-webkit-scrollbar { display: none; }
-    .site-nav a { flex-shrink: 0; padding: 0.35rem 0.7rem; border-radius: 6px; font-size: 0.78rem; font-weight: 500; color: var(--muted); text-decoration: none; white-space: nowrap; }
-    .site-nav a:hover { color: var(--text); background: var(--panel-2); }
-    .site-nav a.active { color: var(--accent); background: rgba(240, 192, 64, 0.12); }
+      padding: var(--space-13) var(--space-12) calc(var(--space-15) + var(--safe-bottom));
+      max-width: var(--narrow-max);
 
-    main {
-      flex: 1;
-      padding: 1.25rem 1rem calc(2rem + var(--safe-bottom));
-      max-width: 800px;
-      width: 100%;
-      margin: 0 auto;
       line-height: 1.55;
     }
     main h2 {
       font-size: 1.15rem;
       color: var(--accent);
-      margin: 1.5rem 0 0.6rem;
-      padding-bottom: 0.35rem;
+      margin: var(--space-14) 0 var(--space-7);
+      padding-bottom: var(--space-2);
       border-bottom: 1px solid var(--border);
     }
     main h2:first-child { margin-top: 0; }
     main h3 {
       font-size: 0.95rem;
       color: var(--text);
-      margin: 1rem 0 0.4rem;
+      margin: var(--space-12) 0 var(--space-3);
     }
-    main p, main li { font-size: 0.92rem; color: var(--text); margin-bottom: 0.5rem; }
-    main ul, main ol { padding-left: 1.25rem; margin-bottom: 0.75rem; }
+    main p, main li { font-size: 0.92rem; color: var(--text); margin-bottom: var(--space-5); }
+    main ul, main ol { padding-left: var(--space-13); margin-bottom: var(--space-10); }
     main li { margin-bottom: 0.3rem; }
     main strong { color: var(--accent); font-weight: 600; }
     .callout {
       background: var(--panel);
       border: 1px solid var(--border);
       border-left: 3px solid var(--accent);
-      border-radius: 0 10px 10px 0;
-      padding: 0.75rem 1rem;
+      border-radius: 0 var(--radius-lg) var(--radius-lg) 0;
+      padding: var(--space-10) var(--space-12);
       margin: 0.9rem 0;
       font-size: 0.88rem;
     }
     .actions-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 0.6rem;
-      margin: 0.75rem 0 1rem;
+      gap: var(--space-7);
+      margin: var(--space-10) 0 var(--space-12);
     }
     .action-card {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 0.7rem 0.85rem;
+
+      border-radius: var(--radius-lg);
+      padding: var(--space-9) var(--space-11);
     }
     .action-card .cost {
       font-size: 0.7rem;
@@ -95,8 +73,9 @@
       letter-spacing: 0.04em;
       margin-bottom: 0.2rem;
     }
-    .action-card .name { font-weight: 600; margin-bottom: 0.25rem; }
+    .action-card .name { font-weight: 600; margin-bottom: var(--space-1); }
     .action-card .desc { font-size: 0.8rem; color: var(--muted); line-height: 1.4; }
+  
   </style>
   <link rel="stylesheet" href="css/site-nav.css" />
 </head>
