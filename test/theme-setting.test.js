@@ -178,3 +178,19 @@ test("the current look stays on :root and Journal Tactica is scoped", () => {
   assert.match(script, /journal-tactica/);
   assert.match(script, /Use site default/);
 });
+
+test("journal map art is drawn only for the Journal Tactica theme", () => {
+  const map = fs.readFileSync(path.join(ROOT, "js", "map.js"), "utf8");
+  const drawStars = map.slice(map.indexOf("function drawStars()"), map.indexOf("function drawLinks()"));
+  assert.match(drawStars, /if \(journalTheme\(\)\) return;/);
+  assert.match(drawStars, /for \(let i = 0; i < 100; i\+\+\)/);
+  assert.match(drawStars, /Math\.random\(\) \* BASE_W/);
+  assert.ok(drawStars.indexOf("journalTheme") < drawStars.indexOf("Math.random"));
+  assert.match(map, /data-theme"\) === "journal-tactica"/);
+  assert.match(map, /AJALE SYSTEM/);
+  assert.match(map, /Built with Abominable Intelligence/);
+  assert.match(map, /class: "link"/);
+  const css = fs.readFileSync(path.join(ROOT, "css", "journal-layout.css"), "utf8");
+  assert.match(css, /html\[data-theme="journal-tactica"\] \.node\.selected \.jt-brackets/);
+  assert.doesNotMatch(css, /^\.jt-(ring|brackets|icon|core|credit|halo)/m);
+});

@@ -115,8 +115,620 @@
     return el;
   }
 
+  function journalTheme() {
+    return document.documentElement.getAttribute("data-theme") === "journal-tactica";
+  }
+
+  function mulberry32(seed) {
+    let a = seed >>> 0;
+    return function () {
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  const CORE_NAMES = new Set(["Kasun", "The Thorn", "Nutorrans", "Kallina"]);
+  const GATE_NAMES = new Set(["The Thorn", "Nutorrans"]);
+  const RING_COLOR = {
+    loyalist: "#d6b062",
+    traitor: "#e24e3c",
+    contested: "#e2d2a8",
+    unaligned: "#9aa4b2"
+  };
+  const ICON_INK = {
+    hive: "#96c8ff",
+    forge: "#ffbe8c",
+    mining: "#bedcc8",
+    agri: "#d2f0a0",
+    knight: "#e6d7ff",
+    station: "#8cfff0",
+    fleet: "#78e6ff",
+    shrine: "#f0e6c8",
+    death: "#e8a090",
+    dead: "#b8c4d4",
+    warp: "#c8b4ff",
+    penal: "#f0c8a0",
+    gas: "#c8b4ff",
+    ocean: "#5ac8ff",
+    world: "#9ad4ff"
+  };
+
+  function iconKey(type) {
+    const t = String(type || "").toLowerCase();
+    if (t.includes("hive")) return "hive";
+    if (t.includes("forge")) return "forge";
+    if (t.includes("mining")) return "mining";
+    if (t.includes("agri")) return "agri";
+    if (t.includes("knight") || t.includes("fortress")) return "knight";
+    if (t.includes("station") || t.includes("void")) return "station";
+    if (t.includes("fleet") || t.includes("anchor")) return "fleet";
+    if (t.includes("shrine")) return "shrine";
+    if (t.includes("dead")) return "dead";
+    if (t.includes("death")) return "death";
+    if (t.includes("warp")) return "warp";
+    if (t.includes("penal")) return "penal";
+    if (t.includes("gas")) return "gas";
+    if (t.includes("ocean")) return "ocean";
+    return "world";
+  }
+
+  function isGate(system) {
+    if (!system) return false;
+    if (GATE_NAMES.has(system.sys_name)) return true;
+    const blob = [system.sys_name, system.sys_type, system.sys_notes, system.sys_struct].join(" ");
+    if (/gate/i.test(blob)) return true;
+    const type = String(system.sys_type || "");
+    return type === "Fleet Anchorage" || type === "Void Station";
+  }
+
+  function coreCluster() {
+    const named = systems.filter((s) => CORE_NAMES.has(s.sys_name));
+    if (named.length >= 3) return named;
+    const anchor = systems.find((s) => /ajale/i.test(String(s.sys_name || "")));
+    if (anchor) {
+      const origin = pos(anchor);
+      const near = systems.filter((s) => {
+        const p = pos(s);
+        return Math.hypot(p.x - origin.x, p.y - origin.y) <= 160;
+      });
+      if (near.length >= 3) return near;
+    }
+    if (systems.length <= 4) return systems.slice();
+    const pts = systems.map((s) => ({ s, ...pos(s) }));
+    const cx = pts.reduce((sum, p) => sum + p.x, 0) / pts.length;
+    const cy = pts.reduce((sum, p) => sum + p.y, 0) / pts.length;
+    return pts
+      .map((p) => ({ ...p, d: Math.hypot(p.x - cx, p.y - cy) }))
+      .sort((a, b) => a.d - b.d)
+      .slice(0, 4)
+      .map((p) => p.s);
+  }
+
+  function clusterOutline(points, pad) {
+    const cx = points.reduce((sum, p) => sum + p.x, 0) / points.length;
+    const cy = points.reduce((sum, p) => sum + p.y, 0) / points.length;
+    const steps = 72;
+    const poly = [];
+    let d = "";
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * Math.PI * 2;
+      let reach = pad;
+      points.forEach((p) => {
+        const projected = (p.x - cx) * Math.cos(angle) + (p.y - cy) * Math.sin(angle) + pad;
+        if (projected > reach) reach = projected;
+      });
+      const x = cx + reach * Math.cos(angle);
+      const y = cy + reach * Math.sin(angle);
+      poly.push({ x, y });
+      d += (i === 0 ? "M" : "L") + x.toFixed(1) + " " + y.toFixed(1) + " ";
+    }
+    return { d: d + "Z", cx, cy, poly };
+  }
+
+  function pointInPoly(x, y, poly) {
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+      const xi = poly[i].x;
+      const yi = poly[i].y;
+      const xj = poly[j].x;
+      const yj = poly[j].y;
+      if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+
+  function boxesCrowd(ax, ay, aw, ah, bx, by, bw, bh, gap) {
+    const dx = Math.abs(ax - bx) - aw - bw;
+    const dy = Math.abs(ay - by) - ah - bh;
+    return dx < gap && dy < gap;
+  }
+
+  function labelHitsNode(x, y) {
+    const halfW = 78;
+    const halfH = 9;
+    return systems.some((s) => {
+      const p = pos(s);
+      if (boxesCrowd(x, y, halfW, halfH, p.x, p.y, 40, 40, 4)) return true;
+      const nameHalf = Math.max(28, String(s.sys_name || "").length * 4.4);
+      return boxesCrowd(x, y, halfW, halfH, p.x, p.y + 46, nameHalf, 9, 4);
+    });
+  }
+
+  function warpSegments() {
+    const segs = [];
+    const seen = new Set();
+    systems.forEach((s) => {
+      parseLinks(s.sys_links).forEach((otherId) => {
+        const a = Number(s.sys_id);
+        const b = Number(otherId);
+        if (!a || !b || a === b) return;
+        const key = a < b ? a + "-" + b : b + "-" + a;
+        if (seen.has(key)) return;
+        seen.add(key);
+        const sa = byId(a);
+        const sb = byId(b);
+        if (sa && sb) segs.push([pos(sa), pos(sb)]);
+      });
+    });
+    return segs;
+  }
+
+  function closestOnSegment(x, y, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len2 = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / len2));
+    return { x: a.x + t * dx, y: a.y + t * dy };
+  }
+
+  function labelHitsRoute(x, y) {
+    const halfW = 78;
+    const halfH = 11;
+    return warpSegments().some(([a, b]) => {
+      const p = closestOnSegment(x, y, a, b);
+      const dx = Math.max(Math.abs(p.x - x) - halfW, 0);
+      const dy = Math.max(Math.abs(p.y - y) - halfH, 0);
+      return Math.hypot(dx, dy) < 10;
+    });
+  }
+
+  function placeCoreLabel(poly) {
+    const cx = poly.reduce((sum, p) => sum + p.x, 0) / poly.length;
+    const cy = poly.reduce((sum, p) => sum + p.y, 0) / poly.length;
+    const minX = Math.min.apply(null, poly.map((p) => p.x));
+    const maxX = Math.max.apply(null, poly.map((p) => p.x));
+    const minY = Math.min.apply(null, poly.map((p) => p.y));
+    const maxY = Math.max.apply(null, poly.map((p) => p.y));
+    let best = null;
+    let bestScore = Infinity;
+    for (let y = Math.max(22, minY - 36); y <= Math.min(BASE_H - 24, maxY + 36); y += 8) {
+      for (let x = 88; x <= BASE_W - 88; x += 8) {
+        if (labelHitsNode(x, y) || labelHitsRoute(x, y)) continue;
+        const inside = pointInPoly(x, y, poly);
+        const score = Math.hypot(x - cx, y - cy) + (inside ? 0 : 280);
+        if (score < bestScore) {
+          bestScore = score;
+          best = { x, y };
+        }
+      }
+    }
+    return best || { x: cx, y: Math.max(22, minY - 18) };
+  }
+
+  function appendIcon(parent, x, y, type) {
+    const key = iconKey(type);
+    const ink = ICON_INK[key] || ICON_INK.world;
+    const g = svgEl("g", {
+      class: "jt-icon",
+      transform: "translate(" + x + " " + y + ") scale(0.62)",
+      fill: "none",
+      stroke: ink,
+      "stroke-width": "2.2",
+      "stroke-linecap": "round",
+      "stroke-linejoin": "round",
+      "pointer-events": "none",
+      filter: "url(#jt-glow)"
+    });
+    const line = (x1, y1, x2, y2, width) => {
+      const attrs = { x1, y1, x2, y2 };
+      if (width) attrs["stroke-width"] = width;
+      g.appendChild(svgEl("line", attrs));
+    };
+    const dot = (cx, cy, r, opacity) => {
+      g.appendChild(
+        svgEl("circle", {
+          cx,
+          cy,
+          r,
+          fill: ink,
+          "fill-opacity": opacity == null ? "0.3" : String(opacity),
+          stroke: ink
+        })
+      );
+    };
+    if (key === "hive") {
+      [[-18, 12, -4], [-12, 12, -12], [-6, 12, -22], [-2, 12, -30]].forEach(([xl, yb, yt]) => {
+        g.appendChild(
+          svgEl("rect", {
+            x: xl,
+            y: yt,
+            width: -2 * xl,
+            height: yb - yt,
+            fill: ink,
+            "fill-opacity": "0.22"
+          })
+        );
+      });
+      line(0, -30, 0, -38);
+      line(-22, 12, 22, 12);
+    } else if (key === "forge") {
+      const pts = [];
+      for (let i = 0; i < 16; i++) {
+        const angle = (i * Math.PI) / 8;
+        const radius = i % 2 === 0 ? 22 : 16;
+        pts.push(Math.cos(angle) * radius + "," + Math.sin(angle) * radius);
+      }
+      g.appendChild(svgEl("polygon", { points: pts.join(" "), fill: ink, "fill-opacity": "0.22" }));
+      g.appendChild(svgEl("circle", { cx: 0, cy: 0, r: 9, fill: "#071018", stroke: ink }));
+    } else if (key === "mining") {
+      [1, -1].forEach((side) => {
+        line(-side * 16, 16, side * 12, -12, "3.2");
+        const hx = side * 12;
+        const hy = -12;
+        g.appendChild(
+          svgEl("path", {
+            d: "M " + (hx - 12) + " " + (hy + 2) + " A 12 10 0 0 " + (side > 0 ? 1 : 0) + " " + (hx + 12) + " " + (hy + 2)
+          })
+        );
+      });
+    } else if (key === "agri") {
+      [-25, 0, 25].forEach((angle) => {
+        const rad = (angle * Math.PI) / 180;
+        const tx = Math.sin(rad) * 28;
+        const ty = 16 - Math.cos(rad) * 28;
+        line(0, 16, tx, ty);
+        for (let j = 0; j < 3; j++) {
+          const t = 0.55 + j * 0.17;
+          g.appendChild(
+            svgEl("ellipse", {
+              cx: tx * t,
+              cy: 16 + (ty - 16) * t,
+              rx: 3.2,
+              ry: 2.1,
+              fill: ink,
+              stroke: "none"
+            })
+          );
+        }
+      });
+      line(-8, 10, 8, 10);
+    } else if (key === "knight") {
+      g.appendChild(
+        svgEl("polygon", {
+          points: "-14,-8 -8,-18 8,-18 14,-8 12,14 0,20 -12,14",
+          fill: ink,
+          "fill-opacity": "0.22"
+        })
+      );
+      line(-10, -2, 10, -2, "3");
+      line(0, 0, 0, 16);
+      line(0, -18, 0, -26);
+    } else if (key === "station") {
+      g.appendChild(svgEl("circle", { r: 18, "stroke-width": "2.6" }));
+      for (let angle = 0; angle < 360; angle += 90) {
+        const rad = (angle * Math.PI) / 180;
+        const ca = Math.cos(rad);
+        const sa = Math.sin(rad);
+        line(7 * ca, 7 * sa, 18 * ca, 18 * sa);
+        g.appendChild(
+          svgEl("rect", {
+            x: 18 * ca - 2.6,
+            y: 18 * sa - 2.6,
+            width: 5.2,
+            height: 5.2,
+            fill: ink,
+            stroke: "none"
+          })
+        );
+      }
+      dot(0, 0, 6, 0.4);
+    } else if (key === "fleet") {
+      g.appendChild(svgEl("circle", { cx: 0, cy: -20, r: 3.5 }));
+      line(0, -16, 0, 16, "3");
+      line(-11, -6, 11, -6);
+      g.appendChild(svgEl("path", { d: "M -16 2 A 16 12 0 0 0 16 2" }));
+      [-1, 1].forEach((side) => {
+        g.appendChild(
+          svgEl("polygon", {
+            points: side * 16 + ",4 " + side * 22 + ",12 " + side * 12 + ",10",
+            fill: ink,
+            stroke: "none"
+          })
+        );
+      });
+    } else if (key === "shrine") {
+      g.appendChild(
+        svgEl("polygon", {
+          points: "0,-18 12,-2 12,14 -12,14 -12,-2",
+          fill: ink,
+          "fill-opacity": "0.22"
+        })
+      );
+      line(0, -18, 0, -26);
+      line(-6, 14, -6, 4);
+      line(6, 14, 6, 4);
+    } else if (key === "death") {
+      g.appendChild(svgEl("circle", { r: 15 }));
+      line(-8, -8, 8, 8, "2.4");
+      line(-8, 8, 8, -8, "2.4");
+    } else if (key === "dead") {
+      g.appendChild(svgEl("circle", { r: 15, "stroke-dasharray": "3 3" }));
+      dot(0, 0, 2.5, 0.8);
+    } else if (key === "warp") {
+      g.appendChild(svgEl("path", { d: "M 0,-16 C 14,-16 14,-2 0,-2 C -14,-2 -14,12 0,12" }));
+      g.appendChild(svgEl("circle", { r: 18, "stroke-dasharray": "2 4" }));
+    } else if (key === "penal") {
+      g.appendChild(svgEl("circle", { r: 16 }));
+      line(-6, -12, -6, 12);
+      line(0, -14, 0, 14);
+      line(6, -12, 6, 12);
+    } else if (key === "gas") {
+      dot(0, 0, 14, 0.2);
+      [-6, 0, 6].forEach((oy) => line(-12 + Math.abs(oy) * 0.4, oy, 12 - Math.abs(oy) * 0.4, oy));
+      g.appendChild(svgEl("ellipse", { cx: 0, cy: 0, rx: 24, ry: 7 }));
+    } else if (key === "ocean") {
+      dot(0, 0, 16, 0.18);
+      [-6, 2, 8].forEach((oy) => {
+        const pts = [];
+        for (let px = -14; px <= 14; px += 2) {
+          pts.push(px + "," + (oy + Math.sin(px / 3) * 2.2).toFixed(1));
+        }
+        g.appendChild(svgEl("polyline", { points: pts.join(" "), fill: "none" }));
+      });
+    } else {
+      dot(0, 0, 15, 0.2);
+      g.appendChild(svgEl("ellipse", { cx: 0, cy: 0, rx: 15, ry: 6 }));
+      line(-15, 0, 15, 0);
+    }
+    parent.appendChild(g);
+    return ink;
+  }
+
+  function forceDiamonds(parent, x, y, here) {
+    const loyalists = here.filter((f) => f.allegiance === "Loyalist").length;
+    const traitors = here.filter((f) => f.allegiance === "Traitor").length;
+    const other = here.length - loyalists - traitors;
+    const items = [];
+    if (loyalists) items.push(["#d6b062", loyalists]);
+    if (traitors) items.push(["#e24e3c", traitors]);
+    if (other) items.push(["#e2d2a8", other]);
+    items.forEach(([color, count], index) => {
+      const bx = x - 48;
+      const by = y - 6 + index * 18;
+      const r = 8;
+      parent.appendChild(
+        svgEl("polygon", {
+          class: "jt-diamond",
+          points: bx + "," + (by - r) + " " + (bx + r) + "," + by + " " + bx + "," + (by + r) + " " + (bx - r) + "," + by,
+          fill: "rgba(6,10,22,0.94)",
+          stroke: color,
+          "stroke-width": "1.6",
+          "pointer-events": "none"
+        })
+      );
+      const text = svgEl("text", {
+        x: bx,
+        y: by + 0.5,
+        fill: color,
+        "font-size": "10",
+        "font-family": "Cinzel, serif",
+        "font-weight": "700",
+        "text-anchor": "middle",
+        "dominant-baseline": "central",
+        "pointer-events": "none"
+      });
+      text.textContent = String(count);
+      parent.appendChild(text);
+    });
+  }
+
+  function addJournalNode(g, system, p, here) {
+    const ctrl = controllerClass(system.sys_controller);
+    const ring = RING_COLOR[ctrl] || RING_COLOR.unaligned;
+    const ink = ICON_INK[iconKey(system.sys_type)] || ICON_INK.world;
+    g.appendChild(
+      svgEl("circle", {
+        class: "jt-glow",
+        cx: p.x,
+        cy: p.y,
+        r: 16,
+        fill: ink,
+        opacity: "0.2",
+        "pointer-events": "none"
+      })
+    );
+    appendIcon(g, p.x, p.y, system.sys_type);
+    const ringAttrs = {
+      class: "jt-ring",
+      cx: p.x,
+      cy: p.y,
+      r: 28,
+      fill: "none",
+      stroke: ring,
+      "stroke-width": "2.2",
+      "pointer-events": "none"
+    };
+    if (ctrl === "contested") ringAttrs["stroke-dasharray"] = "3 2.4";
+    g.appendChild(svgEl("circle", ringAttrs));
+    g.appendChild(
+      svgEl("circle", {
+        class: "jt-ring outer",
+        cx: p.x,
+        cy: p.y,
+        r: 32,
+        fill: "none",
+        stroke: ring,
+        "stroke-width": "1",
+        opacity: "0.45",
+        "pointer-events": "none"
+      })
+    );
+    if (isGate(system)) {
+      [45, 135, 225, 315].forEach((deg) => {
+        const angle = (deg * Math.PI) / 180;
+        g.appendChild(
+          svgEl("line", {
+            class: "jt-gate",
+            x1: p.x + Math.cos(angle) * 38,
+            y1: p.y + Math.sin(angle) * 38,
+            x2: p.x + Math.cos(angle) * 47,
+            y2: p.y + Math.sin(angle) * 47,
+            stroke: "#c8f0ff",
+            "stroke-width": "1.6",
+            "stroke-linecap": "round",
+            "pointer-events": "none"
+          })
+        );
+      });
+    }
+    const brackets = svgEl("g", { class: "jt-brackets", visibility: "hidden", "pointer-events": "none" });
+    const arm = 11;
+    const reach = 36;
+    [[-1, -1], [1, -1], [-1, 1], [1, 1]].forEach(([sx, sy]) => {
+      brackets.appendChild(
+        svgEl("path", {
+          d:
+            "M " + (p.x + sx * reach) + " " + (p.y + sy * (reach - arm)) +
+            " L " + (p.x + sx * reach) + " " + (p.y + sy * reach) +
+            " L " + (p.x + sx * (reach - arm)) + " " + (p.y + sy * reach),
+          fill: "none",
+          stroke: "#d6b062",
+          "stroke-width": "2"
+        })
+      );
+    });
+    g.appendChild(brackets);
+    forceDiamonds(g, p.x, p.y, here);
+  }
+
+  function drawJournalArt() {
+    const previous = document.getElementById("jt-map-art");
+    if (previous) previous.remove();
+    if (!journalTheme()) return;
+    const art = svgEl("g", { id: "jt-map-art", "pointer-events": "none" });
+    const defs = svgEl("defs", {});
+    const glow = svgEl("filter", { id: "jt-glow", x: "-60%", y: "-60%", width: "220%", height: "220%" });
+    glow.appendChild(svgEl("feGaussianBlur", { stdDeviation: "1.35", result: "blur" }));
+    const merge = svgEl("feMerge", {});
+    merge.appendChild(svgEl("feMergeNode", { in: "blur" }));
+    merge.appendChild(svgEl("feMergeNode", { in: "SourceGraphic" }));
+    glow.appendChild(merge);
+    defs.appendChild(glow);
+    const voidGrad = svgEl("radialGradient", { id: "jt-void", cx: "46%", cy: "42%", r: "72%" });
+    voidGrad.appendChild(svgEl("stop", { offset: "0%", "stop-color": "#16325c" }));
+    voidGrad.appendChild(svgEl("stop", { offset: "48%", "stop-color": "#0a1628" }));
+    voidGrad.appendChild(svgEl("stop", { offset: "100%", "stop-color": "#05070d" }));
+    defs.appendChild(voidGrad);
+    art.appendChild(defs);
+    art.appendChild(svgEl("rect", { x: 0, y: 0, width: BASE_W, height: BASE_H, fill: "url(#jt-void)" }));
+    [
+      [250, 250, 170, 120, "#1c4e86", "0.28"],
+      [140, 160, 120, 90, "#2a2a6a", "0.22"],
+      [560, 390, 150, 100, "#12385c", "0.24"]
+    ].forEach(([cx, cy, rx, ry, fill, opacity]) => {
+      art.appendChild(svgEl("ellipse", { cx, cy, rx, ry, fill, opacity }));
+    });
+    for (let x = 40; x < BASE_W; x += 80) {
+      art.appendChild(svgEl("line", { x1: x, y1: 0, x2: x, y2: BASE_H, stroke: "#5090c0", "stroke-width": "1", opacity: "0.08" }));
+    }
+    for (let y = 40; y < BASE_H; y += 80) {
+      art.appendChild(svgEl("line", { x1: 0, y1: y, x2: BASE_W, y2: y, stroke: "#5090c0", "stroke-width": "1", opacity: "0.08" }));
+    }
+    const rand = mulberry32(7);
+    for (let i = 0; i < 340; i++) {
+      const bright = rand();
+      art.appendChild(
+        svgEl("circle", {
+          class: "jt-star",
+          cx: (rand() * BASE_W).toFixed(1),
+          cy: (rand() * BASE_H).toFixed(1),
+          r: bright > 0.96 ? "1.5" : (rand() * 0.7 + 0.25).toFixed(2),
+          fill: "#d2e6ff",
+          opacity: (0.15 + Math.pow(bright, 3) * 0.85).toFixed(2)
+        })
+      );
+    }
+    const cluster = coreCluster();
+    if (cluster.length >= 3) {
+      const outline = clusterOutline(cluster.map(pos), 54);
+      art.appendChild(
+        svgEl("path", {
+          class: "jt-core",
+          d: outline.d,
+          fill: "rgba(60,160,255,0.07)",
+          stroke: "#78dcff",
+          "stroke-width": "1.5",
+          "stroke-dasharray": "7 6",
+          "stroke-linejoin": "round"
+        })
+      );
+      const spot = placeCoreLabel(outline.poly);
+      const captionAttrs = {
+        class: "jt-core-label",
+        x: spot.x.toFixed(1),
+        y: spot.y.toFixed(1),
+        "font-family": "Cinzel, serif",
+        "font-size": "11",
+        "font-weight": "600",
+        "letter-spacing": "0.12em",
+        "text-anchor": "middle"
+      };
+      const halo = svgEl("text", Object.assign({}, captionAttrs, { stroke: "rgba(4,10,22,0.9)", "stroke-width": "3.5", fill: "rgba(4,10,22,0.9)" }));
+      halo.textContent = "AJALE SYSTEM";
+      const caption = svgEl("text", Object.assign({}, captionAttrs, { fill: "rgba(160,230,255,0.9)" }));
+      caption.textContent = "AJALE SYSTEM";
+      art.appendChild(halo);
+      art.appendChild(caption);
+    }
+    const credit = svgEl("text", {
+      class: "jt-credit",
+      x: BASE_W - 14,
+      y: BASE_H - 16,
+      fill: "rgba(120,220,255,0.62)",
+      "font-family": "EB Garamond, serif",
+      "font-style": "italic",
+      "font-size": "13",
+      "text-anchor": "end"
+    });
+    credit.textContent = "Built with Abominable Intelligence";
+    art.appendChild(credit);
+    svg.insertBefore(art, svg.firstChild);
+  }
+
+  function selectedNodeId() {
+    const node = nodesG.querySelector(".node.selected");
+    return node ? node.getAttribute("data-id") : "";
+  }
+
+  function restoreSelection(id) {
+    if (!id) return;
+    const node = nodesG.querySelector('.node[data-id="' + id + '"]');
+    if (node) node.classList.add("selected");
+  }
+
+  function paintMap() {
+    const keep = selectedNodeId();
+    drawJournalArt();
+    drawLinks();
+    drawNodes();
+    restoreSelection(keep);
+  }
+
   function drawStars() {
     starsG.replaceChildren();
+    if (journalTheme()) return;
     for (let i = 0; i < 100; i++) {
       starsG.appendChild(
         svgEl("circle", {
@@ -144,6 +756,30 @@
         if (!sa || !sb) return;
         const pa = pos(sa);
         const pb = pos(sb);
+        if (journalTheme()) {
+          const dx = pb.x - pa.x;
+          const dy = pb.y - pa.y;
+          const len = Math.hypot(dx, dy);
+          if (len < 1) return;
+          const inset = Math.min(32, len * 0.3);
+          const span = Math.max(len - inset * 2, 1);
+          const count = Math.max(1, Math.round(span / 8));
+          for (let i = 0; i <= count; i++) {
+            const t = (inset + (span * i) / count) / len;
+            linksG.appendChild(
+              svgEl("circle", {
+                class: "jt-link",
+                cx: (pa.x + dx * t).toFixed(2),
+                cy: (pa.y + dy * t).toFixed(2),
+                r: "1.35",
+                fill: "#c8f0ff",
+                opacity: "0.88",
+                "pointer-events": "none"
+              })
+            );
+          }
+          return;
+        }
         linksG.appendChild(
           svgEl("line", {
             x1: pa.x,
@@ -177,12 +813,20 @@
       tType.textContent = typeCode(s.sys_type);
       g.appendChild(tType);
 
-      const tName = svgEl("text", { class: "label", x: p.x, y: p.y + 34 });
+      const labelY = journalTheme() ? p.y + 44 : p.y + 34;
+      if (journalTheme()) {
+        const halo = svgEl("text", { class: "label jt-halo", x: p.x, y: labelY, "pointer-events": "none" });
+        halo.textContent = s.sys_name;
+        g.appendChild(halo);
+      }
+      const tName = svgEl("text", { class: "label", x: p.x, y: labelY });
       tName.textContent = s.sys_name;
       g.appendChild(tName);
 
       const here = forcesAt(s.sys_id);
-      if (here.length) {
+      if (journalTheme()) {
+        addJournalNode(g, s, p, here);
+      } else if (here.length) {
         const traitors = here.filter((f) => f.allegiance === "Traitor").length;
         const loyalists = here.filter((f) => f.allegiance === "Loyalist").length;
         let fill = "var(--accent)";
@@ -701,8 +1345,7 @@
     forces = Array.isArray(forceRows) ? forceRows : [];
     meta = metaRow && typeof metaRow === "object" ? metaRow : {};
     actionStatus = status;
-    drawLinks();
-    drawNodes();
+    paintMap();
     updateStatusBar();
     updateHeader();
   }
@@ -725,13 +1368,18 @@
 
   function renderMap() {
     drawStars();
-    drawLinks();
-    drawNodes();
+    paintMap();
     updateStatusBar();
     updateHeader();
     applyViewBox();
     if (!isMobile()) sheet.classList.add("open");
   }
+
+  new MutationObserver(() => {
+    if (!systems.length) return;
+    drawStars();
+    paintMap();
+  }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
 
   loadCampaign()
     .then(() => {

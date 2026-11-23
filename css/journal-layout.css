@@ -422,3 +422,46 @@ html[data-theme="journal-tactica"] .sheet {
     width: auto;
   }
 }
+
+/* Map art. Drawn only while Journal Tactica is active; these rules style that SVG. */
+html[data-theme="journal-tactica"] #jt-map-art,
+html[data-theme="journal-tactica"] #jt-map-art * {
+  pointer-events: none;
+}
+
+html[data-theme="journal-tactica"] .node text.type {
+  display: none;
+}
+
+html[data-theme="journal-tactica"] .node circle.main {
+  fill: rgba(4, 12, 28, 0.82);
+  stroke: none;
+}
+
+html[data-theme="journal-tactica"] .node text.label {
+  fill: #f0e8d2;
+  font-family: Cinzel, serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+html[data-theme="journal-tactica"] .node text.jt-halo {
+  stroke: rgba(4, 10, 22, 0.92);
+  stroke-width: 4px;
+  fill: rgba(4, 10, 22, 0.92);
+  font-family: Cinzel, serif;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+html[data-theme="journal-tactica"] .node.selected text.label:not(.jt-halo) {
+  fill: #d6b062;
+}
+
+html[data-theme="journal-tactica"] .node.selected .jt-brackets {
+  visibility: visible;
+}
