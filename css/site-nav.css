@@ -420,3 +420,47 @@
   .header-end a.nav-login { padding: 0 var(--space-6); }
   .site-header h1 { font-size: 0.95rem; }
 }
+
+.theme-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-left: auto;
+  padding: 0 0.35rem;
+}
+
+.theme-switch label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.theme-switch select {
+  min-height: 36px;
+  max-width: 11rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+}
+
+@media (max-width: 719px) {
+  .theme-switch {
+    width: 100%;
+    margin-left: 0;
+    padding: 0.35rem 0.85rem 0.15rem;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .theme-switch select {
+    width: 100%;
+    max-width: none;
+    min-height: 44px;
+    font-size: 16px;
+  }
+}

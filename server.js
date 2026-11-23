@@ -47,6 +47,7 @@
  *   GET  /api/campaign/muster          (campaign_admin) sides, forces, and balance counts
  *   POST /api/campaign/phase-deadline  (campaign_admin) { phase_ends_at } — ISO time, or null to clear
  *   POST /api/campaign/auto-advance    (campaign_admin) { enabled?: boolean, muster?: boolean }
+ *   POST /api/campaign/theme           (campaign_admin) { theme: "current" | "journal-tactica" }
  *   POST /api/campaign/discord-test    (campaign_admin) post a test to the campaign Discord webhook
  *   A past phase deadline, or every counted player being out of actions during
  *   Logistics, advances one phase. Ending Battles grants uncontested occupation
@@ -228,7 +229,8 @@ const PUBLIC_TYPES = {
   ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".webp": "image/webp",
-  ".gif": "image/gif"
+  ".gif": "image/gif",
+  ".woff2": "font/woff2"
 };
 
 // Pages that require login (client still loads; API enforces). Listed for docs.
@@ -1426,6 +1428,7 @@ function isPublicAsset(parts) {
   }
   if (parts.length === 2 && parts[0] === "js" && path.extname(parts[1]).toLowerCase() === ".js") return true;
   if (parts.length === 2 && parts[0] === "css" && path.extname(parts[1]).toLowerCase() === ".css") return true;
+  if (parts.length === 2 && parts[0] === "css" && path.extname(parts[1]).toLowerCase() === ".woff2") return true;
   return false;
 }
 
@@ -1566,6 +1569,7 @@ function serveStatic(req, res, pathname) {
         console.error("Could not fill dashboard counts: " + (err && err.message ? err.message : err));
       }
     }
+    html = applyThemeDefault(html, readCollection("meta"));
     html = versionAssetUrls(html);
     res.writeHead(200, {
       "Content-Type": "text/html; charset=utf-8",
@@ -4432,6 +4436,19 @@ async function handleCampaign(req, res, parts, method) {
     });
   }
 
+  if (action === "theme" && method === "POST") {
+    const gate = requireRole(auth, ["campaign_admin"]);
+    if (!gate.ok) return send(res, gate.status, { error: gate.error });
+    const body = (await readBody(req)) || {};
+    if (!SITE_THEMES.has(body.theme)) {
+      return send(res, 400, { error: "theme must be current or journal-tactica" });
+    }
+    const meta = readCollection("meta") || {};
+    meta.theme = body.theme;
+    writeCollection("meta", meta);
+    return send(res, 200, { ok: true, theme: meta.theme });
+  }
+
   if (action === "auto-advance" && method === "POST") {
     const gate = requireRole(auth, ["campaign_admin"]);
     if (!gate.ok) return send(res, gate.status, { error: gate.error });
@@ -4558,7 +4575,7 @@ async function handleCampaign(req, res, parts, method) {
     return send(res, 200, { ok: true });
   }
 
-  return send(res, 404, { error: "Unknown campaign action. Use advance|begin|muster|status|set-phase|phase-deadline|auto-advance|discord-test|reset" });
+  return send(res, 404, { error: "Unknown campaign action. Use advance|begin|muster|status|set-phase|phase-deadline|auto-advance|theme|discord-test|reset" });
 }
 
 function parsePhaseDeadline(value) {
@@ -4935,6 +4952,12 @@ async function handleActions(req, res, parts, method) {
   });
 }
 
+const SITE_THEMES = new Set(["current", "journal-tactica"]);
+
+function normalizeTheme(value) {
+  return value === "journal-tactica" ? "journal-tactica" : "current";
+}
+
 function publicMeta(meta) {
   const hidden = new Set(["player_actions", "admin_pin", "next_player_id", "discord_deadline_reminder_key"]);
   const safe = {};
@@ -4943,7 +4966,19 @@ function publicMeta(meta) {
     if (/password|secret|token|pin|hash/i.test(key)) return;
     safe[key] = meta[key];
   });
+  safe.theme = normalizeTheme(meta && meta.theme);
   return safe;
+}
+
+function applyThemeDefault(html, meta) {
+  const theme = normalizeTheme(meta && meta.theme);
+  return String(html).replace(/<html\b([^>]*)>/i, (full, attrs) => {
+    const attr = 'data-theme-default="' + theme + '"';
+    if (/\bdata-theme-default\s*=/.test(attrs)) {
+      return full.replace(/\bdata-theme-default\s*=\s*("[^"]*"|'[^']*')/i, attr);
+    }
+    return "<html" + attrs + " " + attr + ">";
+  });
 }
 
 function publicAccount(account) {
@@ -5240,6 +5275,7 @@ function resetCampaign(options = {}) {
     victory_reason: null,
     next_player_id: nextPlayerId
   };
+  if (normalizeTheme(previous.theme) === "journal-tactica") meta.theme = "journal-tactica";
   writeCollection("meta", meta);
   writeCollection("forces", forces);
   writeCollection("games", []);
