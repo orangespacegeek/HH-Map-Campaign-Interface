@@ -811,6 +811,25 @@
     return { ok: true, meta };
   }
 
+  async function setSiteTheme(theme) {
+    await probe();
+    if (mode === "server") {
+      const res = await fetch(apiBase() + "/api/campaign/theme", {
+        method: "POST",
+        headers: authHeaders(),
+        credentials: "include",
+        body: JSON.stringify({ theme })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Could not save the site style");
+      return data;
+    }
+    const meta = localRead("meta");
+    meta.theme = theme;
+    localWrite("meta", meta);
+    return { ok: true, theme };
+  }
+
   async function setPhaseDeadline(phaseEndsAt) {
     await probe();
     if (mode === "server") {
@@ -1235,6 +1254,7 @@
     musterRoster,
     setPhase,
     setPhaseDeadline,
+    setSiteTheme,
     setAutoAdvance,
     setMusterAutoAdvance,
     sendDiscordTest,

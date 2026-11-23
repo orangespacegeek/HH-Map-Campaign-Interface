@@ -19,6 +19,7 @@
   <meta name="twitter:image" content="__OG_IMAGE__" />
   <title>Sunset Heresy – Campaign Tracker</title>
   <script src="js/theme.js"></script>
+  <link rel="stylesheet" href="css/journal-fonts.css" />
   <link rel="stylesheet" href="css/theme.css" />
   <style>
 /* Shared site header + nav */
@@ -810,6 +811,15 @@
         <button type="button" id="btn-restore">Restore from backup</button>
         <button type="button" id="btn-reset">Reset campaign</button>
       </div>
+      <div class="deadline-editor" id="site-theme-editor" data-role="campaign_admin">
+        <label for="site-theme">Site style</label>
+        <select id="site-theme" aria-label="Site style">
+          <option value="current">Current</option>
+          <option value="journal-tactica">Journal Tactica</option>
+        </select>
+        <button type="button" id="btn-site-theme">Save site style</button>
+        <p class="admin-hint">Visitors see this style unless they choose their own in the header menu. That choice stays in this browser only.</p>
+      </div>
       <div class="deadline-editor" data-role="campaign_admin">
         <label for="phase-ends-at">Phase ends at</label>
         <input type="datetime-local" id="phase-ends-at" />
@@ -1035,6 +1045,10 @@
       const musterToggle = document.getElementById("auto-advance-muster");
       if (musterToggle && document.activeElement !== musterToggle) {
         musterToggle.checked = meta.auto_advance_muster === true;
+      }
+      const themeSelect = document.getElementById("site-theme");
+      if (themeSelect && document.activeElement !== themeSelect) {
+        themeSelect.value = meta.theme === "journal-tactica" ? "journal-tactica" : "current";
       }
       const blocked = document.getElementById("auto-advance-blocked");
       if (blocked) {
@@ -1702,6 +1716,23 @@
         await refreshDashboard();
       } catch (err) {
         log.textContent = err.message || "Could not clear the phase deadline";
+      }
+    });
+
+    document.getElementById("btn-site-theme").addEventListener("click", async () => {
+      const log = document.getElementById("turn-log");
+      const theme = document.getElementById("site-theme").value;
+      try {
+        await SH.setSiteTheme(theme);
+        document.documentElement.setAttribute("data-theme-default", theme);
+        let choice = null;
+        try { choice = localStorage.getItem("sh-theme"); } catch (_) {}
+        if (window.SHTheme && choice !== "current" && choice !== "journal-tactica") SHTheme.apply(theme);
+        log.textContent = theme === "journal-tactica"
+          ? "Site style set to Journal Tactica."
+          : "Site style set to Current.";
+      } catch (err) {
+        log.textContent = err.message || "Could not save the site style";
       }
     });
 

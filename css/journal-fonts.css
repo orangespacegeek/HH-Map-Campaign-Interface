@@ -1,0 +1,45 @@
+/* Latin subsets of Cinzel, Cinzel Decorative, and EB Garamond.
+   Those faces are used under the SIL Open Font License.
+   This file is linked on every page so the server can add ?v= cache-busting.
+   The font files download only when Journal Tactica is the active theme,
+   because the current theme never names these families. */
+
+@font-face {
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("cinzel-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("cinzel-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Cinzel Decorative";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("cinzel-decorative-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("eb-garamond-italic-latin.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "EB Garamond";
+  font-style: italic;
+  font-weight: 600;
+  font-display: swap;
+  src: url("eb-garamond-italic-latin.woff2") format("woff2");
+}
